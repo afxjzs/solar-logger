@@ -1,5 +1,6 @@
 #include <Wire.h>
 #include <Preferences.h>
+#include <WiFi.h>
 
 // ============================================================================
 // BMW SOLAR LOGGER
@@ -20,6 +21,9 @@
 // Serial commands:
 //   HELP
 //   STATUS
+//   WIFI ON
+//   WIFI OFF
+//   WIFI STATUS
 //   RESET
 //   RESET YES
 //
@@ -1593,6 +1597,75 @@ void printCsvRow(
 // SERIAL COMMAND HELP
 // ============================================================================
 
+const char *wifiModeName(wifi_mode_t mode) {
+  switch (mode) {
+    case WIFI_OFF:
+      return "OFF";
+    case WIFI_STA:
+      return "STA";
+    case WIFI_AP:
+      return "AP";
+    case WIFI_AP_STA:
+      return "STA+AP";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+
+void printWifiStatus() {
+  wifi_mode_t mode = WiFi.getMode();
+
+  Serial.print("[WIFI] State: ");
+  Serial.println(mode == WIFI_OFF ? "DISABLED" : "ENABLED");
+
+  Serial.print("[WIFI] Mode: ");
+  Serial.println(wifiModeName(mode));
+}
+
+
+void enableWifi() {
+  Serial.println("[WIFI] Enabling Wi-Fi...");
+
+  // STA means station mode: the ESP32 behaves like a client radio, but this
+  // command deliberately does not join an access point. Enabling the radio
+  // without a network connection lets bench measurements isolate Wi-Fi power.
+  if (!WiFi.mode(WIFI_STA)) {
+    Serial.println("[WIFI] ERROR: Could not set station mode.");
+    return;
+  }
+
+  if (!WiFi.disconnect(false, false)) {
+    Serial.println("[WIFI] ERROR: Could not keep Wi-Fi disconnected.");
+    return;
+  }
+
+  Serial.println("[WIFI] Mode: STA");
+  Serial.println("[WIFI] Wi-Fi enabled: ALL OK");
+}
+
+
+void disableWifi() {
+  Serial.println("[WIFI] Disabling Wi-Fi...");
+
+  // WIFI_OFF is the Arduino ESP32 core's explicit radio-off mode.
+  if (!WiFi.mode(WIFI_OFF)) {
+    Serial.println("[WIFI] ERROR: Could not disable Wi-Fi.");
+    return;
+  }
+
+  Serial.println("[WIFI] Wi-Fi disabled: ALL OK");
+}
+
+
+void initializeWifiOff() {
+  // Set the baseline explicitly instead of relying on framework defaults,
+  // which can vary after resets or across Arduino core versions.
+  Serial.println("[WIFI] Boot default: OFF");
+  disableWifi();
+}
+
+
 void printHelp() {
   Serial.println();
 
@@ -1603,6 +1676,15 @@ void printHelp() {
 
   Serial.println(
       "  STATUS     - print current experiment state and live sensor reading");
+
+  Serial.println(
+      "  WIFI ON    - enable Wi-Fi station mode without connecting");
+
+  Serial.println(
+      "  WIFI OFF   - disable the Wi-Fi subsystem");
+
+  Serial.println(
+      "  WIFI STATUS - print Wi-Fi state and mode");
 
   Serial.println(
       "  RESET      - explain reset confirmation");
@@ -1800,6 +1882,18 @@ void processCommand(String command) {
   } else if (command == "STATUS") {
 
     printStatus();
+
+  } else if (command == "WIFI ON") {
+
+    enableWifi();
+
+  } else if (command == "WIFI OFF") {
+
+    disableWifi();
+
+  } else if (command == "WIFI STATUS") {
+
+    printWifiStatus();
 
   } else if (command == "RESET") {
 
@@ -2260,6 +2354,8 @@ void setup() {
 
   // Give USB Serial time to enumerate before printing the boot sequence.
   delay(1500);
+
+  initializeWifiOff();
 
 
   Serial.println();

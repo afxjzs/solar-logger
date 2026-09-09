@@ -1,0 +1,16 @@
+{
+	"chat.tools.terminal.autoApprove": {
+		"/^uv run python -m py_compile app/solar_logger\\.py$/": {
+			"approve": true,
+			"matchCommandLine": true
+		},
+		"/^arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger$/": {
+			"approve": true,
+			"matchCommandLine": true
+		},
+		"/^bash -n tools/upload\\.sh$/": {
+			"approve": true,
+			"matchCommandLine": true
+		}
+	}
+}

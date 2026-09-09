@@ -31,7 +31,9 @@ cleanup_handshake() {
   fi
 }
 
-trap cleanup_handshake EXIT INT TERM
+trap cleanup_handshake EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 
 echo
@@ -69,37 +71,54 @@ echo
 
 
 # ---------------------------------------------------------------------------
-# REQUEST EXCLUSIVE SERIAL ACCESS
+# CHECK FOR THE LOGGER AND REQUEST EXCLUSIVE SERIAL ACCESS IF NEEDED
 # ---------------------------------------------------------------------------
 
-echo "[SERIAL] Requesting exclusive serial access from logger..."
-printf '%s\n' "REQUESTED" > "$HANDSHAKE_FILE"
-echo "[SERIAL] Handshake created: $HANDSHAKE_FILE"
-echo "[SERIAL] Waiting for logger acknowledgement..."
+echo "[SERIAL] Checking for running BMW Solar Logger..."
 
-handshake_state=""
-released="false"
-
-for ((attempt = 1; attempt <= 50; attempt++)); do
-  if [[ -f "$HANDSHAKE_FILE" ]]; then
-    IFS= read -r handshake_state < "$HANDSHAKE_FILE" || handshake_state=""
-
-    if [[ "$handshake_state" == "RELEASED" ]]; then
-      released="true"
-      break
-    fi
-  fi
-
-  sleep 0.1
-done
-
-if [[ "$released" != "true" ]]; then
-  echo "[SERIAL] ERROR: Logger did not acknowledge RELEASED within 5 seconds." >&2
-  echo "[SERIAL] ERROR: Refusing to start esptool." >&2
-  exit 1
+logger_running="false"
+if pgrep -f '(^|[[:space:]/])app/solar_logger\.py([[:space:]]|$)' >/dev/null; then
+  logger_running="true"
 fi
 
-echo "[SERIAL] Logger acknowledged RELEASED: ALL OK"
+if [[ "$logger_running" == "true" ]]; then
+  echo "[SERIAL] Logger process detected."
+  echo "[SERIAL] Requesting exclusive serial access..."
+  printf '%s\n' "REQUESTED" > "$HANDSHAKE_FILE"
+  echo "[SERIAL] Handshake created: $HANDSHAKE_FILE"
+  echo "[SERIAL] Waiting for logger acknowledgement..."
+
+  handshake_state=""
+  released="false"
+
+  for ((attempt = 1; attempt <= 50; attempt++)); do
+    if [[ -f "$HANDSHAKE_FILE" ]]; then
+      IFS= read -r handshake_state < "$HANDSHAKE_FILE" || handshake_state=""
+
+      if [[ "$handshake_state" == "RELEASED" ]]; then
+        released="true"
+        break
+      fi
+    fi
+
+    sleep 0.1
+  done
+
+  if [[ "$released" != "true" ]]; then
+    # A detected logger may still own or reclaim Serial. Never turn a failed
+    # acknowledgment into an upload: that would let esptool race the logger.
+    echo "[ERROR] Logger is running but did not acknowledge serial release." >&2
+    echo "[ERROR] Refusing to start esptool." >&2
+    exit 1
+  fi
+
+  echo "[SERIAL] Logger acknowledged RELEASED: ALL OK"
+else
+  # With no logger process, no one can acknowledge REQUESTED and no logger can
+  # own Serial. Upload can proceed without creating a needless handshake.
+  echo "[SERIAL] Logger process not detected."
+  echo "[SERIAL] No logger handshake required."
+fi
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +126,7 @@ echo "[SERIAL] Logger acknowledged RELEASED: ALL OK"
 # ---------------------------------------------------------------------------
 
 # The board can receive a different usbmodem number after reset, so discover
-# the current port only after Python has released the serial device.
+# the current port immediately before upload, after any required release.
 shopt -s nullglob
 USB_MODEM_PORTS=(/dev/cu.usbmodem*)
 

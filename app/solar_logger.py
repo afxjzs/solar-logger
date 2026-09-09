@@ -31,8 +31,10 @@ This program:
 """
 
 import csv
+import math
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -65,6 +67,7 @@ UPLOAD_HANDSHAKE_FILE = PROJECT_ROOT / ".upload-in-progress"
 
 SAMPLES_FILE = DATA_DIR / "samples.csv"
 INTERVALS_FILE = DATA_DIR / "intervals.csv"
+EVENTS_FILE = DATA_DIR / "events.csv"
 
 
 # ============================================================================
@@ -89,7 +92,8 @@ SILENT_DISCONNECT_SECONDS = 10
 # CSV SCHEMAS
 # ============================================================================
 
-# CSV_SAMPLE firmware format:
+# CSV_SAMPLE firmware format. captured_at is added by the Mac logger and is
+# intentionally separate from the ESP32's experiment-relative time.
 #
 # CSV_SAMPLE,
 # experiment_id,
@@ -99,7 +103,7 @@ SILENT_DISCONNECT_SECONDS = 10
 # power_mW,
 # temperature_C
 #
-SAMPLE_COLUMNS = [
+SAMPLE_FIRMWARE_COLUMNS = [
     "experiment_id",
     "elapsed_seconds",
     "voltage_V",
@@ -107,6 +111,8 @@ SAMPLE_COLUMNS = [
     "power_mW",
     "temperature_C",
 ]
+
+SAMPLE_COLUMNS = ["captured_at", *SAMPLE_FIRMWARE_COLUMNS]
 
 
 # CSV_DATA firmware format:
@@ -126,7 +132,7 @@ SAMPLE_COLUMNS = [
 # running_charge_mAh,
 # running_energy_mWh
 #
-INTERVAL_COLUMNS = [
+INTERVAL_FIRMWARE_COLUMNS = [
     "experiment_id",
     "interval",
     "elapsed_seconds",
@@ -142,6 +148,15 @@ INTERVAL_COLUMNS = [
     "running_energy_mWh",
 ]
 
+INTERVAL_COLUMNS = ["captured_at", *INTERVAL_FIRMWARE_COLUMNS]
+
+EVENT_COLUMNS = [
+    "captured_at",
+    "event_type",
+    "experiment_id",
+    "detail",
+]
+
 
 # ============================================================================
 # SERIAL PORT DISCOVERY
@@ -154,12 +169,8 @@ def find_xiao_port():
     macOS serial devices suitable for initiating a connection normally use
     /dev/cu.* names.
 
-    Our current board appears as:
-
-        /dev/cu.usbmodem1101
-
-    The exact number can change, so we do not want to permanently hard-code
-    usbmodem1101.
+    The board appears as a /dev/cu.usbmodem* device. The exact suffix can
+    change, so discovery must not depend on one fixed port name.
     """
 
     ports = list(list_ports.comports())
@@ -257,7 +268,7 @@ def parse_sample(line):
 
     parts = line.split(",")
 
-    expected_parts = len(SAMPLE_COLUMNS) + 1
+    expected_parts = len(SAMPLE_FIRMWARE_COLUMNS) + 1
 
     if len(parts) != expected_parts:
         print(
@@ -268,13 +279,13 @@ def parse_sample(line):
 
     values = parts[1:]
 
-    row = dict(zip(SAMPLE_COLUMNS, values))
+    row = dict(zip(SAMPLE_FIRMWARE_COLUMNS, values))
 
     # Experiment IDs are integers.
     row["experiment_id"] = int(row["experiment_id"])
 
     # All the measurements are floating-point values.
-    for column in SAMPLE_COLUMNS[1:]:
+    for column in SAMPLE_FIRMWARE_COLUMNS[1:]:
         row[column] = float(row[column])
 
     return row
@@ -287,7 +298,7 @@ def parse_interval(line):
 
     parts = line.split(",")
 
-    expected_parts = len(INTERVAL_COLUMNS) + 1
+    expected_parts = len(INTERVAL_FIRMWARE_COLUMNS) + 1
 
     if len(parts) != expected_parts:
         print(
@@ -298,29 +309,94 @@ def parse_interval(line):
 
     values = parts[1:]
 
-    row = dict(zip(INTERVAL_COLUMNS, values))
+    row = dict(zip(INTERVAL_FIRMWARE_COLUMNS, values))
 
     row["experiment_id"] = int(row["experiment_id"])
     row["interval"] = int(row["interval"])
 
-    for column in INTERVAL_COLUMNS[2:]:
+    for column in INTERVAL_FIRMWARE_COLUMNS[2:]:
         row[column] = float(row[column])
 
     return row
+
+
+def parse_event(line):
+    """
+    Convert one variable-length CSV_EVENT line into a Python dictionary.
+
+    The event tail is preserved as one comma-joined detail field because
+    different event types may carry different numbers of detail values.
+    """
+
+    parts = line.split(",")
+
+    if len(parts) < 3:
+        print(
+            "[WARNING] CSV_EVENT is malformed. Expected at least 3 fields, "
+            f"got {len(parts)}: {line}"
+        )
+        return None
+
+    if not parts[1]:
+        print(f"[WARNING] CSV_EVENT has an empty event_type: {line}")
+        return None
+
+    try:
+        experiment_id = int(parts[2])
+
+    except ValueError:
+        print(
+            "[WARNING] CSV_EVENT has an invalid experiment_id: "
+            f"{line}"
+        )
+        return None
+
+    return {
+        "event_type": parts[1],
+        "experiment_id": experiment_id,
+        "detail": ",".join(parts[3:]),
+    }
 
 
 # ============================================================================
 # CSV FILE HANDLING
 # ============================================================================
 
+def current_host_timestamp():
+    """Return local Mac time with its UTC offset in ISO 8601 format."""
+
+    # captured_at is host time because the Mac receives the complete serial
+    # line; the ESP32 does not provide a synchronized wall clock. The
+    # timezone-aware value keeps the local UTC offset instead of creating an
+    # ambiguous timestamp. elapsed_seconds remains useful for experiment
+    # timing because it is measured by the firmware's experiment clock.
+    return datetime.now().astimezone().isoformat()
+
+
 def open_csv_file(path, columns):
     """
     Open a CSV file for append.
 
-    If the file does not already exist, write the column header first.
+    If the file does not already exist, write the column header first. Existing
+    files must have the exact current header before append; otherwise old data
+    and new rows would have different meanings in one CSV file.
     """
 
     file_exists = path.exists()
+
+    if file_exists:
+        with path.open("r", newline="") as existing_handle:
+            existing_header = next(csv.reader(existing_handle), [])
+
+        if existing_header != columns:
+            print(f"[FILE] ERROR: CSV schema mismatch: {path}")
+            print(f"[FILE] Existing header: {existing_header}")
+            print(f"[FILE] Expected header: {columns}")
+            print(
+                "[FILE] ERROR: Refusing to append. Archive or rename the "
+                "existing file before restarting."
+            )
+            raise SystemExit(1)
 
     handle = path.open(
         "a",
@@ -426,6 +502,27 @@ def update_graphs(figure, axes, samples):
     plt.pause(0.01)
 
 
+def insert_plot_discontinuity(samples):
+    """Insert one display-only NaN row so matplotlib breaks every line."""
+
+    if not samples or samples[-1].get("plot_gap"):
+        return False
+
+    # NaN is understood by matplotlib as a missing point, so the line is
+    # broken instead of connecting the samples on either side. This marker is
+    # display metadata only and must never be written to telemetry CSV files.
+    samples.append({
+        "plot_gap": True,
+        "elapsed_seconds": math.nan,
+        "voltage_V": math.nan,
+        "current_mA": math.nan,
+        "power_mW": math.nan,
+        "experiment_id": samples[-1]["experiment_id"],
+    })
+    print("[PLOT] Serial interruption: inserting graph discontinuity.")
+    return True
+
+
 # ============================================================================
 # MAIN LOGGER
 # ============================================================================
@@ -439,6 +536,9 @@ def main():
 
     print(f"[PATH] Project root: {PROJECT_ROOT}")
     print(f"[PATH] Data directory: {DATA_DIR}")
+    print(f"[FILE] Samples:   {SAMPLES_FILE}")
+    print(f"[FILE] Intervals: {INTERVALS_FILE}")
+    print(f"[FILE] Events:    {EVENTS_FILE}")
     print()
 
     DATA_DIR.mkdir(
@@ -461,6 +561,11 @@ def main():
         INTERVAL_COLUMNS,
     )
 
+    events_handle, events_writer = open_csv_file(
+        EVENTS_FILE,
+        EVENT_COLUMNS,
+    )
+
 
     # ------------------------------------------------------------------------
     # Create graph
@@ -469,6 +574,7 @@ def main():
     figure, axes = create_graphs()
 
     live_samples = []
+    plot_gap_inserted = False
 
     current_experiment_id = None
 
@@ -509,7 +615,17 @@ def main():
                     print("[SERIAL] Upload REQUESTED. Releasing ESP32 port...")
 
                     if ser is not None:
-                        close_serial_connection(ser)
+                        if not close_serial_connection(ser):
+                            print(
+                                "[SERIAL] ERROR: Port release failed; "
+                                "RELEASED acknowledgment will not be sent."
+                            )
+                            plt.pause(0.01)
+                            continue
+
+                        if insert_plot_discontinuity(live_samples):
+                            plot_gap_inserted = True
+
                         ser = None
                         serial_opened_at = None
                         last_serial_line_at = None
@@ -650,6 +766,9 @@ def main():
                 )
 
                 close_serial_connection(ser)
+                if insert_plot_discontinuity(live_samples):
+                    plot_gap_inserted = True
+
                 ser = None
                 serial_opened_at = None
                 last_serial_line_at = None
@@ -694,6 +813,9 @@ def main():
                         "and retrying discovery."
                     )
                     close_serial_connection(ser)
+                    if insert_plot_discontinuity(live_samples):
+                        plot_gap_inserted = True
+
                     ser = None
                     serial_opened_at = None
                     last_serial_line_at = None
@@ -746,6 +868,13 @@ def main():
                 if sample is None:
                     continue
 
+                sample = {
+                    "captured_at": current_host_timestamp(),
+                    **sample,
+                }
+
+                if plot_gap_inserted:
+                    plot_gap_inserted = False
 
                 samples_writer.writerow(sample)
                 samples_handle.flush()
@@ -773,6 +902,7 @@ def main():
                     # We do not want experiment 1 and experiment 2 joined by a
                     # misleading line on the same graph.
                     live_samples = []
+                    plot_gap_inserted = False
 
 
                 live_samples.append(sample)
@@ -792,6 +922,10 @@ def main():
                 if interval is None:
                     continue
 
+                interval = {
+                    "captured_at": current_host_timestamp(),
+                    **interval,
+                }
 
                 intervals_writer.writerow(interval)
                 intervals_handle.flush()
@@ -805,12 +939,27 @@ def main():
 
             elif line.startswith("CSV_EVENT,"):
 
-                # We print events already.
-                #
-                # We do not yet persist these separately.
-                #
-                # Later we may make an experiment metadata log from them.
-                pass
+                event = parse_event(line)
+
+                if event is None:
+                    continue
+
+                # CSV_EVENT has a variable-length tail. parse_event preserves
+                # every field after experiment_id in one comma-joined detail
+                # value so no event information is silently discarded.
+                event = {
+                    "captured_at": current_host_timestamp(),
+                    **event,
+                }
+
+                events_writer.writerow(event)
+                events_handle.flush()
+
+                print(
+                    "[CAPTURE] Saved event "
+                    f"{event['event_type']} for experiment "
+                    f"{event['experiment_id']}"
+                )
 
 
             else:
@@ -838,6 +987,7 @@ def main():
 
         samples_handle.close()
         intervals_handle.close()
+        events_handle.close()
 
         print("[FILE] CSV logs closed.")
         print("[LOGGER] Shutdown complete.")
