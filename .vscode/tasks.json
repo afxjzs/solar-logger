@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Solar Logger: Compile",
+      "type": "shell",
+      "command": "arduino-cli",
+      "args": [
+        "compile",
+        "--fqbn",
+        "esp32:esp32:XIAO_ESP32C3",
+        "${workspaceFolder}/Arduino/solar-logger"
+      ],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "Solar Logger: Upload",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/upload.sh",
+      "problemMatcher": []
+    }
+  ]
+}

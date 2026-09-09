@@ -1,0 +1,10 @@
+[project]
+name = "solar-charger"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "pyserial>=3.5",
+]
