@@ -60,10 +60,11 @@ from serial.tools import list_ports
 #
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-LOG_DIR = PROJECT_ROOT / "data"
+DATA_DIR = PROJECT_ROOT / "data"
+UPLOAD_HANDSHAKE_FILE = PROJECT_ROOT / ".upload-in-progress"
 
-SAMPLES_FILE = LOG_DIR / "samples.csv"
-INTERVALS_FILE = LOG_DIR / "intervals.csv"
+SAMPLES_FILE = DATA_DIR / "samples.csv"
+INTERVALS_FILE = DATA_DIR / "intervals.csv"
 
 
 # ============================================================================
@@ -77,6 +78,11 @@ SERIAL_TIMEOUT_SECONDS = 1
 
 # How long we wait between reconnect attempts after the ESP32 disappears.
 RECONNECT_DELAY_SECONDS = 1
+
+# An open serial device does not prove that the sketch is running. The ESP32
+# may instead be in its ROM downloader, resetting, or otherwise silent.
+SILENT_WARNING_SECONDS = 3
+SILENT_DISCONNECT_SECONDS = 10
 
 
 # ============================================================================
@@ -181,6 +187,43 @@ def find_xiao_port():
         return usbmodem_ports[0].device
 
     return None
+
+
+def read_upload_handshake():
+    """
+    Read the upload coordination file's content.
+
+    None means that no upload is in progress. An empty string is retained as
+    an in-progress state because upload.sh may be between writing the file and
+    writing its complete state; reconnecting during that window would be
+    unsafe.
+    """
+
+    if not UPLOAD_HANDSHAKE_FILE.exists():
+        return None
+
+    try:
+        return UPLOAD_HANDSHAKE_FILE.read_text(encoding="utf-8").strip()
+
+    except OSError as error:
+        print(
+            "[SERIAL] ERROR: Could not read upload handshake: "
+            f"{error}"
+        )
+        return ""
+
+
+def close_serial_connection(connection):
+    """Close a serial connection and report close failures explicitly."""
+
+    try:
+        connection.close()
+
+    except (serial.SerialException, OSError) as error:
+        print(f"[SERIAL] ERROR while closing port: {error}")
+        return False
+
+    return True
 
 
 # ============================================================================
@@ -395,10 +438,10 @@ def main():
     print()
 
     print(f"[PATH] Project root: {PROJECT_ROOT}")
-    print(f"[PATH] Log directory: {LOG_DIR}")
+    print(f"[PATH] Data directory: {DATA_DIR}")
     print()
 
-    LOG_DIR.mkdir(
+    DATA_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
@@ -435,6 +478,10 @@ def main():
     # ------------------------------------------------------------------------
 
     ser = None
+    serial_opened_at = None
+    last_serial_line_at = None
+    silent_warning_printed = False
+    upload_release_acknowledged = False
 
     print()
     print("[LOGGER] Starting serial connection manager.")
@@ -444,6 +491,76 @@ def main():
 
     try:
         while True:
+
+            # --------------------------------------------------------------
+            # Upload handshake state
+            # --------------------------------------------------------------
+            #
+            # upload.sh writes REQUESTED before it touches the board. We
+            # close our port and write RELEASED as an explicit acknowledgment
+            # rather than relying on a sleep and hoping the port is free.
+            # While RELEASED remains in the file, Python must stay
+            # disconnected: esptool owns the serial device during upload.
+            # When upload.sh removes the file, normal discovery resumes.
+            upload_state = read_upload_handshake()
+
+            if upload_state == "REQUESTED":
+                if not upload_release_acknowledged:
+                    print("[SERIAL] Upload REQUESTED. Releasing ESP32 port...")
+
+                    if ser is not None:
+                        close_serial_connection(ser)
+                        ser = None
+                        serial_opened_at = None
+                        last_serial_line_at = None
+                        silent_warning_printed = False
+                        print("[SERIAL] Port closed for firmware upload.")
+                    else:
+                        print("[SERIAL] Port already closed for firmware upload.")
+
+                    try:
+                        UPLOAD_HANDSHAKE_FILE.write_text(
+                            "RELEASED\n",
+                            encoding="utf-8",
+                        )
+
+                    except OSError as error:
+                        print(
+                            "[SERIAL] ERROR: Could not acknowledge upload "
+                            f"handshake: {error}"
+                        )
+                        plt.pause(0.01)
+                        continue
+
+                    upload_release_acknowledged = True
+                    print("[SERIAL] Upload handshake: RELEASED")
+
+                plt.pause(0.01)
+                continue
+
+            if upload_state is not None:
+                # This includes RELEASED and the brief empty-file window. A
+                # present handshake file always blocks discovery, so Python
+                # cannot race esptool for the serial port.
+                if upload_state not in ("RELEASED", ""):
+                    print(
+                        "[SERIAL] WARNING: Unknown upload handshake state: "
+                        f"{upload_state!r}. Staying disconnected."
+                    )
+
+                if ser is not None:
+                    close_serial_connection(ser)
+                    ser = None
+                    serial_opened_at = None
+                    last_serial_line_at = None
+                    silent_warning_printed = False
+
+                plt.pause(0.01)
+                continue
+
+            if upload_release_acknowledged:
+                upload_release_acknowledged = False
+                print("[SERIAL] Upload finished. Resuming ESP32 discovery...")
 
             # ================================================================
             # DISCONNECTED STATE
@@ -490,6 +607,14 @@ def main():
                     )
                     print()
 
+                    # time.monotonic() measures elapsed duration without being
+                    # affected by a wall-clock adjustment. An open port only
+                    # proves that macOS opened a device; it does not prove the
+                    # sketch is running and producing firmware telemetry.
+                    serial_opened_at = time.monotonic()
+                    last_serial_line_at = None
+                    silent_warning_printed = False
+
 
                 except serial.SerialException as error:
                     print(
@@ -524,12 +649,11 @@ def main():
                     f"Connection lost: {error}"
                 )
 
-                try:
-                    ser.close()
-                except Exception:
-                    pass
-
+                close_serial_connection(ser)
                 ser = None
+                serial_opened_at = None
+                last_serial_line_at = None
+                silent_warning_printed = False
 
                 print(
                     "[SERIAL] Waiting for ESP32 to reappear..."
@@ -541,8 +665,50 @@ def main():
 
             # A timeout with no data is not necessarily an error.
             if not raw_line:
+                now = time.monotonic()
+                seconds_since_line = (
+                    now - serial_opened_at
+                    if last_serial_line_at is None
+                    else now - last_serial_line_at
+                )
+
+                if (
+                    seconds_since_line >= SILENT_WARNING_SECONDS
+                    and not silent_warning_printed
+                ):
+                    print(
+                        "[SERIAL] WARNING: Port is open but no firmware data "
+                        f"has arrived for {seconds_since_line:.1f} seconds."
+                    )
+                    print("[SERIAL] State: CONNECTED-BUT-SILENT")
+                    print(
+                        "[SERIAL] The ESP32 may be in the ROM downloader, "
+                        "reset state, or otherwise not running the sketch."
+                    )
+                    silent_warning_printed = True
+
+                if seconds_since_line >= SILENT_DISCONNECT_SECONDS:
+                    print(
+                        "[SERIAL] ERROR: No firmware data arrived for "
+                        f"{seconds_since_line:.1f} seconds. Closing port "
+                        "and retrying discovery."
+                    )
+                    close_serial_connection(ser)
+                    ser = None
+                    serial_opened_at = None
+                    last_serial_line_at = None
+                    silent_warning_printed = False
+
                 plt.pause(0.01)
                 continue
+
+            now = time.monotonic()
+            was_silent = silent_warning_printed
+            last_serial_line_at = now
+
+            if was_silent:
+                print("[SERIAL] Firmware data resumed: ALL OK")
+                silent_warning_printed = False
 
 
             line = raw_line.decode(
@@ -582,6 +748,7 @@ def main():
 
 
                 samples_writer.writerow(sample)
+                samples_handle.flush()
 
 
                 # ------------------------------------------------------------
@@ -627,6 +794,7 @@ def main():
 
 
                 intervals_writer.writerow(interval)
+                intervals_handle.flush()
 
                 print(
                     "[CAPTURE] Saved interval "
@@ -664,16 +832,8 @@ def main():
     finally:
 
         if ser is not None:
-
-            try:
-                ser.close()
+            if close_serial_connection(ser):
                 print("[SERIAL] Serial connection closed.")
-
-            except Exception as error:
-                print(
-                    "[SERIAL] WARNING while closing: "
-                    f"{error}"
-                )
 
 
         samples_handle.close()
