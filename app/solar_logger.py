@@ -1,33 +1,38 @@
 #!/usr/bin/env python3
 
 """
-BMW Solar Logger - Mac Serial Capture + Live Graphs
+BMW Solar Logger - Mac telemetry capture
 
-What this program does:
+The ESP32 sends several kinds of text over USB Serial.
 
-1. Finds serial devices connected to the Mac.
-2. Opens the ESP32 serial connection at 115200 baud.
-3. Prints ALL incoming Serial output to the terminal.
-4. Looks specifically for lines beginning with:
+Machine-readable messages:
 
-       CSV_DATA,
+    CSV_SAMPLE,...
+        Instantaneous measurement.
+        Currently sent once per second.
 
-5. Parses those machine-readable rows.
-6. Saves every row into a CSV file on the Mac.
-7. Displays live graphs for:
-       - battery voltage
-       - solar current
-       - solar power
-       - cumulative solar energy
+    CSV_DATA,...
+        Completed 60-second accounting interval.
 
-IMPORTANT:
-The Arduino Serial Monitor must be CLOSED while this program is running.
+    CSV_EVENT,...
+        Experiment lifecycle information.
 
-Only one program can normally own the ESP32's serial port at a time.
+Everything else is human-readable diagnostic output from the firmware.
+
+This program:
+
+1. Finds the XIAO serial port.
+2. Connects at 115200 baud.
+3. Prints ALL firmware output.
+4. Saves CSV_SAMPLE rows to data/samples.csv.
+5. Saves CSV_DATA rows to data/intervals.csv.
+6. Displays live voltage, current, and power.
+7. Automatically tries to reconnect if the ESP32 disappears.
 """
 
 import csv
 import sys
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -35,18 +40,87 @@ import serial
 from serial.tools import list_ports
 
 
-# ---------------------------------------------------------------------------
+# ============================================================================
+# PATHS
+# ============================================================================
+
+# __file__ is the path of THIS Python source file:
+#
+#     .../solar-charger/app/solar_logger.py
+#
+# .resolve() converts it to an absolute path.
+#
+# .parent gives:
+#
+#     .../solar-charger/app
+#
+# .parent.parent therefore gives the repository root:
+#
+#     .../solar-charger
+#
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+LOG_DIR = PROJECT_ROOT / "data"
+
+SAMPLES_FILE = LOG_DIR / "samples.csv"
+INTERVALS_FILE = LOG_DIR / "intervals.csv"
+
+
+# ============================================================================
 # SERIAL CONFIGURATION
-# ---------------------------------------------------------------------------
+# ============================================================================
 
 BAUD_RATE = 115200
 
+# How long readline() waits before returning when no Serial data arrives.
+SERIAL_TIMEOUT_SECONDS = 1
 
-# These are the columns emitted by the ESP32 firmware.
+# How long we wait between reconnect attempts after the ESP32 disappears.
+RECONNECT_DELAY_SECONDS = 1
+
+
+# ============================================================================
+# CSV SCHEMAS
+# ============================================================================
+
+# CSV_SAMPLE firmware format:
 #
-# The first item on the Serial line is literally "CSV_DATA", so that marker
-# is not included in this list.
-CSV_COLUMNS = [
+# CSV_SAMPLE,
+# experiment_id,
+# elapsed_seconds,
+# voltage_V,
+# current_mA,
+# power_mW,
+# temperature_C
+#
+SAMPLE_COLUMNS = [
+    "experiment_id",
+    "elapsed_seconds",
+    "voltage_V",
+    "current_mA",
+    "power_mW",
+    "temperature_C",
+]
+
+
+# CSV_DATA firmware format:
+#
+# CSV_DATA,
+# experiment_id,
+# interval,
+# elapsed_seconds,
+# voltage_V,
+# current_mA,
+# power_mW,
+# temperature_C,
+# interval_charge_mAh,
+# interval_energy_mWh,
+# average_current_mA,
+# average_power_mW,
+# running_charge_mAh,
+# running_energy_mWh
+#
+INTERVAL_COLUMNS = [
     "experiment_id",
     "interval",
     "elapsed_seconds",
@@ -63,200 +137,237 @@ CSV_COLUMNS = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# FIND THE ESP32 SERIAL PORT
-# ---------------------------------------------------------------------------
+# ============================================================================
+# SERIAL PORT DISCOVERY
+# ============================================================================
 
-def choose_serial_port():
+def find_xiao_port():
     """
-    Ask pyserial for all serial ports currently visible to macOS.
+    Find the most likely XIAO ESP32-C3 serial port.
 
-    Typical ESP32/XIAO names on a Mac look something like:
+    macOS serial devices suitable for initiating a connection normally use
+    /dev/cu.* names.
+
+    Our current board appears as:
 
         /dev/cu.usbmodem1101
-        /dev/cu.usbserial-XXXX
 
-    We print everything we find rather than silently guessing.
+    The exact number can change, so we do not want to permanently hard-code
+    usbmodem1101.
     """
 
     ports = list(list_ports.comports())
 
-    if not ports:
-        print("[ERROR] No serial ports found.")
-        print("[ERROR] Is the XIAO connected by USB?")
-        sys.exit(1)
+    usbmodem_ports = [
+        port
+        for port in ports
+        if port.device.startswith("/dev/cu.usbmodem")
+    ]
 
-    print()
-    print("Serial ports found:")
-    print()
+    if len(usbmodem_ports) == 1:
+        return usbmodem_ports[0].device
 
-    for index, port in enumerate(ports):
-        print(f"  [{index}] {port.device}")
-        print(f"      description: {port.description}")
-        print(f"      manufacturer: {port.manufacturer}")
-        print()
+    if len(usbmodem_ports) > 1:
+        print("[WARNING] Multiple USB modem serial ports found:")
 
-    # If there is only one serial port, choosing it automatically is
-    # unambiguous.
-    if len(ports) == 1:
-        selected = ports[0]
+        for port in usbmodem_ports:
+            print(f"          {port.device} - {port.description}")
 
-        print(f"Using the only available port: {selected.device}")
-        return selected.device
+        print(
+            "[WARNING] Using the first USB modem port. "
+            "We should improve board identification if this becomes ambiguous."
+        )
 
-    # Otherwise let the user explicitly choose.
-    while True:
-        choice = input("Choose the ESP32 serial-port number: ").strip()
+        return usbmodem_ports[0].device
 
-        try:
-            index = int(choice)
-
-            if 0 <= index < len(ports):
-                return ports[index].device
-
-        except ValueError:
-            pass
-
-        print("Invalid selection. Try again.")
+    return None
 
 
-# ---------------------------------------------------------------------------
-# PARSE ONE CSV_DATA LINE
-# ---------------------------------------------------------------------------
+# ============================================================================
+# CSV PARSING
+# ============================================================================
 
-def parse_csv_data(line):
+def parse_sample(line):
     """
-    Convert a firmware CSV_DATA line into normal Python values.
+    Convert one CSV_SAMPLE line into a Python dictionary.
 
-    Example input:
+    Example:
 
-        CSV_DATA,1,3,60.000,12.83,272.4,...
+        CSV_SAMPLE,2,5166.632,13.108789,337.584000,4425.356800,28.1563
 
-    line.split(",") gives us a Python list:
+    line.split(",") produces:
 
         [
-            "CSV_DATA",
-            "1",
-            "3",
-            "60.000",
-            "12.83",
-            ...
+            "CSV_SAMPLE",
+            "2",
+            "5166.632",
+            "13.108789",
+            "337.584000",
+            "4425.356800",
+            "28.1563",
         ]
 
-    We discard "CSV_DATA" and map the remaining fields to CSV_COLUMNS.
+    The first item identifies the message type.
+
+    The remaining six fields contain the data.
     """
 
     parts = line.split(",")
 
-    expected_parts = len(CSV_COLUMNS) + 1
+    expected_parts = len(SAMPLE_COLUMNS) + 1
 
     if len(parts) != expected_parts:
         print(
-            f"[WARNING] CSV_DATA field count is wrong. "
+            "[WARNING] CSV_SAMPLE field count is wrong. "
             f"Expected {expected_parts}, got {len(parts)}"
         )
-
         return None
 
     values = parts[1:]
 
-    row = dict(zip(CSV_COLUMNS, values))
+    row = dict(zip(SAMPLE_COLUMNS, values))
 
-    # Convert fields into numeric Python values.
-    #
-    # experiment_id and interval are whole numbers.
+    # Experiment IDs are integers.
     row["experiment_id"] = int(row["experiment_id"])
-    row["interval"] = int(row["interval"])
 
-    # Everything else is a decimal measurement.
-    for column in CSV_COLUMNS[2:]:
+    # All the measurements are floating-point values.
+    for column in SAMPLE_COLUMNS[1:]:
         row[column] = float(row[column])
 
     return row
 
 
-# ---------------------------------------------------------------------------
-# LIVE GRAPH SETUP
-# ---------------------------------------------------------------------------
+def parse_interval(line):
+    """
+    Convert one CSV_DATA interval summary into a Python dictionary.
+    """
+
+    parts = line.split(",")
+
+    expected_parts = len(INTERVAL_COLUMNS) + 1
+
+    if len(parts) != expected_parts:
+        print(
+            "[WARNING] CSV_DATA field count is wrong. "
+            f"Expected {expected_parts}, got {len(parts)}"
+        )
+        return None
+
+    values = parts[1:]
+
+    row = dict(zip(INTERVAL_COLUMNS, values))
+
+    row["experiment_id"] = int(row["experiment_id"])
+    row["interval"] = int(row["interval"])
+
+    for column in INTERVAL_COLUMNS[2:]:
+        row[column] = float(row[column])
+
+    return row
+
+
+# ============================================================================
+# CSV FILE HANDLING
+# ============================================================================
+
+def open_csv_file(path, columns):
+    """
+    Open a CSV file for append.
+
+    If the file does not already exist, write the column header first.
+    """
+
+    file_exists = path.exists()
+
+    handle = path.open(
+        "a",
+        newline="",
+        buffering=1,
+    )
+
+    writer = csv.DictWriter(
+        handle,
+        fieldnames=columns,
+    )
+
+    if not file_exists:
+        writer.writeheader()
+        print(f"[FILE] Created {path}")
+
+    else:
+        print(f"[FILE] Appending to {path}")
+
+    return handle, writer
+
+
+# ============================================================================
+# LIVE GRAPH
+# ============================================================================
 
 def create_graphs():
     """
-    Create the live dashboard window.
+    Create the live telemetry window.
 
-    We keep four separate axes because voltage, current, power, and energy use
-    very different units and scales.
+    These graphs use CSV_SAMPLE, so they update every second.
     """
 
     plt.ion()
 
     figure, axes = plt.subplots(
-        4,
+        3,
         1,
-        figsize=(11, 10),
+        figsize=(11, 9),
         sharex=True,
     )
 
     figure.suptitle("BMW Solar Logger")
 
-    axes[0].set_ylabel("Voltage (V)")
-    axes[1].set_ylabel("Current (mA)")
-    axes[2].set_ylabel("Power (mW)")
-    axes[3].set_ylabel("Energy (mWh)")
-    axes[3].set_xlabel("Interval")
-
-    axes[0].grid(True)
-    axes[1].grid(True)
-    axes[2].grid(True)
-    axes[3].grid(True)
-
     return figure, axes
 
 
-# ---------------------------------------------------------------------------
-# REDRAW LIVE GRAPH
-# ---------------------------------------------------------------------------
-
-def update_graphs(figure, axes, rows):
+def update_graphs(figure, axes, samples):
     """
-    Redraw the plots using every CSV_DATA row collected for the current
-    experiment.
-
-    This is deliberately simple for now.
-
-    One minute of data creates only one point, so even many hours of bench
-    testing is a very small dataset for a laptop.
+    Redraw the live charts using collected high-resolution samples.
     """
 
-    if not rows:
+    if not samples:
         return
 
-    experiment_id = rows[-1]["experiment_id"]
+    times = [
+        row["elapsed_seconds"]
+        for row in samples
+    ]
 
-    intervals = [row["interval"] for row in rows]
-    voltage = [row["voltage_V"] for row in rows]
-    current = [row["current_mA"] for row in rows]
-    power = [row["power_mW"] for row in rows]
-    energy = [row["running_energy_mWh"] for row in rows]
+    voltages = [
+        row["voltage_V"]
+        for row in samples
+    ]
+
+    currents = [
+        row["current_mA"]
+        for row in samples
+    ]
+
+    powers = [
+        row["power_mW"]
+        for row in samples
+    ]
 
     for axis in axes:
         axis.clear()
+        axis.grid(True)
 
-    axes[0].plot(intervals, voltage)
+    axes[0].plot(times, voltages)
     axes[0].set_ylabel("Voltage (V)")
-    axes[0].grid(True)
 
-    axes[1].plot(intervals, current)
+    axes[1].plot(times, currents)
     axes[1].set_ylabel("Current (mA)")
-    axes[1].grid(True)
 
-    axes[2].plot(intervals, power)
+    axes[2].plot(times, powers)
     axes[2].set_ylabel("Power (mW)")
-    axes[2].grid(True)
+    axes[2].set_xlabel("Experiment elapsed time (seconds)")
 
-    axes[3].plot(intervals, energy)
-    axes[3].set_ylabel("Energy (mWh)")
-    axes[3].set_xlabel("Interval (minutes)")
-    axes[3].grid(True)
+    experiment_id = samples[-1]["experiment_id"]
 
     figure.suptitle(
         f"BMW Solar Logger - Experiment {experiment_id}"
@@ -264,100 +375,69 @@ def update_graphs(figure, axes, rows):
 
     figure.tight_layout()
 
-    # Tell matplotlib to actually refresh the window.
     figure.canvas.draw_idle()
     figure.canvas.flush_events()
 
+    # Without this tiny pause, matplotlib's GUI event loop does not always get
+    # enough time to repaint the window.
     plt.pause(0.01)
 
 
-# ---------------------------------------------------------------------------
-# MAIN PROGRAM
-# ---------------------------------------------------------------------------
+# ============================================================================
+# MAIN LOGGER
+# ============================================================================
 
 def main():
-    port = choose_serial_port()
-
     print()
     print("============================================================")
-    print("BMW SOLAR LOGGER - MAC CAPTURE")
+    print("BMW SOLAR LOGGER")
     print("============================================================")
     print()
-    print(f"Serial port: {port}")
-    print(f"Baud rate:   {BAUD_RATE}")
+
+    print(f"[PATH] Project root: {PROJECT_ROOT}")
+    print(f"[PATH] Log directory: {LOG_DIR}")
     print()
 
-    # Open the serial connection.
-    #
-    # timeout=1 means readline() will wait at most one second for data instead
-    # of hanging forever.
-    try:
-        ser = serial.Serial(
-            port=port,
-            baudrate=BAUD_RATE,
-            timeout=1,
-        )
-
-    except serial.SerialException as error:
-        print(f"[ERROR] Could not open serial port: {error}")
-        sys.exit(1)
-
-    print("[SERIAL] Port opened successfully.")
-    print()
-
-
-    # -----------------------------------------------------------------------
-    # OUTPUT FILE
-    # -----------------------------------------------------------------------
-
-    output_path = Path("bmw_solar_log.csv")
-
-    file_exists = output_path.exists()
-
-    csv_file = output_path.open(
-        "a",
-        newline="",
-        buffering=1,
+    LOG_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
     )
 
-    writer = csv.DictWriter(
-        csv_file,
-        fieldnames=CSV_COLUMNS,
+
+    # ------------------------------------------------------------------------
+    # Open durable CSV logs
+    # ------------------------------------------------------------------------
+
+    samples_handle, samples_writer = open_csv_file(
+        SAMPLES_FILE,
+        SAMPLE_COLUMNS,
     )
 
-    # Write column names if this is a new file.
-    if not file_exists:
-        writer.writeheader()
-
-        print(
-            f"[FILE] Created new log file: "
-            f"{output_path.resolve()}"
-        )
-    else:
-        print(
-            f"[FILE] Appending to existing log file: "
-            f"{output_path.resolve()}"
-        )
+    intervals_handle, intervals_writer = open_csv_file(
+        INTERVALS_FILE,
+        INTERVAL_COLUMNS,
+    )
 
 
-    # -----------------------------------------------------------------------
-    # LIVE GRAPH
-    # -----------------------------------------------------------------------
+    # ------------------------------------------------------------------------
+    # Create graph
+    # ------------------------------------------------------------------------
 
     figure, axes = create_graphs()
 
-
-    # Rows currently being displayed.
-    #
-    # If we encounter a new experiment ID, we'll clear this list so the live
-    # chart automatically switches to the new experiment.
-    graph_rows = []
+    live_samples = []
 
     current_experiment_id = None
 
 
+    # ------------------------------------------------------------------------
+    # Serial connection state
+    # ------------------------------------------------------------------------
+
+    ser = None
+
     print()
-    print("[LOGGER] Listening for ESP32 Serial data...")
+    print("[LOGGER] Starting serial connection manager.")
     print("[LOGGER] Press Control-C to stop.")
     print()
 
@@ -365,112 +445,241 @@ def main():
     try:
         while True:
 
-            # readline() waits until the ESP32 sends a newline.
+            # ================================================================
+            # DISCONNECTED STATE
+            # ================================================================
             #
-            # Serial data arrives as bytes, so decode() converts those bytes
-            # into normal Python text.
-            raw_line = ser.readline()
+            # If ser is None, we currently have no live Serial connection.
+            #
+            # This happens:
+            #
+            #   - when the program first starts
+            #   - while firmware is being uploaded
+            #   - if the USB cable is disconnected
+            #   - if the board resets in a way that removes the USB device
+            #
+            if ser is None:
 
+                port = find_xiao_port()
+
+                if port is None:
+                    print(
+                        "[SERIAL] XIAO not found. "
+                        "Waiting..."
+                    )
+
+                    plt.pause(0.01)
+                    time.sleep(RECONNECT_DELAY_SECONDS)
+                    continue
+
+
+                print(f"[SERIAL] Found candidate port: {port}")
+                print("[SERIAL] Attempting connection...")
+
+
+                try:
+                    ser = serial.Serial(
+                        port=port,
+                        baudrate=BAUD_RATE,
+                        timeout=SERIAL_TIMEOUT_SECONDS,
+                    )
+
+                    print(
+                        f"[SERIAL] CONNECTED: {port} "
+                        f"at {BAUD_RATE} baud"
+                    )
+                    print()
+
+
+                except serial.SerialException as error:
+                    print(
+                        "[SERIAL] WARNING: "
+                        f"Could not open {port}: {error}"
+                    )
+
+                    ser = None
+
+                    plt.pause(0.01)
+                    time.sleep(RECONNECT_DELAY_SECONDS)
+
+                    continue
+
+
+            # ================================================================
+            # CONNECTED STATE
+            # ================================================================
+
+            try:
+                raw_line = ser.readline()
+
+
+            except (
+                serial.SerialException,
+                OSError,
+            ) as error:
+
+                print()
+                print(
+                    "[SERIAL] WARNING: "
+                    f"Connection lost: {error}"
+                )
+
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+
+                ser = None
+
+                print(
+                    "[SERIAL] Waiting for ESP32 to reappear..."
+                )
+                print()
+
+                continue
+
+
+            # A timeout with no data is not necessarily an error.
             if not raw_line:
-                # Nothing arrived during this one-second timeout.
-                #
-                # Keep matplotlib responsive anyway.
                 plt.pause(0.01)
                 continue
 
 
-            try:
-                line = raw_line.decode(
-                    "utf-8",
-                    errors="replace",
-                ).strip()
-
-            except Exception as error:
-                print(
-                    f"[ERROR] Could not decode Serial line: {error}"
-                )
-                continue
+            line = raw_line.decode(
+                "utf-8",
+                errors="replace",
+            ).strip()
 
 
             if not line:
                 continue
 
 
-            # Print EVERYTHING from the firmware.
+            # ================================================================
+            # ALWAYS PRINT FIRMWARE OUTPUT
+            # ================================================================
             #
-            # We want ALL OK, warnings, NVS messages, heartbeats, errors, etc.
+            # Parsing telemetry must never hide diagnostics.
+            #
             print(line)
 
 
-            # Ordinary diagnostic lines require no parsing.
-            if not line.startswith("CSV_DATA,"):
-                continue
+            # ================================================================
+            # MESSAGE DISPATCH
+            # ================================================================
+            #
+            # This is the important new part.
+            #
+            # Identify WHAT kind of message we received before trying to parse
+            # its fields.
+            #
+            if line.startswith("CSV_SAMPLE,"):
+
+                sample = parse_sample(line)
+
+                if sample is None:
+                    continue
 
 
-            try:
-                row = parse_csv_data(line)
+                samples_writer.writerow(sample)
 
-            except Exception as error:
-                print(
-                    f"[ERROR] Could not parse CSV_DATA line: {error}"
+
+                # ------------------------------------------------------------
+                # Experiment boundary
+                # ------------------------------------------------------------
+
+                if (
+                    current_experiment_id
+                    != sample["experiment_id"]
+                ):
+
+                    print(
+                        "[LOGGER] Live experiment changed: "
+                        f"{current_experiment_id} -> "
+                        f"{sample['experiment_id']}"
+                    )
+
+                    current_experiment_id = (
+                        sample["experiment_id"]
+                    )
+
+                    # We do not want experiment 1 and experiment 2 joined by a
+                    # misleading line on the same graph.
+                    live_samples = []
+
+
+                live_samples.append(sample)
+
+
+                update_graphs(
+                    figure,
+                    axes,
+                    live_samples,
                 )
-                continue
 
 
-            if row is None:
-                continue
+            elif line.startswith("CSV_DATA,"):
+
+                interval = parse_interval(line)
+
+                if interval is None:
+                    continue
 
 
-            # Immediately save the data point to disk.
-            writer.writerow(row)
-
-            print(
-                "[CAPTURE] Saved "
-                f"experiment {row['experiment_id']} "
-                f"interval {row['interval']}"
-            )
-
-
-            # ---------------------------------------------------------------
-            # Handle experiment boundaries.
-            # ---------------------------------------------------------------
-
-            if current_experiment_id != row["experiment_id"]:
+                intervals_writer.writerow(interval)
 
                 print(
-                    "[CAPTURE] Experiment changed: "
-                    f"{current_experiment_id} -> "
-                    f"{row['experiment_id']}"
+                    "[CAPTURE] Saved interval "
+                    f"{interval['experiment_id']}:"
+                    f"{interval['interval']}"
                 )
 
-                current_experiment_id = row["experiment_id"]
 
-                # Start a fresh live graph for the new experiment.
-                graph_rows = []
+            elif line.startswith("CSV_EVENT,"):
+
+                # We print events already.
+                #
+                # We do not yet persist these separately.
+                #
+                # Later we may make an experiment metadata log from them.
+                pass
 
 
-            graph_rows.append(row)
+            else:
 
-            update_graphs(
-                figure,
-                axes,
-                graph_rows,
-            )
+                # Ordinary firmware diagnostics need no additional processing.
+                #
+                # They were already printed above.
+                pass
 
 
     except KeyboardInterrupt:
+
         print()
         print()
         print("[LOGGER] Control-C received.")
-        print("[LOGGER] Stopping capture...")
+        print("[LOGGER] Stopping...")
 
 
     finally:
-        csv_file.close()
-        ser.close()
 
-        print("[FILE] CSV file closed.")
-        print("[SERIAL] Serial port closed.")
+        if ser is not None:
+
+            try:
+                ser.close()
+                print("[SERIAL] Serial connection closed.")
+
+            except Exception as error:
+                print(
+                    "[SERIAL] WARNING while closing: "
+                    f"{error}"
+                )
+
+
+        samples_handle.close()
+        intervals_handle.close()
+
+        print("[FILE] CSV logs closed.")
         print("[LOGGER] Shutdown complete.")
 
 
