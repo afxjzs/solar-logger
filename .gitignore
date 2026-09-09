@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# VS Code user-local state
+.vscode/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Generated logger data
+data/*.csv
+data/*.json
+data/*.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Arduino build output, if we later choose local build directories
+build/
+Arduino/build/
