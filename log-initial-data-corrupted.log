@@ -1,0 +1,790 @@
+
+
+============================================================
+BMW SOLAR LOGGER
+Development + NVS Persistence Test
+============================================================
+
+[BOOT] Firmware started.
+[BOOT] Entering setup().
+
+[I2C] Starting I2C interface...
+[I2C] XIAO D4 = SDA
+[I2C] XIAO D5 = SCL
+[I2C] Wire.begin() completed.
+
+[INA228] Testing I2C communication...
+[INA228] Sending request to address 0x40...
+[INA228] Device responded at 0x40.
+[INA228] Communication: OK
+
+[INA228] Beginning configuration...
+[INA228] Writing ADC_CONFIG = 0xFB6B...
+[INA228] ADC_CONFIG readback = 0xFB6B
+[INA228] ADC_CONFIG verification: OK
+[INA228] Writing SHUNT_CAL = 819...
+[INA228] SHUNT_CAL readback = 819
+[INA228] SHUNT_CAL verification: OK
+[INA228] Configuration complete.
+
+[BOOT] INA228 configuration succeeded.
+[BOOT] Loading durable logger state from NVS...
+
+[NVS] Beginning checkpoint load...
+[NVS] Opening namespace "solarlog" in READ ONLY mode...
+[NVS] Namespace opened.
+[NVS] Reading schema version...
+[NVS] Stored schema = 1
+[NVS] Reading saved interval...
+[NVS] interval = 15
+[NVS] Reading saved charge...
+[NVS] charge = 4.126681 mAh
+[NVS] Reading saved energy...
+[NVS] energy = 5.236964 mWh
+[NVS] Namespace closed.
+[NVS] Checkpoint load: OK
+
+[INA228] Waiting 2 seconds for ADC measurements to settle...
+[INA228] Settle period complete.
+[INA228] Reading current sensor state...
+[INA228] Voltage     = 1.6496 V
+[INA228] Current     = 16.604 mA
+[INA228] Power       = 27.379 mW
+[INA228] Temperature = 22.83 C
+
+[LOGGER] Preparing first measurement interval...
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[LOGGER] First measurement interval has started.
+
+============================================================
+ALL OK
+Initialization completed successfully.
+
+USB Serial will remain connected.
+Measurement interval: 60 seconds
+Heartbeat interval:   5 seconds
+NVS checkpoint every: 5 measurement intervals
+
+Restored interval:    15
+Restored charge:      4.126681 mAh
+Restored energy:      5.236964 mWh
+============================================================
+
+[BOOT] Leaving setup().
+[BOOT] Arduino will now call loop() repeatedly.
+[HEARTBEAT] ALL OK | interval 16 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 16 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.010 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276736 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452892 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 16
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #16
+Actual interval:     60.010 seconds
+
+Ending voltage:      1.6492 V
+Current right now:   16.604 mA
+Power right now:     27.379 mW
+Temperature:         22.90 C
+
+Interval charge:     0.276736 mAh
+Interval energy:     0.452892 mWh
+Average current:     16.601 mA
+Average power:       27.169 mW
+
+RUNNING charge:      4.403417 mAh
+RUNNING energy:      5.689856 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 4 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 17 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 17 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276700 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452779 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 17
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #17
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6494 V
+Current right now:   16.624 mA
+Power right now:     27.418 mW
+Temperature:         22.94 C
+
+Interval charge:     0.276700 mAh
+Interval energy:     0.452779 mWh
+Average current:     16.601 mA
+Average power:       27.166 mW
+
+RUNNING charge:      4.680117 mAh
+RUNNING energy:      6.142635 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 3 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 18 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 18 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276323 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.451584 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 18
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #18
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6488 V
+Current right now:   16.628 mA
+Power right now:     27.418 mW
+Temperature:         23.12 C
+
+Interval charge:     0.276323 mAh
+Interval energy:     0.451584 mWh
+Average current:     16.579 mA
+Average power:       27.094 mW
+
+RUNNING charge:      4.956440 mAh
+RUNNING energy:      6.594219 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 2 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 19 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 19 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.246394 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.403285 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 19
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #19
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6482 V
+Current right now:   16.612 mA
+Power right now:     27.366 mW
+Temperature:         23.28 C
+
+Interval charge:     0.246394 mAh
+Interval energy:     0.403285 mWh
+Average current:     14.783 mA
+Average power:       24.196 mW
+
+RUNNING charge:      5.202834 mAh
+RUNNING energy:      6.997504 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 1 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 20 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 20 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276507 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452153 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 20
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #20
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6473 V
+Current right now:   16.592 mA
+Power right now:     27.328 mW
+Temperature:         23.20 C
+
+Interval charge:     0.276507 mAh
+Interval energy:     0.452153 mWh
+Average current:     16.590 mA
+Average power:       27.128 mW
+
+RUNNING charge:      5.479341 mAh
+RUNNING energy:      7.449657 mWh
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+[NVS] CHECKPOINT REQUIRED
+[NVS] Interval 20 is divisible by 5
+[NVS] Opening namespace "solarlog" in READ/WRITE mode...
+[NVS] Namespace opened.
+[NVS] Writing schema = 1
+[NVS] Writing interval = 20
+[NVS] Writing charge = 5.479341 mAh
+[NVS] Writing energy = 7.449657 mWh
+[NVS] Closing namespace...
+[NVS] Namespace closed.
+
+*** NVS CHECKPOINT SAVED SUCCESSFULLY ***
+------------------------------------------------------------
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 21 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 21 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.007 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276338 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.451641 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 21
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #21
+Actual interval:     60.007 seconds
+
+Ending voltage:      1.6473 V
+Current right now:   16.584 mA
+Power right now:     27.315 mW
+Temperature:         23.12 C
+
+Interval charge:     0.276338 mAh
+Interval energy:     0.451641 mWh
+Average current:     16.578 mA
+Average power:       27.095 mW
+
+RUNNING charge:      5.755679 mAh
+RUNNING energy:      7.901298 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 4 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 22 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 22 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.001 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276423 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.451982 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 22
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #22
+Actual interval:     60.001 seconds
+
+Ending voltage:      1.6479 V
+Current right now:   16.608 mA
+Power right now:     27.354 mW
+Temperature:         23.11 C
+
+Interval charge:     0.276423 mAh
+Interval energy:     0.451982 mWh
+Average current:     16.585 mA
+Average power:       27.118 mW
+
+RUNNING charge:      6.032102 mAh
+RUNNING energy:      8.353280 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 3 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 23 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 23 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276460 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452039 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 23
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #23
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6480 V
+Current right now:   16.624 mA
+Power right now:     27.392 mW
+Temperature:         23.09 C
+
+Interval charge:     0.276460 mAh
+Interval energy:     0.452039 mWh
+Average current:     16.587 mA
+Average power:       27.121 mW
+
+RUNNING charge:      6.308562 mAh
+RUNNING energy:      8.805319 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 2 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 24 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 24 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276489 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452153 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 24
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #24
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6482 V
+Current right now:   16.564 mA
+Power right now:     27.290 mW
+Temperature:         23.08 C
+
+Interval charge:     0.276489 mAh
+Interval energy:     0.452153 mWh
+Average current:     16.589 mA
+Average power:       27.128 mW
+
+RUNNING charge:      6.585051 mAh
+RUNNING energy:      9.257472 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 1 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 25 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 25 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276539 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452324 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 25
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #25
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6488 V
+Current right now:   16.584 mA
+Power right now:     27.341 mW
+Temperature:         23.07 C
+
+Interval charge:     0.276539 mAh
+Interval energy:     0.452324 mWh
+Average current:     16.592 mA
+Average power:       27.139 mW
+
+RUNNING charge:      6.861590 mAh
+RUNNING energy:      9.709796 mWh
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+[NVS] CHECKPOINT REQUIRED
+[NVS] Interval 25 is divisible by 5
+[NVS] Opening namespace "solarlog" in READ/WRITE mode...
+[NVS] Namespace opened.
+[NVS] Writing schema = 1
+[NVS] Writing interval = 25
+[NVS] Writing charge = 6.861590 mAh
+[NVS] Writing energy = 9.709796 mWh
+[NVS] Closing namespace...
+[NVS] Namespace closed.
+
+*** NVS CHECKPOINT SAVED SUCCESSFULLY ***
+------------------------------------------------------------
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 26 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 26 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.007 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276620 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452608 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 26
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #26
+Actual interval:     60.007 seconds
+
+Ending voltage:      1.6490 V
+Current right now:   16.624 mA
+Power right now:     27.405 mW
+Temperature:         23.11 C
+
+Interval charge:     0.276620 mAh
+Interval energy:     0.452608 mWh
+Average current:     16.595 mA
+Average power:       27.153 mW
+
+RUNNING charge:      7.138210 mAh
+RUNNING energy:      10.162404 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 4 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 27 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 27 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.001 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276721 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.452836 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 27
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #27
+Actual interval:     60.001 seconds
+
+Ending voltage:      1.6494 V
+Current right now:   16.620 mA
+Power right now:     27.405 mW
+Temperature:         23.08 C
+
+Interval charge:     0.276721 mAh
+Interval energy:     0.452836 mWh
+Average current:     16.603 mA
+Average power:       27.170 mW
+
+RUNNING charge:      7.414931 mAh
+RUNNING energy:      10.615239 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 3 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 28 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 28 in progress | 55 sec elapsed | 5 sec remaining
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 60.002 seconds
+[INA228] Reading instantaneous measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Interval charge = 0.276762 mAh
+[INA228] Reading accumulated ENERGY...
+[INA228] Interval energy = 0.453063 mWh
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[INA228] New accumulation interval has started.
+[LOGGER] Incremented interval number to 28
+[LOGGER] Adding interval charge to running total...
+[LOGGER] Adding interval energy to running total...
+
+------------------------------------------------------------
+INTERVAL #28
+Actual interval:     60.002 seconds
+
+Ending voltage:      1.6496 V
+Current right now:   16.620 mA
+Power right now:     27.405 mW
+Temperature:         23.01 C
+
+Interval charge:     0.276762 mAh
+Interval energy:     0.453063 mWh
+Average current:     16.605 mA
+Average power:       27.183 mW
+
+RUNNING charge:      7.691693 mAh
+RUNNING energy:      11.068302 mWh
+------------------------------------------------------------
+
+[NVS] No checkpoint required. Next checkpoint in 2 interval(s).
+
+[LOGGER] Interval processing complete.
+[LOGGER] Returning to loop().
+============================================================
+[HEARTBEAT] ALL OK | interval 29 in progress | 0 sec elapsed | 60 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 5 sec elapsed | 55 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 10 sec elapsed | 50 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 15 sec elapsed | 45 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 20 sec elapsed | 40 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 25 sec elapsed | 35 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 30 sec elapsed | 30 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 35 sec elapsed | 25 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 40 sec elapsed | 20 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 45 sec elapsed | 15 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 50 sec elapsed | 10 sec remaining
+[HEARTBEAT] ALL OK | interval 29 in progress | 55 sec elapsed | 5 sec remaining

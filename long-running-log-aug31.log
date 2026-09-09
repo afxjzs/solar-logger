@@ -1,0 +1,3364 @@
+
+INA228 deep-sleep accumulation test
+===================================
+Wake reason: TIMER
+
+Measurements after 60-second sleep:
+
+Voltage: 1.5955 V
+Current: 15.520 mA
+Power:   24.755 mW
+Charge accumulated: 0.2701 mAh
+Energy accumulated: 0.4273 mWh
+
+Test complete.
+
+Expected with roughly 16 mA / 25.7 mW load:
+Charge: about 0.267 mAh
+Energy: about 0.428 mWh
+
+INA228 deep-sleep accumulation test
+===================================
+Wake reason: normal power-on/reset
+
+Waiting 2 seconds for INA228 measurements to settle...
+
+Current measurements before sleep:
+Voltage: 1.5984 V
+Current: 16.024 mA
+Power:   25.613 mW
+Charge accumulated: 0.0108 mAh
+Energy accumulated: 0.0170 mWh
+
+Resetting ENERGY and CHARGE to zero...
+
+Going to deep sleep for 60 seconds.
+
+During sleep:
+  ESP32 CPU should be off.
+  INA228 should remain powered.
+  INA228 should continue accumulating.
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: normal power-on/reset
+
+Starting a new continuous logger run.
+
+Waiting 2 seconds for INA228 to settle...
+
+Initial measurements:
+Voltage:      1.5838 V
+Current:      15.908 mA
+Power:        25.190 mW
+Temperature:  23.12 C
+
+Resetting INA228 accumulators...
+
+Continuous logger started.
+It will run until you reset/unplug/reflash it.
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #1
+Interval length: 60 seconds
+
+Ending voltage:     1.5873 V
+Current right now:  15.940 mA
+Power right now:    25.293 mW
+Temperature:        23.07 C
+
+Interval charge:    0.2739 mAh
+Interval energy:    0.4308 mWh
+Average current:    16.432 mA
+Average power:      25.849 mW
+
+RUNNING charge:     0.2739 mAh
+RUNNING energy:     0.4308 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #2
+Interval length: 60 seconds
+
+Ending voltage:     1.5873 V
+Current right now:  15.964 mA
+Power right now:    25.331 mW
+Temperature:        23.05 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.458 mA
+Average power:      25.900 mW
+
+RUNNING charge:     0.5482 mAh
+RUNNING energy:     0.8625 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #3
+Interval length: 60 seconds
+
+Ending voltage:     1.5838 V
+Current right now:  15.928 mA
+Power right now:    25.216 mW
+Temperature:        23.06 C
+
+Interval charge:    0.2741 mAh
+Interval energy:    0.4308 mWh
+Average current:    16.444 mA
+Average power:      25.849 mW
+
+RUNNING charge:     0.8222 mAh
+RUNNING energy:     1.2933 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #4
+Interval length: 60 seconds
+
+Ending voltage:     1.5852 V
+Current right now:  15.900 mA
+Power right now:    25.203 mW
+Temperature:        23.03 C
+
+Interval charge:    0.2739 mAh
+Interval energy:    0.4303 mWh
+Average current:    16.435 mA
+Average power:      25.818 mW
+
+RUNNING charge:     1.0962 mAh
+RUNNING energy:     1.7236 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #5
+Interval length: 60 seconds
+
+Ending voltage:     1.5871 V
+Current right now:  15.924 mA
+Power right now:    25.267 mW
+Temperature:        23.00 C
+
+Interval charge:    0.2742 mAh
+Interval energy:    0.4314 mWh
+Average current:    16.454 mA
+Average power:      25.883 mW
+
+RUNNING charge:     1.3704 mAh
+RUNNING energy:     2.1550 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #6
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.988 mA
+Power right now:    25.408 mW
+Temperature:        23.02 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4326 mWh
+Average current:    16.480 mA
+Average power:      25.955 mW
+
+RUNNING charge:     1.6451 mAh
+RUNNING energy:     2.5876 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #7
+Interval length: 60 seconds
+
+Ending voltage:     1.5857 V
+Current right now:  15.940 mA
+Power right now:    25.267 mW
+Temperature:        23.02 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4318 mWh
+Average current:    16.459 mA
+Average power:      25.911 mW
+
+RUNNING charge:     1.9194 mAh
+RUNNING energy:     3.0194 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #8
+Interval length: 60 seconds
+
+Ending voltage:     1.5869 V
+Current right now:  15.944 mA
+Power right now:    25.293 mW
+Temperature:        23.01 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4314 mWh
+Average current:    16.459 mA
+Average power:      25.883 mW
+
+RUNNING charge:     2.1937 mAh
+RUNNING energy:     3.4508 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #9
+Interval length: 60 seconds
+
+Ending voltage:     1.5855 V
+Current right now:  15.940 mA
+Power right now:    25.267 mW
+Temperature:        22.96 C
+
+Interval charge:    0.2740 mAh
+Interval energy:    0.4308 mWh
+Average current:    16.438 mA
+Average power:      25.849 mW
+
+RUNNING charge:     2.4677 mAh
+RUNNING energy:     3.8816 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #10
+Interval length: 60 seconds
+
+Ending voltage:     1.5846 V
+Current right now:  15.908 mA
+Power right now:    25.203 mW
+Temperature:        22.94 C
+
+Interval charge:    0.2738 mAh
+Interval energy:    0.4302 mWh
+Average current:    16.425 mA
+Average power:      25.812 mW
+
+RUNNING charge:     2.7414 mAh
+RUNNING energy:     4.3118 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #11
+Interval length: 60 seconds
+
+Ending voltage:     1.5879 V
+Current right now:  15.956 mA
+Power right now:    25.331 mW
+Temperature:        22.91 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4316 mWh
+Average current:    16.461 mA
+Average power:      25.894 mW
+
+RUNNING charge:     3.0158 mAh
+RUNNING energy:     4.7434 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #12
+Interval length: 60 seconds
+
+Ending voltage:     1.5883 V
+Current right now:  15.940 mA
+Power right now:    25.318 mW
+Temperature:        22.91 C
+
+Interval charge:    0.2746 mAh
+Interval energy:    0.4325 mWh
+Average current:    16.478 mA
+Average power:      25.952 mW
+
+RUNNING charge:     3.2904 mAh
+RUNNING energy:     5.1759 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #13
+Interval length: 60 seconds
+
+Ending voltage:     1.5873 V
+Current right now:  15.956 mA
+Power right now:    25.318 mW
+Temperature:        22.91 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4322 mWh
+Average current:    16.473 mA
+Average power:      25.935 mW
+
+RUNNING charge:     3.5649 mAh
+RUNNING energy:     5.6082 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #14
+Interval length: 60 seconds
+
+Ending voltage:     1.5869 V
+Current right now:  15.916 mA
+Power right now:    25.254 mW
+Temperature:        22.91 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.460 mA
+Average power:      25.904 mW
+
+RUNNING charge:     3.8393 mAh
+RUNNING energy:     6.0399 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #15
+Interval length: 60 seconds
+
+Ending voltage:     1.5854 V
+Current right now:  15.916 mA
+Power right now:    25.229 mW
+Temperature:        22.90 C
+
+Interval charge:    0.2742 mAh
+Interval energy:    0.4313 mWh
+Average current:    16.453 mA
+Average power:      25.876 mW
+
+RUNNING charge:     4.1135 mAh
+RUNNING energy:     6.4712 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #16
+Interval length: 60 seconds
+
+Ending voltage:     1.5873 V
+Current right now:  15.948 mA
+Power right now:    25.306 mW
+Temperature:        22.90 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4314 mWh
+Average current:    16.457 mA
+Average power:      25.883 mW
+
+RUNNING charge:     4.3878 mAh
+RUNNING energy:     6.9026 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #17
+Interval length: 60 seconds
+
+Ending voltage:     1.5879 V
+Current right now:  15.964 mA
+Power right now:    25.344 mW
+Temperature:        22.90 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4320 mWh
+Average current:    16.467 mA
+Average power:      25.921 mW
+
+RUNNING charge:     4.6622 mAh
+RUNNING energy:     7.3346 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #18
+Interval length: 60 seconds
+
+Ending voltage:     1.5891 V
+Current right now:  15.968 mA
+Power right now:    25.370 mW
+Temperature:        22.90 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4327 mWh
+Average current:    16.483 mA
+Average power:      25.962 mW
+
+RUNNING charge:     4.9369 mAh
+RUNNING energy:     7.7673 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #19
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.976 mA
+Power right now:    25.382 mW
+Temperature:        22.87 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4330 mWh
+Average current:    16.486 mA
+Average power:      25.979 mW
+
+RUNNING charge:     5.2117 mAh
+RUNNING energy:     8.2002 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #20
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.984 mA
+Power right now:    25.395 mW
+Temperature:        22.86 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4332 mWh
+Average current:    16.490 mA
+Average power:      25.993 mW
+
+RUNNING charge:     5.4865 mAh
+RUNNING energy:     8.6335 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #21
+Interval length: 60 seconds
+
+Ending voltage:     1.5893 V
+Current right now:  15.956 mA
+Power right now:    25.357 mW
+Temperature:        22.86 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4332 mWh
+Average current:    16.493 mA
+Average power:      25.993 mW
+
+RUNNING charge:     5.7614 mAh
+RUNNING energy:     9.0667 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #22
+Interval length: 60 seconds
+
+Ending voltage:     1.5885 V
+Current right now:  15.956 mA
+Power right now:    25.344 mW
+Temperature:        22.86 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4332 mWh
+Average current:    16.490 mA
+Average power:      25.989 mW
+
+RUNNING charge:     6.0363 mAh
+RUNNING energy:     9.4998 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #23
+Interval length: 60 seconds
+
+Ending voltage:     1.5875 V
+Current right now:  15.944 mA
+Power right now:    25.306 mW
+Temperature:        22.82 C
+
+Interval charge:    0.2746 mAh
+Interval energy:    0.4324 mWh
+Average current:    16.479 mA
+Average power:      25.945 mW
+
+RUNNING charge:     6.3109 mAh
+RUNNING energy:     9.9322 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #24
+Interval length: 60 seconds
+
+Ending voltage:     1.5865 V
+Current right now:  15.944 mA
+Power right now:    25.293 mW
+Temperature:        22.79 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4319 mWh
+Average current:    16.472 mA
+Average power:      25.914 mW
+
+RUNNING charge:     6.5854 mAh
+RUNNING energy:     10.3641 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #25
+Interval length: 60 seconds
+
+Ending voltage:     1.5871 V
+Current right now:  15.968 mA
+Power right now:    25.344 mW
+Temperature:        22.77 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4319 mWh
+Average current:    16.464 mA
+Average power:      25.914 mW
+
+RUNNING charge:     6.8598 mAh
+RUNNING energy:     10.7960 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #26
+Interval length: 60 seconds
+
+Ending voltage:     1.5865 V
+Current right now:  15.936 mA
+Power right now:    25.280 mW
+Temperature:        22.71 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4316 mWh
+Average current:    16.458 mA
+Average power:      25.894 mW
+
+RUNNING charge:     7.1341 mAh
+RUNNING energy:     11.2276 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #27
+Interval length: 60 seconds
+
+Ending voltage:     1.5863 V
+Current right now:  15.944 mA
+Power right now:    25.293 mW
+Temperature:        22.70 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.464 mA
+Average power:      25.904 mW
+
+RUNNING charge:     7.4085 mAh
+RUNNING energy:     11.6593 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #28
+Interval length: 60 seconds
+
+Ending voltage:     1.5875 V
+Current right now:  15.932 mA
+Power right now:    25.280 mW
+Temperature:        22.68 C
+
+Interval charge:    0.2746 mAh
+Interval energy:    0.4321 mWh
+Average current:    16.476 mA
+Average power:      25.928 mW
+
+RUNNING charge:     7.6831 mAh
+RUNNING energy:     12.0914 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #29
+Interval length: 60 seconds
+
+Ending voltage:     1.5871 V
+Current right now:  15.952 mA
+Power right now:    25.306 mW
+Temperature:        22.66 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.456 mA
+Average power:      25.900 mW
+
+RUNNING charge:     7.9574 mAh
+RUNNING energy:     12.5231 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #30
+Interval length: 60 seconds
+
+Ending voltage:     1.5867 V
+Current right now:  15.968 mA
+Power right now:    25.331 mW
+Temperature:        22.66 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4319 mWh
+Average current:    16.468 mA
+Average power:      25.914 mW
+
+RUNNING charge:     8.2319 mAh
+RUNNING energy:     12.9550 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #31
+Interval length: 60 seconds
+
+Ending voltage:     1.5867 V
+Current right now:  15.948 mA
+Power right now:    25.306 mW
+Temperature:        22.68 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.464 mA
+Average power:      25.900 mW
+
+RUNNING charge:     8.5063 mAh
+RUNNING energy:     13.3867 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #32
+Interval length: 60 seconds
+
+Ending voltage:     1.5857 V
+Current right now:  15.924 mA
+Power right now:    25.242 mW
+Temperature:        22.68 C
+
+Interval charge:    0.2742 mAh
+Interval energy:    0.4313 mWh
+Average current:    16.451 mA
+Average power:      25.876 mW
+
+RUNNING charge:     8.7805 mAh
+RUNNING energy:     13.8180 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #33
+Interval length: 60 seconds
+
+Ending voltage:     1.5867 V
+Current right now:  15.964 mA
+Power right now:    25.331 mW
+Temperature:        22.68 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4316 mWh
+Average current:    16.462 mA
+Average power:      25.894 mW
+
+RUNNING charge:     9.0548 mAh
+RUNNING energy:     14.2495 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #34
+Interval length: 60 seconds
+
+Ending voltage:     1.5865 V
+Current right now:  15.920 mA
+Power right now:    25.254 mW
+Temperature:        22.69 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4314 mWh
+Average current:    16.456 mA
+Average power:      25.887 mW
+
+RUNNING charge:     9.3291 mAh
+RUNNING energy:     14.6810 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #35
+Interval length: 60 seconds
+
+Ending voltage:     1.5871 V
+Current right now:  15.916 mA
+Power right now:    25.254 mW
+Temperature:        22.68 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4317 mWh
+Average current:    16.466 mA
+Average power:      25.900 mW
+
+RUNNING charge:     9.6035 mAh
+RUNNING energy:     15.1126 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #36
+Interval length: 60 seconds
+
+Ending voltage:     1.5875 V
+Current right now:  15.952 mA
+Power right now:    25.318 mW
+Temperature:        22.66 C
+
+Interval charge:    0.2743 mAh
+Interval energy:    0.4316 mWh
+Average current:    16.455 mA
+Average power:      25.897 mW
+
+RUNNING charge:     9.8778 mAh
+RUNNING energy:     15.5443 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #37
+Interval length: 60 seconds
+
+Ending voltage:     1.5877 V
+Current right now:  15.936 mA
+Power right now:    25.293 mW
+Temperature:        22.62 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4319 mWh
+Average current:    16.462 mA
+Average power:      25.914 mW
+
+RUNNING charge:     10.1522 mAh
+RUNNING energy:     15.9762 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #38
+Interval length: 60 seconds
+
+Ending voltage:     1.5877 V
+Current right now:  15.908 mA
+Power right now:    25.254 mW
+Temperature:        22.62 C
+
+Interval charge:    0.2746 mAh
+Interval energy:    0.4322 mWh
+Average current:    16.474 mA
+Average power:      25.935 mW
+
+RUNNING charge:     10.4267 mAh
+RUNNING energy:     16.4084 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #39
+Interval length: 60 seconds
+
+Ending voltage:     1.5877 V
+Current right now:  15.940 mA
+Power right now:    25.306 mW
+Temperature:        22.64 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4321 mWh
+Average current:    16.471 mA
+Average power:      25.928 mW
+
+RUNNING charge:     10.7012 mAh
+RUNNING energy:     16.8405 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #40
+Interval length: 60 seconds
+
+Ending voltage:     1.5883 V
+Current right now:  15.956 mA
+Power right now:    25.331 mW
+Temperature:        22.63 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4320 mWh
+Average current:    16.468 mA
+Average power:      25.921 mW
+
+RUNNING charge:     10.9757 mAh
+RUNNING energy:     17.2725 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #41
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.964 mA
+Power right now:    25.370 mW
+Temperature:        22.63 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4328 mWh
+Average current:    16.483 mA
+Average power:      25.965 mW
+
+RUNNING charge:     11.2504 mAh
+RUNNING energy:     17.7053 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #42
+Interval length: 60 seconds
+
+Ending voltage:     1.5885 V
+Current right now:  15.944 mA
+Power right now:    25.318 mW
+Temperature:        22.62 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4328 mWh
+Average current:    16.482 mA
+Average power:      25.965 mW
+
+RUNNING charge:     11.5251 mAh
+RUNNING energy:     18.1381 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #43
+Interval length: 60 seconds
+
+Ending voltage:     1.5893 V
+Current right now:  15.952 mA
+Power right now:    25.344 mW
+Temperature:        22.61 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4329 mWh
+Average current:    16.480 mA
+Average power:      25.972 mW
+
+RUNNING charge:     11.7998 mAh
+RUNNING energy:     18.5709 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #44
+Interval length: 60 seconds
+
+Ending voltage:     1.5891 V
+Current right now:  15.960 mA
+Power right now:    25.357 mW
+Temperature:        22.59 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4331 mWh
+Average current:    16.491 mA
+Average power:      25.986 mW
+
+RUNNING charge:     12.0746 mAh
+RUNNING energy:     19.0040 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #45
+Interval length: 60 seconds
+
+Ending voltage:     1.5889 V
+Current right now:  15.960 mA
+Power right now:    25.344 mW
+Temperature:        22.56 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4329 mWh
+Average current:    16.485 mA
+Average power:      25.975 mW
+
+RUNNING charge:     12.3494 mAh
+RUNNING energy:     19.4369 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #46
+Interval length: 60 seconds
+
+Ending voltage:     1.5893 V
+Current right now:  15.988 mA
+Power right now:    25.408 mW
+Temperature:        22.57 C
+
+Interval charge:    0.2744 mAh
+Interval energy:    0.4324 mWh
+Average current:    16.466 mA
+Average power:      25.945 mW
+
+RUNNING charge:     12.6238 mAh
+RUNNING energy:     19.8694 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #47
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.976 mA
+Power right now:    25.382 mW
+Temperature:        22.60 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4330 mWh
+Average current:    16.486 mA
+Average power:      25.982 mW
+
+RUNNING charge:     12.8985 mAh
+RUNNING energy:     20.3024 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #48
+Interval length: 60 seconds
+
+Ending voltage:     1.5895 V
+Current right now:  15.964 mA
+Power right now:    25.370 mW
+Temperature:        22.59 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4329 mWh
+Average current:    16.482 mA
+Average power:      25.975 mW
+
+RUNNING charge:     13.1732 mAh
+RUNNING energy:     20.7353 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #49
+Interval length: 60 seconds
+
+Ending voltage:     1.5896 V
+Current right now:  15.996 mA
+Power right now:    25.421 mW
+Temperature:        22.61 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4333 mWh
+Average current:    16.496 mA
+Average power:      25.999 mW
+
+RUNNING charge:     13.4482 mAh
+RUNNING energy:     21.1686 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #50
+Interval length: 60 seconds
+
+Ending voltage:     1.5883 V
+Current right now:  15.948 mA
+Power right now:    25.318 mW
+Temperature:        22.62 C
+
+Interval charge:    0.2746 mAh
+Interval energy:    0.4327 mWh
+Average current:    16.474 mA
+Average power:      25.962 mW
+
+RUNNING charge:     13.7228 mAh
+RUNNING energy:     21.6013 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #51
+Interval length: 60 seconds
+
+Ending voltage:     1.5896 V
+Current right now:  15.932 mA
+Power right now:    25.318 mW
+Temperature:        22.62 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4325 mWh
+Average current:    16.472 mA
+Average power:      25.948 mW
+
+RUNNING charge:     13.9973 mAh
+RUNNING energy:     22.0338 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #52
+Interval length: 60 seconds
+
+Ending voltage:     1.5889 V
+Current right now:  15.980 mA
+Power right now:    25.382 mW
+Temperature:        22.60 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4324 mWh
+Average current:    16.468 mA
+Average power:      25.945 mW
+
+RUNNING charge:     14.2718 mAh
+RUNNING energy:     22.4662 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #53
+Interval length: 60 seconds
+
+Ending voltage:     1.5904 V
+Current right now:  15.972 mA
+Power right now:    25.395 mW
+Temperature:        22.55 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4336 mWh
+Average current:    16.501 mA
+Average power:      26.016 mW
+
+RUNNING charge:     14.5468 mAh
+RUNNING energy:     22.8998 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #54
+Interval length: 60 seconds
+
+Ending voltage:     1.5906 V
+Current right now:  15.972 mA
+Power right now:    25.395 mW
+Temperature:        22.55 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4336 mWh
+Average current:    16.492 mA
+Average power:      26.013 mW
+
+RUNNING charge:     14.8216 mAh
+RUNNING energy:     23.3334 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #55
+Interval length: 60 seconds
+
+Ending voltage:     1.5912 V
+Current right now:  15.956 mA
+Power right now:    25.382 mW
+Temperature:        22.57 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4339 mWh
+Average current:    16.506 mA
+Average power:      26.037 mW
+
+RUNNING charge:     15.0967 mAh
+RUNNING energy:     23.7673 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #56
+Interval length: 60 seconds
+
+Ending voltage:     1.5906 V
+Current right now:  15.992 mA
+Power right now:    25.434 mW
+Temperature:        22.54 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4341 mWh
+Average current:    16.515 mA
+Average power:      26.044 mW
+
+RUNNING charge:     15.3720 mAh
+RUNNING energy:     24.2014 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #57
+Interval length: 60 seconds
+
+Ending voltage:     1.5908 V
+Current right now:  16.012 mA
+Power right now:    25.459 mW
+Temperature:        22.55 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4338 mWh
+Average current:    16.500 mA
+Average power:      26.027 mW
+
+RUNNING charge:     15.6470 mAh
+RUNNING energy:     24.6352 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #58
+Interval length: 60 seconds
+
+Ending voltage:     1.5914 V
+Current right now:  15.984 mA
+Power right now:    25.434 mW
+Temperature:        22.53 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4338 mWh
+Average current:    16.502 mA
+Average power:      26.027 mW
+
+RUNNING charge:     15.9220 mAh
+RUNNING energy:     25.0689 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #59
+Interval length: 60 seconds
+
+Ending voltage:     1.5906 V
+Current right now:  15.976 mA
+Power right now:    25.408 mW
+Temperature:        22.49 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4335 mWh
+Average current:    16.494 mA
+Average power:      26.010 mW
+
+RUNNING charge:     16.1969 mAh
+RUNNING energy:     25.5024 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #60
+Interval length: 60 seconds
+
+Ending voltage:     1.5914 V
+Current right now:  16.016 mA
+Power right now:    25.485 mW
+Temperature:        22.53 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4337 mWh
+Average current:    16.495 mA
+Average power:      26.020 mW
+
+RUNNING charge:     16.4718 mAh
+RUNNING energy:     25.9361 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #61
+Interval length: 60 seconds
+
+Ending voltage:     1.5916 V
+Current right now:  15.980 mA
+Power right now:    25.421 mW
+Temperature:        22.51 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4341 mWh
+Average current:    16.503 mA
+Average power:      26.044 mW
+
+RUNNING charge:     16.7469 mAh
+RUNNING energy:     26.3702 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #62
+Interval length: 60 seconds
+
+Ending voltage:     1.5916 V
+Current right now:  16.000 mA
+Power right now:    25.459 mW
+Temperature:        22.52 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4342 mWh
+Average current:    16.509 mA
+Average power:      26.054 mW
+
+RUNNING charge:     17.0220 mAh
+RUNNING energy:     26.8044 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #63
+Interval length: 60 seconds
+
+Ending voltage:     1.5896 V
+Current right now:  15.956 mA
+Power right now:    25.357 mW
+Temperature:        22.51 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4336 mWh
+Average current:    16.498 mA
+Average power:      26.016 mW
+
+RUNNING charge:     17.2970 mAh
+RUNNING energy:     27.2380 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #64
+Interval length: 60 seconds
+
+Ending voltage:     1.5912 V
+Current right now:  16.016 mA
+Power right now:    25.485 mW
+Temperature:        22.48 C
+
+Interval charge:    0.2752 mAh
+Interval energy:    0.4341 mWh
+Average current:    16.511 mA
+Average power:      26.047 mW
+
+RUNNING charge:     17.5722 mAh
+RUNNING energy:     27.6721 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #65
+Interval length: 60 seconds
+
+Ending voltage:     1.5908 V
+Current right now:  15.996 mA
+Power right now:    25.434 mW
+Temperature:        22.46 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4337 mWh
+Average current:    16.494 mA
+Average power:      26.020 mW
+
+RUNNING charge:     17.8471 mAh
+RUNNING energy:     28.1058 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #66
+Interval length: 60 seconds
+
+Ending voltage:     1.5904 V
+Current right now:  15.992 mA
+Power right now:    25.421 mW
+Temperature:        22.45 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4338 mWh
+Average current:    16.506 mA
+Average power:      26.030 mW
+
+RUNNING charge:     18.1222 mAh
+RUNNING energy:     28.5396 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #67
+Interval length: 60 seconds
+
+Ending voltage:     1.5904 V
+Current right now:  15.996 mA
+Power right now:    25.434 mW
+Temperature:        22.46 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4333 mWh
+Average current:    16.484 mA
+Average power:      25.996 mW
+
+RUNNING charge:     18.3969 mAh
+RUNNING energy:     28.9729 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #68
+Interval length: 60 seconds
+
+Ending voltage:     1.5900 V
+Current right now:  15.992 mA
+Power right now:    25.421 mW
+Temperature:        22.47 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4333 mWh
+Average current:    16.486 mA
+Average power:      25.999 mW
+
+RUNNING charge:     18.6717 mAh
+RUNNING energy:     29.4062 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #69
+Interval length: 60 seconds
+
+Ending voltage:     1.5900 V
+Current right now:  15.956 mA
+Power right now:    25.370 mW
+Temperature:        22.43 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4338 mWh
+Average current:    16.506 mA
+Average power:      26.027 mW
+
+RUNNING charge:     18.9468 mAh
+RUNNING energy:     29.8400 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #70
+Interval length: 60 seconds
+
+Ending voltage:     1.5906 V
+Current right now:  16.004 mA
+Power right now:    25.446 mW
+Temperature:        22.41 C
+
+Interval charge:    0.2749 mAh
+Interval energy:    0.4334 mWh
+Average current:    16.491 mA
+Average power:      26.006 mW
+
+RUNNING charge:     19.2216 mAh
+RUNNING energy:     30.2734 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #71
+Interval length: 60 seconds
+
+Ending voltage:     1.5889 V
+Current right now:  15.968 mA
+Power right now:    25.357 mW
+Temperature:        22.40 C
+
+Interval charge:    0.2748 mAh
+Interval energy:    0.4331 mWh
+Average current:    16.486 mA
+Average power:      25.986 mW
+
+RUNNING charge:     19.4964 mAh
+RUNNING energy:     30.7065 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #72
+Interval length: 60 seconds
+
+Ending voltage:     1.5889 V
+Current right now:  15.968 mA
+Power right now:    25.370 mW
+Temperature:        22.37 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4326 mWh
+Average current:    16.481 mA
+Average power:      25.958 mW
+
+RUNNING charge:     19.7711 mAh
+RUNNING energy:     31.1392 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #73
+Interval length: 60 seconds
+
+Ending voltage:     1.5893 V
+Current right now:  15.980 mA
+Power right now:    25.395 mW
+Temperature:        22.37 C
+
+Interval charge:    0.2745 mAh
+Interval energy:    0.4324 mWh
+Average current:    16.471 mA
+Average power:      25.945 mW
+
+RUNNING charge:     20.0456 mAh
+RUNNING energy:     31.5716 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #74
+Interval length: 60 seconds
+
+Ending voltage:     1.5904 V
+Current right now:  16.000 mA
+Power right now:    25.434 mW
+Temperature:        22.30 C
+
+Interval charge:    0.2747 mAh
+Interval energy:    0.4330 mWh
+Average current:    16.484 mA
+Average power:      25.979 mW
+
+RUNNING charge:     20.3203 mAh
+RUNNING energy:     32.0046 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #75
+Interval length: 60 seconds
+
+Ending voltage:     1.5912 V
+Current right now:  15.988 mA
+Power right now:    25.434 mW
+Temperature:        22.28 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4337 mWh
+Average current:    16.498 mA
+Average power:      26.023 mW
+
+RUNNING charge:     20.5953 mAh
+RUNNING energy:     32.4383 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #76
+Interval length: 60 seconds
+
+Ending voltage:     1.5922 V
+Current right now:  16.008 mA
+Power right now:    25.485 mW
+Temperature:        22.27 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4344 mWh
+Average current:    16.515 mA
+Average power:      26.064 mW
+
+RUNNING charge:     20.8705 mAh
+RUNNING energy:     32.8727 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #77
+Interval length: 60 seconds
+
+Ending voltage:     1.5930 V
+Current right now:  16.004 mA
+Power right now:    25.485 mW
+Temperature:        22.28 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4350 mWh
+Average current:    16.530 mA
+Average power:      26.102 mW
+
+RUNNING charge:     21.1460 mAh
+RUNNING energy:     33.3077 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #78
+Interval length: 60 seconds
+
+Ending voltage:     1.5936 V
+Current right now:  16.000 mA
+Power right now:    25.485 mW
+Temperature:        22.27 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4345 mWh
+Average current:    16.505 mA
+Average power:      26.071 mW
+
+RUNNING charge:     21.4211 mAh
+RUNNING energy:     33.7422 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #79
+Interval length: 60 seconds
+
+Ending voltage:     1.5930 V
+Current right now:  16.024 mA
+Power right now:    25.523 mW
+Temperature:        22.27 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4351 mWh
+Average current:    16.527 mA
+Average power:      26.109 mW
+
+RUNNING charge:     21.6966 mAh
+RUNNING energy:     34.1774 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #80
+Interval length: 60 seconds
+
+Ending voltage:     1.5922 V
+Current right now:  15.996 mA
+Power right now:    25.459 mW
+Temperature:        22.28 C
+
+Interval charge:    0.2752 mAh
+Interval energy:    0.4345 mWh
+Average current:    16.512 mA
+Average power:      26.071 mW
+
+RUNNING charge:     21.9718 mAh
+RUNNING energy:     34.6119 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #81
+Interval length: 60 seconds
+
+Ending voltage:     1.5924 V
+Current right now:  15.984 mA
+Power right now:    25.446 mW
+Temperature:        22.27 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4345 mWh
+Average current:    16.516 mA
+Average power:      26.071 mW
+
+RUNNING charge:     22.2470 mAh
+RUNNING energy:     35.0464 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #82
+Interval length: 60 seconds
+
+Ending voltage:     1.5920 V
+Current right now:  15.960 mA
+Power right now:    25.395 mW
+Temperature:        22.26 C
+
+Interval charge:    0.2754 mAh
+Interval energy:    0.4349 mWh
+Average current:    16.526 mA
+Average power:      26.092 mW
+
+RUNNING charge:     22.5225 mAh
+RUNNING energy:     35.4813 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #83
+Interval length: 60 seconds
+
+Ending voltage:     1.5912 V
+Current right now:  15.992 mA
+Power right now:    25.446 mW
+Temperature:        22.25 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4340 mWh
+Average current:    16.500 mA
+Average power:      26.040 mW
+
+RUNNING charge:     22.7975 mAh
+RUNNING energy:     35.9153 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #84
+Interval length: 60 seconds
+
+Ending voltage:     1.5922 V
+Current right now:  15.988 mA
+Power right now:    25.446 mW
+Temperature:        22.24 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4343 mWh
+Average current:    16.508 mA
+Average power:      26.061 mW
+
+RUNNING charge:     23.0726 mAh
+RUNNING energy:     36.3496 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #85
+Interval length: 60 seconds
+
+Ending voltage:     1.5906 V
+Current right now:  15.988 mA
+Power right now:    25.434 mW
+Temperature:        22.26 C
+
+Interval charge:    0.2752 mAh
+Interval energy:    0.4342 mWh
+Average current:    16.510 mA
+Average power:      26.051 mW
+
+RUNNING charge:     23.3478 mAh
+RUNNING energy:     36.7838 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #86
+Interval length: 60 seconds
+
+Ending voltage:     1.5904 V
+Current right now:  15.992 mA
+Power right now:    25.421 mW
+Temperature:        22.25 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4337 mWh
+Average current:    16.502 mA
+Average power:      26.023 mW
+
+RUNNING charge:     23.6228 mAh
+RUNNING energy:     37.2175 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #87
+Interval length: 60 seconds
+
+Ending voltage:     1.5920 V
+Current right now:  16.000 mA
+Power right now:    25.459 mW
+Temperature:        22.23 C
+
+Interval charge:    0.2750 mAh
+Interval energy:    0.4337 mWh
+Average current:    16.500 mA
+Average power:      26.023 mW
+
+RUNNING charge:     23.8978 mAh
+RUNNING energy:     37.6512 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #88
+Interval length: 60 seconds
+
+Ending voltage:     1.5924 V
+Current right now:  15.996 mA
+Power right now:    25.472 mW
+Temperature:        22.21 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4346 mWh
+Average current:    16.516 mA
+Average power:      26.074 mW
+
+RUNNING charge:     24.1731 mAh
+RUNNING energy:     38.0858 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #89
+Interval length: 60 seconds
+
+Ending voltage:     1.5920 V
+Current right now:  15.996 mA
+Power right now:    25.459 mW
+Temperature:        22.18 C
+
+Interval charge:    0.2752 mAh
+Interval energy:    0.4346 mWh
+Average current:    16.514 mA
+Average power:      26.074 mW
+
+RUNNING charge:     24.4483 mAh
+RUNNING energy:     38.5204 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #90
+Interval length: 60 seconds
+
+Ending voltage:     1.5920 V
+Current right now:  16.016 mA
+Power right now:    25.498 mW
+Temperature:        22.14 C
+
+Interval charge:    0.2754 mAh
+Interval energy:    0.4348 mWh
+Average current:    16.522 mA
+Average power:      26.088 mW
+
+RUNNING charge:     24.7237 mAh
+RUNNING energy:     38.9552 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #91
+Interval length: 60 seconds
+
+Ending voltage:     1.5922 V
+Current right now:  16.004 mA
+Power right now:    25.472 mW
+Temperature:        22.12 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4345 mWh
+Average current:    16.517 mA
+Average power:      26.068 mW
+
+RUNNING charge:     24.9989 mAh
+RUNNING energy:     39.3896 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #92
+Interval length: 60 seconds
+
+Ending voltage:     1.5934 V
+Current right now:  16.024 mA
+Power right now:    25.523 mW
+Temperature:        22.12 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4348 mWh
+Average current:    16.519 mA
+Average power:      26.088 mW
+
+RUNNING charge:     25.2743 mAh
+RUNNING energy:     39.8244 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #93
+Interval length: 60 seconds
+
+Ending voltage:     1.5943 V
+Current right now:  16.048 mA
+Power right now:    25.574 mW
+Temperature:        22.13 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4353 mWh
+Average current:    16.530 mA
+Average power:      26.119 mW
+
+RUNNING charge:     25.5498 mAh
+RUNNING energy:     40.2598 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #94
+Interval length: 60 seconds
+
+Ending voltage:     1.5951 V
+Current right now:  16.036 mA
+Power right now:    25.574 mW
+Temperature:        22.13 C
+
+Interval charge:    0.2758 mAh
+Interval energy:    0.4361 mWh
+Average current:    16.548 mA
+Average power:      26.167 mW
+
+RUNNING charge:     25.8256 mAh
+RUNNING energy:     40.6959 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #95
+Interval length: 60 seconds
+
+Ending voltage:     1.5949 V
+Current right now:  16.060 mA
+Power right now:    25.613 mW
+Temperature:        22.12 C
+
+Interval charge:    0.2754 mAh
+Interval energy:    0.4355 mWh
+Average current:    16.525 mA
+Average power:      26.129 mW
+
+RUNNING charge:     26.1010 mAh
+RUNNING energy:     41.1313 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #96
+Interval length: 60 seconds
+
+Ending voltage:     1.5947 V
+Current right now:  16.044 mA
+Power right now:    25.574 mW
+Temperature:        22.11 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4358 mWh
+Average current:    16.537 mA
+Average power:      26.146 mW
+
+RUNNING charge:     26.3766 mAh
+RUNNING energy:     41.5671 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #97
+Interval length: 60 seconds
+
+Ending voltage:     1.5939 V
+Current right now:  16.000 mA
+Power right now:    25.498 mW
+Temperature:        22.08 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4358 mWh
+Average current:    16.543 mA
+Average power:      26.146 mW
+
+RUNNING charge:     26.6523 mAh
+RUNNING energy:     42.0029 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #98
+Interval length: 60 seconds
+
+Ending voltage:     1.5943 V
+Current right now:  16.052 mA
+Power right now:    25.587 mW
+Temperature:        22.05 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4358 mWh
+Average current:    16.544 mA
+Average power:      26.146 mW
+
+RUNNING charge:     26.9280 mAh
+RUNNING energy:     42.4387 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #99
+Interval length: 60 seconds
+
+Ending voltage:     1.5963 V
+Current right now:  16.040 mA
+Power right now:    25.600 mW
+Temperature:        22.04 C
+
+Interval charge:    0.2760 mAh
+Interval energy:    0.4367 mWh
+Average current:    16.562 mA
+Average power:      26.204 mW
+
+RUNNING charge:     27.2041 mAh
+RUNNING energy:     42.8754 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #100
+Interval length: 60 seconds
+
+Ending voltage:     1.5967 V
+Current right now:  16.040 mA
+Power right now:    25.600 mW
+Temperature:        22.02 C
+
+Interval charge:    0.2761 mAh
+Interval energy:    0.4369 mWh
+Average current:    16.563 mA
+Average power:      26.214 mW
+
+RUNNING charge:     27.4801 mAh
+RUNNING energy:     43.3123 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #101
+Interval length: 60 seconds
+
+Ending voltage:     1.5967 V
+Current right now:  16.040 mA
+Power right now:    25.613 mW
+Temperature:        22.00 C
+
+Interval charge:    0.2762 mAh
+Interval energy:    0.4371 mWh
+Average current:    16.570 mA
+Average power:      26.228 mW
+
+RUNNING charge:     27.7563 mAh
+RUNNING energy:     43.7494 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #102
+Interval length: 60 seconds
+
+Ending voltage:     1.5953 V
+Current right now:  16.028 mA
+Power right now:    25.562 mW
+Temperature:        22.01 C
+
+Interval charge:    0.2761 mAh
+Interval energy:    0.4368 mWh
+Average current:    16.564 mA
+Average power:      26.211 mW
+
+RUNNING charge:     28.0324 mAh
+RUNNING energy:     44.1863 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #103
+Interval length: 60 seconds
+
+Ending voltage:     1.5951 V
+Current right now:  16.036 mA
+Power right now:    25.574 mW
+Temperature:        22.00 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4361 mWh
+Average current:    16.544 mA
+Average power:      26.167 mW
+
+RUNNING charge:     28.3081 mAh
+RUNNING energy:     44.6224 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #104
+Interval length: 60 seconds
+
+Ending voltage:     1.5949 V
+Current right now:  16.004 mA
+Power right now:    25.523 mW
+Temperature:        22.00 C
+
+Interval charge:    0.2758 mAh
+Interval energy:    0.4362 mWh
+Average current:    16.549 mA
+Average power:      26.170 mW
+
+RUNNING charge:     28.5839 mAh
+RUNNING energy:     45.0586 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #105
+Interval length: 60 seconds
+
+Ending voltage:     1.5939 V
+Current right now:  16.032 mA
+Power right now:    25.549 mW
+Temperature:        22.01 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4356 mWh
+Average current:    16.538 mA
+Average power:      26.136 mW
+
+RUNNING charge:     28.8595 mAh
+RUNNING energy:     45.4942 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #106
+Interval length: 60 seconds
+
+Ending voltage:     1.5930 V
+Current right now:  15.988 mA
+Power right now:    25.459 mW
+Temperature:        22.02 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4354 mWh
+Average current:    16.534 mA
+Average power:      26.122 mW
+
+RUNNING charge:     29.1351 mAh
+RUNNING energy:     45.9295 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #107
+Interval length: 60 seconds
+
+Ending voltage:     1.5930 V
+Current right now:  16.024 mA
+Power right now:    25.523 mW
+Temperature:        22.00 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4351 mWh
+Average current:    16.528 mA
+Average power:      26.109 mW
+
+RUNNING charge:     29.4106 mAh
+RUNNING energy:     46.3647 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #108
+Interval length: 60 seconds
+
+Ending voltage:     1.5928 V
+Current right now:  15.980 mA
+Power right now:    25.446 mW
+Temperature:        22.01 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4348 mWh
+Average current:    16.516 mA
+Average power:      26.088 mW
+
+RUNNING charge:     29.6858 mAh
+RUNNING energy:     46.7995 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #109
+Interval length: 60 seconds
+
+Ending voltage:     1.5926 V
+Current right now:  15.976 mA
+Power right now:    25.434 mW
+Temperature:        22.00 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4343 mWh
+Average current:    16.503 mA
+Average power:      26.061 mW
+
+RUNNING charge:     29.9609 mAh
+RUNNING energy:     47.2338 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #110
+Interval length: 60 seconds
+
+Ending voltage:     1.5926 V
+Current right now:  15.992 mA
+Power right now:    25.459 mW
+Temperature:        22.01 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4347 mWh
+Average current:    16.515 mA
+Average power:      26.081 mW
+
+RUNNING charge:     30.2361 mAh
+RUNNING energy:     47.6685 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #111
+Interval length: 60 seconds
+
+Ending voltage:     1.5938 V
+Current right now:  16.016 mA
+Power right now:    25.523 mW
+Temperature:        21.98 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4355 mWh
+Average current:    16.543 mA
+Average power:      26.132 mW
+
+RUNNING charge:     30.5119 mAh
+RUNNING energy:     48.1040 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #112
+Interval length: 60 seconds
+
+Ending voltage:     1.5936 V
+Current right now:  16.024 mA
+Power right now:    25.523 mW
+Temperature:        21.97 C
+
+Interval charge:    0.2754 mAh
+Interval energy:    0.4353 mWh
+Average current:    16.525 mA
+Average power:      26.115 mW
+
+RUNNING charge:     30.7873 mAh
+RUNNING energy:     48.5393 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #113
+Interval length: 60 seconds
+
+Ending voltage:     1.5945 V
+Current right now:  16.020 mA
+Power right now:    25.536 mW
+Temperature:        21.95 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4354 mWh
+Average current:    16.529 mA
+Average power:      26.126 mW
+
+RUNNING charge:     31.0628 mAh
+RUNNING energy:     48.9747 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #114
+Interval length: 60 seconds
+
+Ending voltage:     1.5938 V
+Current right now:  15.984 mA
+Power right now:    25.472 mW
+Temperature:        21.94 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4354 mWh
+Average current:    16.530 mA
+Average power:      26.126 mW
+
+RUNNING charge:     31.3382 mAh
+RUNNING energy:     49.4102 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #115
+Interval length: 60 seconds
+
+Ending voltage:     1.5934 V
+Current right now:  16.004 mA
+Power right now:    25.498 mW
+Temperature:        21.93 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4355 mWh
+Average current:    16.535 mA
+Average power:      26.129 mW
+
+RUNNING charge:     31.6138 mAh
+RUNNING energy:     49.8456 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #116
+Interval length: 60 seconds
+
+Ending voltage:     1.5945 V
+Current right now:  16.020 mA
+Power right now:    25.536 mW
+Temperature:        21.93 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4356 mWh
+Average current:    16.538 mA
+Average power:      26.136 mW
+
+RUNNING charge:     31.8895 mAh
+RUNNING energy:     50.2812 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #117
+Interval length: 60 seconds
+
+Ending voltage:     1.5941 V
+Current right now:  15.996 mA
+Power right now:    25.498 mW
+Temperature:        21.89 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4356 mWh
+Average current:    16.537 mA
+Average power:      26.136 mW
+
+RUNNING charge:     32.1651 mAh
+RUNNING energy:     50.7168 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #118
+Interval length: 60 seconds
+
+Ending voltage:     1.5941 V
+Current right now:  16.020 mA
+Power right now:    25.536 mW
+Temperature:        21.90 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4358 mWh
+Average current:    16.542 mA
+Average power:      26.146 mW
+
+RUNNING charge:     32.4408 mAh
+RUNNING energy:     51.1526 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #119
+Interval length: 60 seconds
+
+Ending voltage:     1.5932 V
+Current right now:  16.016 mA
+Power right now:    25.510 mW
+Temperature:        21.90 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4350 mWh
+Average current:    16.517 mA
+Average power:      26.098 mW
+
+RUNNING charge:     32.7161 mAh
+RUNNING energy:     51.5876 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #120
+Interval length: 60 seconds
+
+Ending voltage:     1.5939 V
+Current right now:  16.000 mA
+Power right now:    25.498 mW
+Temperature:        21.87 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4354 mWh
+Average current:    16.529 mA
+Average power:      26.122 mW
+
+RUNNING charge:     32.9915 mAh
+RUNNING energy:     52.0230 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #121
+Interval length: 60 seconds
+
+Ending voltage:     1.5939 V
+Current right now:  16.024 mA
+Power right now:    25.536 mW
+Temperature:        21.84 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4353 mWh
+Average current:    16.529 mA
+Average power:      26.119 mW
+
+RUNNING charge:     33.2670 mAh
+RUNNING energy:     52.4583 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #122
+Interval length: 60 seconds
+
+Ending voltage:     1.5928 V
+Current right now:  15.984 mA
+Power right now:    25.459 mW
+Temperature:        21.84 C
+
+Interval charge:    0.2751 mAh
+Interval energy:    0.4345 mWh
+Average current:    16.508 mA
+Average power:      26.071 mW
+
+RUNNING charge:     33.5422 mAh
+RUNNING energy:     52.8928 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #123
+Interval length: 60 seconds
+
+Ending voltage:     1.5939 V
+Current right now:  16.000 mA
+Power right now:    25.498 mW
+Temperature:        21.84 C
+
+Interval charge:    0.2755 mAh
+Interval energy:    0.4354 mWh
+Average current:    16.531 mA
+Average power:      26.122 mW
+
+RUNNING charge:     33.8177 mAh
+RUNNING energy:     53.3282 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #124
+Interval length: 60 seconds
+
+Ending voltage:     1.5934 V
+Current right now:  16.016 mA
+Power right now:    25.510 mW
+Temperature:        21.80 C
+
+Interval charge:    0.2753 mAh
+Interval energy:    0.4351 mWh
+Average current:    16.521 mA
+Average power:      26.105 mW
+
+RUNNING charge:     34.0930 mAh
+RUNNING energy:     53.7632 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #125
+Interval length: 60 seconds
+
+Ending voltage:     1.5947 V
+Current right now:  16.020 mA
+Power right now:    25.549 mW
+Temperature:        21.80 C
+
+Interval charge:    0.2756 mAh
+Interval energy:    0.4355 mWh
+Average current:    16.535 mA
+Average power:      26.132 mW
+
+RUNNING charge:     34.3686 mAh
+RUNNING energy:     54.1988 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #126
+Interval length: 60 seconds
+
+Ending voltage:     1.5951 V
+Current right now:  16.008 mA
+Power right now:    25.536 mW
+Temperature:        21.80 C
+
+Interval charge:    0.2758 mAh
+Interval energy:    0.4362 mWh
+Average current:    16.551 mA
+Average power:      26.170 mW
+
+RUNNING charge:     34.6445 mAh
+RUNNING energy:     54.6350 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
+
+INA228 continuous deep-sleep logger
+===================================
+Wake reason: TIMER
+
+------------------------------------------------------------
+Interval #127
+Interval length: 60 seconds
+
+Ending voltage:     1.5951 V
+Current right now:  16.068 mA
+Power right now:    25.626 mW
+Temperature:        21.80 C
+
+Interval charge:    0.2757 mAh
+Interval energy:    0.4361 mWh
+Average current:    16.542 mA
+Average power:      26.163 mW
+
+RUNNING charge:     34.9201 mAh
+RUNNING energy:     55.0710 mWh
+
+Resetting INA228 accumulators for next interval...
+
+Sleeping for 60 seconds...
+
