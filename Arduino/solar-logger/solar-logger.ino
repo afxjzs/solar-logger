@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include "esp_sleep.h"
 
 // ============================================================================
 // BMW SOLAR LOGGER
@@ -24,8 +25,29 @@
 //   WIFI ON
 //   WIFI OFF
 //   WIFI STATUS
+//   POWER TEST WIFI
+//   POWER TEST SLEEP
+//   POWER TEST SLEEP INA OFF
+//   POWER TEST STATUS
+//   POWER TEST STOP
 //   RESET
 //   RESET YES
+//
+// These are bench power-characterization modes. Only ONE may be armed at a
+// time. None of them touches the experiment ID, interval number, or running
+// charge/energy totals.
+//
+// The two deep-sleep variants differ only in what the INA228 does during the
+// ESP32's sleep phase:
+//
+//   POWER TEST SLEEP           INA228 stays in continuous conversion.
+//                              Hardware CHARGE/ENERGY accumulation continues.
+//
+//   POWER TEST SLEEP INA OFF   INA228 enters its own documented shutdown
+//                              mode first. No conversions, no accumulation.
+//                              Solar measurement is sacrificed during sleep.
+//
+// Neither variant removes INA228 power or touches the XIAO 3V3 rail.
 //
 // RESET YES deliberately starts a NEW experiment.
 // It:
@@ -115,6 +137,74 @@ constexpr uint8_t REG_DEVICE_ID       = 0x3F;
 
 constexpr uint16_t ADC_CONFIG_VALUE = 0xFB6B;
 constexpr uint16_t SHUNT_CAL_VALUE  = 819;
+
+
+// ============================================================================
+// INA228 ADC_CONFIG MODE FIELD
+// ============================================================================
+//
+// Source: TI INA228 datasheet SLYS021A (January 2021, revised May 2022),
+// Table 7-6, "ADC_CONFIG Register Field Descriptions". Address 1h,
+// reset = FB68h.
+//
+//   Bits 15-12  MODE     (reset Fh)
+//   Bits 11-9   VBUSCT   (reset 5h = 1052 us)
+//   Bits 8-6    VSHCT    (reset 5h = 1052 us)
+//   Bits 5-3    VTCT     (reset 5h = 1052 us)
+//   Bits 2-0    AVG      (reset 0h = 1 sample)
+//
+// The MODE enumeration from that table:
+//
+//   0h = Shutdown
+//   1h = Triggered bus voltage, single shot
+//   2h = Triggered shunt voltage, single shot
+//   3h = Triggered shunt voltage and bus voltage, single shot
+//   4h = Triggered temperature, single shot
+//   5h = Triggered temperature and bus voltage, single shot
+//   6h = Triggered temperature and shunt voltage, single shot
+//   7h = Triggered bus voltage, shunt voltage and temperature, single shot
+//   8h = Shutdown
+//   9h = Continuous bus voltage only
+//   Ah = Continuous shunt voltage only
+//   Bh = Continuous shunt and bus voltage
+//   Ch = Continuous temperature only
+//   Dh = Continuous bus voltage and temperature
+//   Eh = Continuous temperature and shunt voltage
+//   Fh = Continuous bus voltage, shunt voltage and temperature
+//
+// NOTE: the datasheet documents TWO shutdown encodings, 0h and 8h. Our
+// shutdown verification accepts either, because the test that matters is
+// "does the device report a documented shutdown mode", not "does it echo the
+// exact bit pattern we happened to choose".
+//
+// Decoding our own ADC_CONFIG_VALUE of 0xFB6B against that table:
+//
+//   MODE   = Fh  continuous bus voltage, shunt voltage and temperature
+//   VBUSCT = 5h  1052 us
+//   VSHCT  = 5h  1052 us
+//   VTCT   = 5h  1052 us
+//   AVG    = 3h  64 samples
+//
+// which is exactly what the KNOWN-GOOD block above claims it is.
+
+constexpr uint16_t INA_MODE_MASK  = 0xF000;
+constexpr uint8_t  INA_MODE_SHIFT = 12;
+
+constexpr uint16_t INA_MODE_SHUTDOWN_ZERO  = 0x0;
+constexpr uint16_t INA_MODE_SHUTDOWN_EIGHT = 0x8;
+constexpr uint16_t INA_MODE_CONTINUOUS_ALL = 0xF;
+
+
+// Datasheet Section 7.4.1 and the Electrical Characteristics table:
+//
+//   IQ    (active)    640 uA typical, 750 uA maximum, VSENSE = 0 V
+//   IQSD  (shutdown)  2.8 uA typical, 5 uA maximum
+//   TPOR  from shutdown mode   60 us device start-up time
+//
+// So the arithmetic prediction for what INA228 shutdown saves is roughly
+// 640 uA. The existing 2-second ADC settle in setup() is four orders of
+// magnitude longer than the 60 us start-up time, so no new settling delay is
+// needed on the wake path.
 
 constexpr double SHUNT_OHMS = 0.01562;
 
@@ -225,7 +315,22 @@ constexpr uint32_t NVS_CHECKPOINT_EVERY_INTERVALS = 1;
 Preferences preferences;
 
 constexpr char NVS_NAMESPACE[] = "solarlog";
-constexpr char NVS_WIFI_POWER_TEST_KEY[] = "wifi_test_armed";
+
+// ESP32 NVS key names are limited to 15 usable characters. "wifi_test_armed"
+// is exactly 15. "sleep_test_armed" would be 16 and would be rejected, so the
+// deep-sleep test flag uses the shorter "sleep_test_arm".
+constexpr char NVS_WIFI_POWER_TEST_KEY[]  = "wifi_test_armed";
+constexpr char NVS_SLEEP_POWER_TEST_KEY[] = "sleep_test_arm";
+
+// Variant selector for the deep-sleep test. It is only meaningful while
+// NVS_SLEEP_POWER_TEST_KEY is true.
+//
+//   false -> POWER TEST SLEEP           INA228 stays in continuous conversion
+//   true  -> POWER TEST SLEEP INA OFF   INA228 enters its own shutdown mode
+//
+// One armed flag plus one variant flag, rather than two independent armed
+// flags, is what makes "both variants armed at once" unrepresentable.
+constexpr char NVS_SLEEP_INA_OFF_KEY[] = "sleep_ina_off";
 
 constexpr uint32_t NVS_SCHEMA_VERSION = 2;
 
@@ -279,6 +384,142 @@ bool wifiPowerTestArmed = false;
 bool wifiPowerTestRunning = false;
 uint8_t wifiPowerTestPhase = 0;
 unsigned long wifiPowerTestPhaseStartedMs = 0;
+
+
+// ============================================================================
+// DEEP-SLEEP POWER TEST
+// ============================================================================
+//
+// PURPOSE
+//
+//   Measure XIAO ESP32-C3 supply current while the ESP32 is in TRUE deep
+//   sleep and the INA228 breakout remains normally powered from XIAO 3V3.
+//
+//   The comparison we want is:
+//
+//     normal awake logger  (already measured at ~28.4 mA)
+//     vs
+//     ESP32 deep sleep + INA228 still powered
+//
+//   In this first test we deliberately do NOT power-gate the INA228. VIN,
+//   GND, SDA, and SCL all stay connected. Isolating INA228 power is a
+//   separate future experiment.
+//
+//
+// PHASE SEQUENCE
+//
+//   Phase A:  awake for 30 seconds, Wi-Fi OFF, normal INA228 behavior
+//   Phase B:  true deep sleep for 30 seconds
+//   wake -> Phase A -> repeat
+//
+//
+// WHY THIS IS NOT A NORMAL STATE MACHINE
+//
+//   ESP32 deep sleep does not resume after esp_deep_sleep_start(). The chip
+//   reboots and setup() runs again from the top. There is therefore no
+//   "phase B code" that runs during sleep, and no code path that returns
+//   from sleep into loop().
+//
+//   Every wake is a fresh boot. The test state machine is consequently
+//   split across the reset boundary:
+//
+//     setup()  decides "am I starting an awake phase, and why?"
+//     loop()   decides "has the awake phase lasted long enough to sleep?"
+//
+constexpr unsigned long SLEEP_POWER_TEST_AWAKE_MS = 30UL * 1000UL;
+constexpr uint64_t SLEEP_POWER_TEST_SLEEP_US = 30ULL * 1000000ULL;
+
+
+// ----------------------------------------------------------------------------
+// WHY THE CYCLE COUNTER LIVES IN RTC MEMORY INSTEAD OF NVS
+// ----------------------------------------------------------------------------
+//
+// NVS is flash. Flash has finite erase endurance. This test sleeps every 30
+// seconds, which is 2,880 write cycles per day. Writing a counter to flash
+// that often would burn endurance for a value that has no long-term meaning.
+//
+// RTC slow memory has exactly the lifetime we want:
+//
+//   retained  across deep sleep  (which is the whole point)
+//   lost      on power loss      (which ends the bench run anyway)
+//
+// So the split is deliberate:
+//
+//   NVS  ->  "is the deep-sleep test armed?"    (must survive power loss)
+//   RTC  ->  "which cycle are we on?"           (only meaningful within one
+//                                                continuous battery run)
+//
+// RTC memory contents are UNDEFINED after a power-on reset, so a magic value
+// guards it. Without the guard we would read whatever bits happened to be in
+// RAM and report a fabricated cycle number.
+// ----------------------------------------------------------------------------
+
+constexpr uint32_t SLEEP_POWER_TEST_RTC_MAGIC = 0x5A1EEB01;
+
+RTC_DATA_ATTR uint32_t rtcSleepTestMagic = 0;
+RTC_DATA_ATTR uint32_t rtcSleepTestCycle = 0;
+
+
+bool sleepPowerTestArmed = false;
+bool sleepPowerTestRunning = false;
+unsigned long sleepPowerTestAwakeStartedMs = 0;
+
+// Which variant of the deep-sleep test is armed. Only meaningful while
+// sleepPowerTestArmed is true.
+bool sleepPowerTestInaOff = false;
+
+// True only between a verified INA228 shutdown and the deep sleep that
+// follows it. Nothing may present INA228 register contents as fresh
+// measurements while this is set, because no conversions are running.
+//
+// In practice deep sleep follows within microseconds, so this exists to make
+// the invariant explicit rather than to depend on control flow being fast.
+bool inaShutdownActive = false;
+
+// Set when a power test ends but the INA228 accumulators could not be cleared.
+// Accounting must stay suspended in that case: the accumulators hold charge
+// from an unaccounted window of unknown length, and folding it into the next
+// interval would produce a wrong average current and average power that look
+// exactly like right ones.
+//
+// This is ordinary RAM, not RTC memory or NVS, so a reset clears it. That is
+// intended: setup() clears the accumulators on every boot.
+bool intervalAccountingBlocked = false;
+
+
+// Captured once, at the very top of setup(), before anything else can run.
+esp_sleep_wakeup_cause_t bootWakeupCause = ESP_SLEEP_WAKEUP_UNDEFINED;
+
+
+// ============================================================================
+// WHICH POWER TEST IS ARMED
+// ============================================================================
+//
+// The Wi-Fi test and the deep-sleep test are mutually exclusive. They are
+// stored under two separate NVS keys rather than one shared mode key so that
+// the existing, already-deployed wifi_test_armed key keeps working exactly as
+// documented in DECISIONS.md D-006.
+//
+// Two independent flags make one invalid combination representable: both
+// armed at once. That state is never created by this firmware, but if it ever
+// appears we refuse to guess which test the user meant.
+// ============================================================================
+
+enum PowerTestMode : uint8_t {
+  POWER_TEST_NONE = 0,
+  POWER_TEST_WIFI = 1,
+  POWER_TEST_SLEEP = 2,
+  POWER_TEST_CONFLICT = 3,
+};
+
+// armedPowerTestMode() and intervalAccountingSuspended() are defined further
+// down, alongside the other power-test functions.
+//
+// They deliberately are NOT defined here. The Arduino sketch preprocessor
+// inserts its generated function prototypes immediately before the FIRST
+// function definition in the file. A function defined here would push that
+// insertion point above "struct SensorReading", and every generated prototype
+// that mentions SensorReading would then fail to compile.
 
 
 // This is OUR command-building buffer.
@@ -851,6 +1092,215 @@ bool configureIna228() {
 
 
 // ============================================================================
+// INA228 SHUTDOWN MODE
+// ============================================================================
+//
+// Used by the INA-OFF variant of the deep-sleep power test to measure the
+// lowest power reachable WITHOUT physically power-gating the INA228.
+//
+// This never removes INA228 power, never touches the XIAO 3V3 rail, and never
+// disconnects SDA or SCL. It writes the documented shutdown MODE and nothing
+// else: every other ADC_CONFIG bit is preserved.
+//
+// MEASUREMENT SEMANTICS, and they are not subtle:
+//
+//   While the INA228 is shut down, no ADC conversions occur. Voltage,
+//   current, power, and temperature registers stop being updated, and the
+//   hardware CHARGE and ENERGY accumulators stop accumulating. The registers
+//   still read back, but their contents are STALE, not new measurements.
+//
+// This variant deliberately sacrifices solar measurement during the sleep
+// phase. That is the entire point of the experiment.
+// ============================================================================
+
+uint16_t inaModeFromAdcConfig(uint16_t adcConfig) {
+  return (adcConfig & INA_MODE_MASK) >> INA_MODE_SHIFT;
+}
+
+
+bool inaModeIsShutdown(uint16_t mode) {
+  return mode == INA_MODE_SHUTDOWN_ZERO || mode == INA_MODE_SHUTDOWN_EIGHT;
+}
+
+
+void printAdcConfigHex(const char *label, uint16_t value) {
+  Serial.print(label);
+  Serial.print("0x");
+
+  // Print a fixed four-digit hex value. Serial.print(x, HEX) drops leading
+  // zeros, which would make 0x0B6B display as "B6B" and read like a
+  // different register width.
+  for (int8_t nibble = 3; nibble >= 0; nibble--) {
+    uint8_t digit = (value >> (nibble * 4)) & 0x0F;
+    Serial.print(digit, HEX);
+  }
+
+  Serial.println();
+}
+
+
+bool enterInaShutdownMode() {
+  Serial.println("[INA228] Entering shutdown mode...");
+
+  uint16_t before;
+
+  if (!readRegister16(REG_ADC_CONFIG, before)) {
+    Serial.println(
+        "[INA228] ERROR: Could not read ADC_CONFIG before shutdown.");
+    return false;
+  }
+
+  printAdcConfigHex("[INA228] ADC_CONFIG before: ", before);
+
+  // Replace ONLY the MODE field. VBUSCT, VSHCT, VTCT, and AVG are carried
+  // through untouched so that waking into the normal configuration does not
+  // depend on this function having preserved them by accident.
+  uint16_t desired =
+      (before & ~INA_MODE_MASK) |
+      (static_cast<uint16_t>(INA_MODE_SHUTDOWN_ZERO) << INA_MODE_SHIFT);
+
+  if (!writeRegister16(REG_ADC_CONFIG, desired)) {
+    Serial.println(
+        "[INA228] ERROR: Could not write ADC_CONFIG shutdown mode.");
+    return false;
+  }
+
+  uint16_t after;
+
+  if (!readRegister16(REG_ADC_CONFIG, after)) {
+    Serial.println(
+        "[INA228] ERROR: Could not read ADC_CONFIG back after shutdown "
+        "write.");
+    return false;
+  }
+
+  printAdcConfigHex("[INA228] ADC_CONFIG after:  ", after);
+
+  uint16_t mode = inaModeFromAdcConfig(after);
+
+  if (!inaModeIsShutdown(mode)) {
+    Serial.print(
+        "[INA228] ERROR: MODE bits do not indicate shutdown. MODE = 0x");
+    Serial.println(mode, HEX);
+    Serial.println(
+        "[INA228] Datasheet SLYS021A Table 7-6 documents 0h and 8h as "
+        "Shutdown.");
+    return false;
+  }
+
+  // A shutdown write that also changed conversion times or averaging would
+  // mean the next wake restores something other than the known-good
+  // configuration. Catch that here rather than discovering it in the data.
+  if ((after & ~INA_MODE_MASK) != (before & ~INA_MODE_MASK)) {
+    Serial.println(
+        "[INA228] ERROR: Non-MODE ADC_CONFIG bits changed during the "
+        "shutdown write.");
+    printAdcConfigHex("[INA228] Expected non-MODE bits: ",
+                      static_cast<uint16_t>(before & ~INA_MODE_MASK));
+    printAdcConfigHex("[INA228] Actual non-MODE bits:   ",
+                      static_cast<uint16_t>(after & ~INA_MODE_MASK));
+    return false;
+  }
+
+  Serial.println("[INA228] Shutdown mode verified: ALL OK");
+  Serial.println(
+      "[INA228] Measurement SUSPENDED: no conversions, no CHARGE/ENERGY "
+      "accumulation.");
+  Serial.println(
+      "[INA228] Register contents are now stale and must not be reported as "
+      "new measurements.");
+
+  return true;
+}
+
+
+// Read back what the device is actually doing. Nothing here asserts a state;
+// it reports the MODE field that was read from the part.
+bool inaIsInContinuousMode(bool verbose) {
+  uint16_t adcConfig;
+
+  if (!readRegister16(REG_ADC_CONFIG, adcConfig)) {
+    Serial.println(
+        "[INA228] ERROR: Could not read ADC_CONFIG to confirm mode.");
+    return false;
+  }
+
+  uint16_t mode = inaModeFromAdcConfig(adcConfig);
+
+  if (verbose) {
+    printAdcConfigHex("[INA228] ADC_CONFIG now:    ", adcConfig);
+  }
+
+  return mode == INA_MODE_CONTINUOUS_ALL;
+}
+
+
+// Bring the INA228 back to the project's standard continuous configuration.
+//
+// The normal wake path already does this, because setup() calls
+// configureIna228() on every boot. This exists for the paths that do NOT go
+// through a reboot: stopping the test while awake, and the failure path where
+// shutdown succeeded but the ESP32 then did not sleep.
+bool restoreInaContinuousMode() {
+  if (inaIsInContinuousMode(false)) {
+    Serial.println(
+        "[INA228] Continuous measurement already active: ALL OK");
+    return true;
+  }
+
+  Serial.println(
+      "[INA228] INA228 is not in continuous mode. Restoring configuration...");
+
+  if (!configureIna228()) {
+    Serial.println(
+        "[INA228] ERROR: Could not restore INA228 configuration.");
+    return false;
+  }
+
+  if (!inaIsInContinuousMode(true)) {
+    Serial.println(
+        "[INA228] ERROR: INA228 still does not report continuous mode after "
+        "reconfiguration.");
+    return false;
+  }
+
+  Serial.println("[INA228] Continuous measurement restored: ALL OK");
+  return true;
+}
+
+
+// Print the raw ADC_CONFIG and the decoded MODE field, for the case where the
+// device is in some state other than continuous conversion. Saying only "not
+// continuous" would leave the operator with nowhere to go.
+void printPowerTestInaModeDetail() {
+  uint16_t adcConfig;
+
+  if (!readRegister16(REG_ADC_CONFIG, adcConfig)) {
+    Serial.println(
+        "[INA228] ERROR: Could not read ADC_CONFIG for mode detail.");
+    return;
+  }
+
+  printAdcConfigHex("[INA228] ADC_CONFIG now:    ", adcConfig);
+
+  uint16_t mode = inaModeFromAdcConfig(adcConfig);
+
+  Serial.print("[INA228] MODE field: 0x");
+  Serial.print(mode, HEX);
+
+  if (inaModeIsShutdown(mode)) {
+    Serial.println(" (Shutdown)");
+    Serial.println(
+        "[INA228] Measurement is SUSPENDED. Register values are stale.");
+  } else if (mode == INA_MODE_CONTINUOUS_ALL) {
+    Serial.println(" (Continuous bus voltage, shunt voltage and temperature)");
+  } else {
+    Serial.println(" (see datasheet SLYS021A Table 7-6)");
+  }
+}
+
+
+// ============================================================================
 // RESET INA228 ENERGY AND CHARGE ACCUMULATORS
 // ============================================================================
 //
@@ -1057,6 +1507,26 @@ bool readSensor(SensorReading &reading, bool verboseVshunt) {
 // with the INA228 CHARGE or ENERGY accumulators.
 //
 void printLiveSample() {
+  // CSV_SAMPLE carries elapsed_seconds, which is derived from
+  // completedInterval and millis(). Both are meaningless during the
+  // deep-sleep test: completedInterval is frozen because accounting is
+  // suspended, and millis() restarts at zero on every wake. Emitting rows
+  // anyway would write a sawtooth elapsed_seconds into the live experiment's
+  // samples.csv under an unchanged experiment_id.
+  //
+  // Suppressing the machine-readable row is the honest option. The
+  // human-readable heartbeat keeps printing real INA228 values every five
+  // seconds, so Serial observability is unaffected.
+  //
+  // Note that this checks sleepPowerTestRunning, NOT the broader
+  // intervalAccountingSuspended(). The difference is deliberate: in the
+  // accounting-blocked state the board is awake continuously, so
+  // elapsed_seconds still advances monotonically and the samples are real.
+  // Only repeated deep sleep makes the value jump backwards.
+  if (sleepPowerTestRunning) {
+    return;
+  }
+
   SensorReading reading;
 
   // readSensor() fills the SensorReading struct with the latest values
@@ -1313,6 +1783,10 @@ bool saveWifiPowerTestArmed(bool armed) {
 
 bool loadWifiPowerTestArmed() {
   if (!preferences.begin(NVS_NAMESPACE, true)) {
+    // The message below promises a value, so actually assign it. Leaving the
+    // global untouched here would make the printed claim depend on whatever
+    // the variable already held.
+    wifiPowerTestArmed = false;
     Serial.println(
         "[NVS] Wi-Fi power-test flag unavailable; defaulting to not armed.");
     return true;
@@ -1331,6 +1805,113 @@ bool loadWifiPowerTestArmed() {
   Serial.print("[NVS] Wi-Fi power-test flag: ");
   Serial.println(wifiPowerTestArmed ? "armed" : "not armed");
   return true;
+}
+
+
+// The deep-sleep power-test flag uses its own NVS key for the same reason the
+// Wi-Fi flag does: arming or stopping a bench test must never be able to
+// alter experiment totals, interval numbers, or the experiment ID.
+bool saveSleepPowerTestArmed(bool armed) {
+  Serial.print("[NVS] Writing ");
+  Serial.print(NVS_SLEEP_POWER_TEST_KEY);
+  Serial.print(" = ");
+  Serial.println(armed ? "true" : "false");
+
+  if (!preferences.begin(NVS_NAMESPACE, false)) {
+    Serial.println("[ERROR] Could not open NVS for deep-sleep test flag.");
+    return false;
+  }
+
+  size_t written = preferences.putBool(NVS_SLEEP_POWER_TEST_KEY, armed);
+  preferences.end();
+
+  if (written != sizeof(bool)) {
+    Serial.println("[ERROR] Failed to write deep-sleep test NVS flag.");
+    return false;
+  }
+
+  Serial.println("[NVS] Deep-sleep test flag saved: ALL OK");
+  return true;
+}
+
+
+bool loadSleepPowerTestArmed() {
+  if (!preferences.begin(NVS_NAMESPACE, true)) {
+    sleepPowerTestArmed = false;
+    Serial.println(
+        "[NVS] Deep-sleep test flag unavailable; defaulting to not armed.");
+    return true;
+  }
+
+  if (!preferences.isKey(NVS_SLEEP_POWER_TEST_KEY)) {
+    preferences.end();
+    sleepPowerTestArmed = false;
+    Serial.println("[NVS] Deep-sleep test flag: not armed.");
+    return true;
+  }
+
+  sleepPowerTestArmed = preferences.getBool(NVS_SLEEP_POWER_TEST_KEY, false);
+  preferences.end();
+
+  Serial.print("[NVS] Deep-sleep test flag: ");
+  Serial.println(sleepPowerTestArmed ? "armed" : "not armed");
+  return true;
+}
+
+
+bool saveSleepPowerTestInaOff(bool inaOff) {
+  Serial.print("[NVS] Writing ");
+  Serial.print(NVS_SLEEP_INA_OFF_KEY);
+  Serial.print(" = ");
+  Serial.println(inaOff ? "true" : "false");
+
+  if (!preferences.begin(NVS_NAMESPACE, false)) {
+    Serial.println("[ERROR] Could not open NVS for deep-sleep variant flag.");
+    return false;
+  }
+
+  size_t written = preferences.putBool(NVS_SLEEP_INA_OFF_KEY, inaOff);
+  preferences.end();
+
+  if (written != sizeof(bool)) {
+    Serial.println("[ERROR] Failed to write deep-sleep variant NVS flag.");
+    return false;
+  }
+
+  Serial.println("[NVS] Deep-sleep variant flag saved: ALL OK");
+  return true;
+}
+
+
+bool loadSleepPowerTestInaOff() {
+  if (!preferences.begin(NVS_NAMESPACE, true)) {
+    sleepPowerTestInaOff = false;
+    Serial.println(
+        "[NVS] Deep-sleep variant flag unavailable; defaulting to INA "
+        "continuous.");
+    return true;
+  }
+
+  if (!preferences.isKey(NVS_SLEEP_INA_OFF_KEY)) {
+    preferences.end();
+    sleepPowerTestInaOff = false;
+    Serial.println("[NVS] Deep-sleep variant flag: INA continuous.");
+    return true;
+  }
+
+  sleepPowerTestInaOff = preferences.getBool(NVS_SLEEP_INA_OFF_KEY, false);
+  preferences.end();
+
+  Serial.print("[NVS] Deep-sleep variant flag: ");
+  Serial.println(sleepPowerTestInaOff ? "INA shutdown" : "INA continuous");
+  return true;
+}
+
+
+// One place decides how a sleep-test variant is named, so the banner, STATUS,
+// and stop messages cannot drift apart.
+const char *sleepPowerTestVariantName() {
+  return sleepPowerTestInaOff ? "INA shutdown" : "INA continuous";
 }
 
 
@@ -1600,6 +2181,30 @@ void printExperimentResumeEvent() {
 }
 
 
+// Machine-readable markers for the deep-sleep power test.
+//
+// The host parser already treats everything after experiment_id as one
+// comma-joined detail field, so these need no change on the Python side.
+//
+// Durability caveat, and it is a real one:
+//
+//   SLEEP_TEST_SLEEP is emitted at the end of an awake phase, while the host
+//   is connected, so it is normally captured.
+//
+//   SLEEP_TEST_WAKE is emitted during setup(), before the host has finished
+//   rediscovering the re-enumerated USB device, so it is normally LOST. This
+//   is the same known limitation already documented for EXPERIMENT_RESUME and
+//   is one of the reasons the store-and-forward backlog item exists.
+void printSleepTestEvent(const char *eventType, uint32_t cycle) {
+  Serial.print("CSV_EVENT,");
+  Serial.print(eventType);
+  Serial.print(',');
+  Serial.print(experimentId);
+  Serial.print(',');
+  Serial.println(cycle);
+}
+
+
 void printCsvRow(
     uint32_t interval,
     double elapsedSeconds,
@@ -1773,6 +2378,16 @@ void updateWifiPowerTest(unsigned long now) {
 
 
 void armWifiPowerTest() {
+  // Only one power test may be armed at a time. Silently replacing an armed
+  // test would change what the DMM is measuring without saying so.
+  if (sleepPowerTestArmed || sleepPowerTestRunning) {
+    Serial.println(
+        "[POWER TEST] ERROR: The deep-sleep power test is already armed.");
+    Serial.println(
+        "[POWER TEST] Send POWER TEST STOP first, then POWER TEST WIFI.");
+    return;
+  }
+
   if (!saveWifiPowerTestArmed(true)) {
     Serial.println("[POWER TEST] ERROR: Test was not armed.");
     return;
@@ -1785,43 +2400,667 @@ void armWifiPowerTest() {
 }
 
 
-void stopWifiPowerTest() {
-  wifiPowerTestRunning = false;
-  wifiPowerTestPhase = 0;
-  disableWifi();
-
-  if (!saveWifiPowerTestArmed(false)) {
-    Serial.println(
-        "[POWER TEST] ERROR: Could not clear persisted test flag.");
-    wifiPowerTestArmed = true;
-    return;
-  }
-
-  wifiPowerTestArmed = false;
-  Serial.println("[POWER TEST] Wi-Fi power test stopped.");
-  Serial.println("[POWER TEST] Persisted test flag cleared.");
-}
+// NOTE: The former stopWifiPowerTest() was removed when POWER TEST STOP began
+// handling both power tests. Its logic now lives in stopAllPowerTests(), which
+// is the single stop path. Two stop functions would eventually diverge.
 
 
 void printWifiPowerTestStatus() {
-  Serial.print("[POWER TEST] Armed: ");
+  Serial.print("[POWER TEST] Wi-Fi test armed: ");
   Serial.println(wifiPowerTestArmed ? "YES" : "NO");
 
-  Serial.print("[POWER TEST] Running: ");
+  Serial.print("[POWER TEST] Wi-Fi test running: ");
   Serial.println(wifiPowerTestRunning ? "YES" : "NO");
 
   if (!wifiPowerTestRunning) {
-    Serial.println("[POWER TEST] Phase: NONE");
+    Serial.println("[POWER TEST] Wi-Fi test phase: NONE");
     return;
   }
 
-  Serial.print("[POWER TEST] Phase: ");
+  Serial.print("[POWER TEST] Wi-Fi test phase: ");
   Serial.print(wifiPowerTestPhase);
   Serial.println("/3");
 
   Serial.print("[POWER TEST] Elapsed in phase: ");
   Serial.print((millis() - wifiPowerTestPhaseStartedMs) / 1000UL);
   Serial.println(" seconds");
+}
+
+
+// ============================================================================
+// WHICH POWER TEST IS ARMED
+// ============================================================================
+
+PowerTestMode armedPowerTestMode() {
+  if (wifiPowerTestArmed && sleepPowerTestArmed) {
+    return POWER_TEST_CONFLICT;
+  }
+
+  if (wifiPowerTestArmed) {
+    return POWER_TEST_WIFI;
+  }
+
+  if (sleepPowerTestArmed) {
+    return POWER_TEST_SLEEP;
+  }
+
+  return POWER_TEST_NONE;
+}
+
+
+// ============================================================================
+// INTERVAL ACCOUNTING SUSPENSION
+// ============================================================================
+//
+// The 60-second accounting interval cannot survive repeated deep sleep:
+//
+//   1. millis() restarts at zero on every wake, so the interval timer never
+//      reaches 60 seconds during a 30-second awake phase.
+//   2. setup() calls resetInaAccumulators() on every boot, so INA228 hardware
+//      accumulation from the previous awake phase is discarded on each wake.
+//   3. The board is not awake during sleep, so there is no honest way to
+//      report 60 seconds of elapsed interval time.
+//
+// Rather than emit intervals whose elapsed time, average current, and average
+// power would all be wrong, accounting is explicitly SUSPENDED for the whole
+// duration of the deep-sleep test. Running charge, running energy, interval
+// number, and experiment ID are left exactly as they were.
+//
+// This is a single derived predicate so no second flag can drift out of sync
+// with the test state. It has two honest causes:
+//
+//   sleepPowerTestRunning     the deep-sleep test is in progress
+//   intervalAccountingBlocked a test ended but the accumulators are dirty
+//
+// The second one exists because "the test stopped" and "accounting is safe to
+// resume" are different facts. Without it, a failed accumulator reset would
+// print that accounting stays suspended while this predicate said it was
+// active, and loop() would go on closing intervals with stale accumulation.
+// ============================================================================
+
+bool intervalAccountingSuspended() {
+  return sleepPowerTestRunning || intervalAccountingBlocked;
+}
+
+
+const char *intervalAccountingSuspendReason() {
+  if (sleepPowerTestRunning) {
+    return "deep-sleep power test in progress";
+  }
+
+  if (intervalAccountingBlocked) {
+    return "INA228 accumulators could not be cleared; reset the board";
+  }
+
+  return "not suspended";
+}
+
+
+// ============================================================================
+// DEEP-SLEEP WAKE DIAGNOSTICS
+// ============================================================================
+//
+// Every value here comes from esp_sleep_get_wakeup_cause(). Nothing is
+// inferred from timing, from the armed flag, or from RTC memory contents.
+// ============================================================================
+
+const char *wakeupCauseName(esp_sleep_wakeup_cause_t cause) {
+  switch (cause) {
+    case ESP_SLEEP_WAKEUP_UNDEFINED:
+      return "POWER ON / RESET";
+    case ESP_SLEEP_WAKEUP_TIMER:
+      return "DEEP SLEEP TIMER";
+    case ESP_SLEEP_WAKEUP_EXT0:
+      return "EXT0";
+    case ESP_SLEEP_WAKEUP_EXT1:
+      return "EXT1";
+    case ESP_SLEEP_WAKEUP_TOUCHPAD:
+      return "TOUCHPAD";
+    case ESP_SLEEP_WAKEUP_ULP:
+      return "ULP";
+    case ESP_SLEEP_WAKEUP_GPIO:
+      return "GPIO";
+    case ESP_SLEEP_WAKEUP_UART:
+      return "UART";
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+
+void printBootWakeReason() {
+  Serial.print("[BOOT] Wake reason: ");
+  Serial.println(wakeupCauseName(bootWakeupCause));
+
+  // Print the raw enum value too. If the name above ever says UNRECOGNIZED,
+  // this is what makes the cause diagnosable instead of a dead end.
+  Serial.print("[BOOT] Wake cause code: ");
+  Serial.println(static_cast<int>(bootWakeupCause));
+}
+
+
+// ============================================================================
+// DEEP-SLEEP POWER TEST: AWAKE PHASE
+// ============================================================================
+
+void startSleepPowerTestAwakePhase() {
+  sleepPowerTestRunning = true;
+  sleepPowerTestAwakeStartedMs = millis();
+
+  Serial.println();
+
+  if (sleepPowerTestInaOff) {
+    Serial.println("[POWER TEST] INA-OFF sleep test");
+  }
+
+  Serial.print("[POWER TEST] Sleep test variant: ");
+  Serial.println(sleepPowerTestVariantName());
+
+  Serial.println("[POWER TEST] Sleep test: AWAKE phase");
+
+  Serial.print("[POWER TEST] Awake duration: ");
+  Serial.print(SLEEP_POWER_TEST_AWAKE_MS / 1000UL);
+  Serial.println(" seconds");
+
+  // Report the Wi-Fi state the radio is ACTUALLY in rather than asserting
+  // that it is off. If something left it on, this line has to say so.
+  wifi_mode_t mode = WiFi.getMode();
+
+  Serial.print("[POWER TEST] Wi-Fi: ");
+  Serial.println(mode == WIFI_OFF ? "OFF" : wifiModeName(mode));
+
+  if (mode != WIFI_OFF) {
+    Serial.println(
+        "[POWER TEST] ERROR: Wi-Fi must be OFF during the sleep test.");
+    Serial.println(
+        "[POWER TEST] Disabling Wi-Fi now so the measurement stays valid.");
+
+    disableWifi();
+
+    if (WiFi.getMode() != WIFI_OFF) {
+      Serial.println(
+          "[POWER TEST] ERROR: Wi-Fi is STILL ON. Sleep-current readings "
+          "from this cycle include the radio.");
+    }
+  }
+
+  Serial.print("[POWER TEST] Cycle: ");
+  Serial.println(rtcSleepTestCycle);
+
+  Serial.print("[POWER TEST] Boot-to-awake-phase time: ");
+  Serial.print(millis() / 1000.0, 2);
+  Serial.println(" seconds");
+
+  Serial.println(
+      "[POWER TEST] Interval accounting: SUSPENDED for this test.");
+  Serial.println(
+      "[POWER TEST] CSV_SAMPLE and CSV_DATA output: SUSPENDED for this test.");
+  Serial.println(
+      "[POWER TEST] Heartbeat continues every 5 seconds.");
+
+  if (sleepPowerTestInaOff) {
+    Serial.println(
+        "[POWER TEST] During each deep sleep the INA228 will be in its own "
+        "shutdown mode.");
+    Serial.println(
+        "[POWER TEST] Solar measurement is therefore SUSPENDED during sleep: "
+        "no conversions and no CHARGE/ENERGY accumulation.");
+    Serial.println(
+        "[POWER TEST] The INA228 measures normally during this awake phase.");
+  } else {
+    Serial.println(
+        "[POWER TEST] The INA228 stays in continuous conversion through the "
+        "deep sleep.");
+  }
+}
+
+
+// ============================================================================
+// DEEP-SLEEP POWER TEST: ENTER SLEEP
+// ============================================================================
+//
+// This function does not return in the success case. The chip powers down
+// here and the next thing that runs is setup().
+// ============================================================================
+
+void enterSleepPowerTestDeepSleep() {
+  Serial.println();
+
+  if (sleepPowerTestInaOff) {
+    Serial.println("[POWER TEST] INA-OFF sleep test");
+
+    // The INA228 is shut down BEFORE the wake timer is armed, so a shutdown
+    // failure costs nothing: the board simply never sleeps this cycle.
+    if (!enterInaShutdownMode()) {
+      Serial.println(
+          "[POWER TEST] ERROR: INA228 shutdown could not be verified.");
+      Serial.println("[POWER TEST] Deep sleep NOT entered.");
+      Serial.println(
+          "[POWER TEST] Sleeping now would measure an unknown INA228 state "
+          "and the reading would be meaningless.");
+
+      stopAllPowerTests();
+      return;
+    }
+
+    inaShutdownActive = true;
+  }
+
+  Serial.print("[POWER TEST] Entering ESP32 DEEP SLEEP for ");
+  Serial.print(static_cast<unsigned long>(SLEEP_POWER_TEST_SLEEP_US / 1000000ULL));
+  Serial.println(" seconds...");
+
+  // Reports the cycle whose awake phase just finished.
+  printSleepTestEvent(
+      sleepPowerTestInaOff ? "SLEEP_TEST_SLEEP_INA_OFF" : "SLEEP_TEST_SLEEP",
+      rtcSleepTestCycle);
+
+  esp_err_t timerResult =
+      esp_sleep_enable_timer_wakeup(SLEEP_POWER_TEST_SLEEP_US);
+
+  if (timerResult != ESP_OK) {
+    // Sleeping without a wake source would put the board into a sleep it
+    // never returns from. The DMM would show sleep current forever and the
+    // test would look like it was working. Refuse, loudly, and disarm.
+    Serial.print(
+        "[POWER TEST] ERROR: Could not enable the deep-sleep wake timer. "
+        "esp_err_t = ");
+    Serial.println(static_cast<int>(timerResult));
+
+    Serial.println("[POWER TEST] Deep sleep NOT entered.");
+    Serial.println(
+        "[POWER TEST] Stopping the sleep test rather than sleeping without "
+        "a wake source.");
+
+    stopAllPowerTests();
+    return;
+  }
+
+  Serial.println("[POWER TEST] Wake timer armed: ALL OK");
+
+  // Stamp RTC memory only now, once sleep is actually going to happen. If the
+  // counter were advanced before the timer check above, a failed check would
+  // leave a cycle count that claims a sleep the board never took.
+  //
+  // After the wake this stamp is the only evidence that the previous boot was
+  // ours and ended deliberately.
+  rtcSleepTestMagic = SLEEP_POWER_TEST_RTC_MAGIC;
+  rtcSleepTestCycle++;
+
+  // Let Serial finish transmitting before most of the chip powers down.
+  Serial.flush();
+
+  esp_deep_sleep_start();
+
+  // esp_deep_sleep_start() is declared noreturn, so reaching this line means
+  // something is deeply wrong with the platform. Say so rather than falling
+  // through into a loop() that believes it is still in an awake phase.
+  Serial.println(
+      "[POWER TEST] ERROR: esp_deep_sleep_start() returned. Deep sleep did "
+      "not happen.");
+  Serial.println(
+      "[POWER TEST] Stopping the sleep test; this cycle measured nothing.");
+
+  stopAllPowerTests();
+}
+
+
+void updateSleepPowerTest(unsigned long now) {
+  if (!sleepPowerTestRunning) {
+    return;
+  }
+
+  if (now - sleepPowerTestAwakeStartedMs < SLEEP_POWER_TEST_AWAKE_MS) {
+    return;
+  }
+
+  enterSleepPowerTestDeepSleep();
+}
+
+
+void armSleepPowerTest(bool inaOff) {
+  if (wifiPowerTestArmed || wifiPowerTestRunning) {
+    Serial.println(
+        "[POWER TEST] ERROR: The Wi-Fi power test is already armed.");
+    Serial.println(
+        "[POWER TEST] Send POWER TEST STOP first, then arm the sleep test.");
+    return;
+  }
+
+  if (sleepPowerTestArmed) {
+    if (sleepPowerTestInaOff == inaOff) {
+      Serial.print(
+          "[POWER TEST] Deep-sleep power test is already armed in this "
+          "variant: ");
+      Serial.println(sleepPowerTestVariantName());
+      Serial.println("[POWER TEST] No change made.");
+      return;
+    }
+
+    // Switching variants silently would change what the DMM is measuring
+    // without saying so, which is exactly the failure this refuses.
+    Serial.print(
+        "[POWER TEST] ERROR: The deep-sleep test is already armed in the "
+        "other variant: ");
+    Serial.println(sleepPowerTestVariantName());
+    Serial.println(
+        "[POWER TEST] Send POWER TEST STOP first, then arm the variant you "
+        "want.");
+    return;
+  }
+
+  // Write the variant BEFORE the armed flag. If the variant write fails the
+  // test is not armed at all, so a reboot can never resume a test whose
+  // variant is unknown.
+  if (!saveSleepPowerTestInaOff(inaOff)) {
+    Serial.println(
+        "[POWER TEST] ERROR: Deep-sleep variant was NOT saved, so the test "
+        "was not armed.");
+    return;
+  }
+
+  sleepPowerTestInaOff = inaOff;
+
+  if (!saveSleepPowerTestArmed(true)) {
+    Serial.println(
+        "[POWER TEST] ERROR: Deep-sleep test was NOT armed. It would not "
+        "survive the USB disconnect, so it is not being started either.");
+    return;
+  }
+
+  sleepPowerTestArmed = true;
+
+  // A freshly armed test starts its cycle count at zero.
+  rtcSleepTestMagic = SLEEP_POWER_TEST_RTC_MAGIC;
+  rtcSleepTestCycle = 0;
+
+  Serial.println();
+  Serial.print("[POWER TEST] Deep-sleep power test ARMED, variant: ");
+  Serial.println(sleepPowerTestVariantName());
+  Serial.println(
+      "[POWER TEST] The armed flag and the variant are persisted in NVS, so "
+      "this test survives USB disconnect and external power cycling.");
+  Serial.println(
+      "[POWER TEST] INA228 stays electrically powered from XIAO 3V3 in both "
+      "variants. Nothing power-gates the INA228.");
+
+  if (inaOff) {
+    Serial.println(
+        "[POWER TEST] The INA228 ADC will be placed in its documented "
+        "shutdown mode before each deep sleep.");
+    Serial.println(
+        "[POWER TEST] Solar measurement is SACRIFICED during each sleep "
+        "phase. That is the purpose of this variant.");
+  }
+
+  // Wi-Fi must be off for the whole test, including this first awake phase.
+  disableWifi();
+
+  printSleepTestEvent(
+      inaOff ? "SLEEP_TEST_ARMED_INA_OFF" : "SLEEP_TEST_ARMED",
+      rtcSleepTestCycle);
+
+  startSleepPowerTestAwakePhase();
+}
+
+
+// ============================================================================
+// RESUME NORMAL INTERVAL ACCOUNTING
+// ============================================================================
+//
+// Called when a deep-sleep test ends. The INA228 has been accumulating charge
+// through a window we deliberately did not account for, and that window is
+// not 60 seconds long. Folding it into the next interval would corrupt that
+// interval's average current and average power.
+//
+// So the accumulators are cleared and the interval timer restarts now. The
+// charge measured during the suspended window is discarded on purpose; the
+// running totals from before the test are untouched.
+// ============================================================================
+
+bool resumeIntervalAccounting() {
+  Serial.println(
+      "[POWER TEST] Resuming normal 60-second interval accounting.");
+
+  if (!resetInaAccumulators()) {
+    // Fail closed. Resuming with stale accumulation would produce a wrong
+    // interval that looks exactly like a right one.
+    intervalAccountingBlocked = true;
+
+    Serial.println(
+        "[ERROR] Could not clear INA228 accumulators after the power test.");
+    Serial.println(
+        "[ERROR] Interval accounting stays SUSPENDED so a partial "
+        "accumulation window cannot be reported as a 60-second interval.");
+    Serial.println(
+        "[ERROR] Running charge and running energy are preserved unchanged.");
+    Serial.println(
+        "[ERROR] Reset the board once Serial access is available.");
+    return false;
+  }
+
+  intervalAccountingBlocked = false;
+
+  intervalStartMs = millis();
+  lastHeartbeatMs = intervalStartMs;
+  lastLiveSampleMs = intervalStartMs;
+
+  Serial.print("[POWER TEST] Experiment ");
+  Serial.print(experimentId);
+  Serial.print(" continues at interval ");
+  Serial.print(completedInterval);
+  Serial.println(" with totals unchanged.");
+
+  Serial.println("[POWER TEST] Interval accounting: ACTIVE");
+  return true;
+}
+
+
+// ============================================================================
+// STOP WHICHEVER POWER TEST IS ACTIVE
+// ============================================================================
+
+void stopAllPowerTests() {
+  bool wifiTestWasActive = wifiPowerTestArmed || wifiPowerTestRunning;
+  bool sleepTestWasActive = sleepPowerTestArmed || sleepPowerTestRunning;
+  bool accountingWasSuspended = intervalAccountingSuspended();
+
+  Serial.println();
+
+  if (!wifiTestWasActive && !sleepTestWasActive) {
+    Serial.println("[POWER TEST] No power test was armed or running.");
+  }
+
+  // Clear RAM state first so nothing else acts on a half-stopped test.
+  wifiPowerTestRunning = false;
+  wifiPowerTestPhase = 0;
+  sleepPowerTestRunning = false;
+
+  // Wi-Fi must end OFF no matter which test was running.
+  disableWifi();
+
+  // The INA228 must end in normal continuous conversion no matter which test
+  // was running. This matters on the INA-OFF failure path, where shutdown
+  // succeeded but the ESP32 then did not sleep: without this, the logger
+  // would resume with a device that is not converting.
+  bool inaRestored = restoreInaContinuousMode();
+
+  if (inaRestored) {
+    inaShutdownActive = false;
+  } else {
+    Serial.println(
+        "[POWER TEST] ERROR: INA228 is not confirmed to be measuring. "
+        "Readings must not be trusted until this is resolved.");
+  }
+
+  if (WiFi.getMode() != WIFI_OFF) {
+    Serial.println(
+        "[POWER TEST] ERROR: Wi-Fi did not turn off. Radio state is unknown.");
+  }
+
+  bool persistedStateCleared = true;
+
+  if (wifiPowerTestArmed) {
+    if (saveWifiPowerTestArmed(false)) {
+      wifiPowerTestArmed = false;
+      Serial.println("[POWER TEST] Wi-Fi test flag cleared.");
+    } else {
+      Serial.println(
+          "[POWER TEST] ERROR: Could not clear the persisted Wi-Fi test flag. "
+          "It will still be armed after the next reboot.");
+      persistedStateCleared = false;
+    }
+  }
+
+  if (!inaRestored) {
+    persistedStateCleared = false;
+  }
+
+  if (sleepPowerTestArmed) {
+    Serial.print("[POWER TEST] Stopping deep-sleep test variant: ");
+    Serial.println(sleepPowerTestVariantName());
+
+    if (saveSleepPowerTestArmed(false)) {
+      sleepPowerTestArmed = false;
+      Serial.println("[POWER TEST] Deep-sleep test flag cleared.");
+    } else {
+      Serial.println(
+          "[POWER TEST] ERROR: Could not clear the persisted deep-sleep test "
+          "flag. It will still be armed after the next reboot.");
+      persistedStateCleared = false;
+    }
+
+    // Clear the variant selector too, so a later bare POWER TEST SLEEP can
+    // never inherit INA-OFF behavior from a test that was already stopped.
+    if (sleepPowerTestInaOff) {
+      if (saveSleepPowerTestInaOff(false)) {
+        sleepPowerTestInaOff = false;
+        Serial.println("[POWER TEST] Deep-sleep variant flag cleared.");
+      } else {
+        Serial.println(
+            "[POWER TEST] ERROR: Could not clear the persisted deep-sleep "
+            "variant flag.");
+        persistedStateCleared = false;
+      }
+    }
+  }
+
+  if (sleepTestWasActive) {
+    printSleepTestEvent("SLEEP_TEST_STOPPED", rtcSleepTestCycle);
+
+    Serial.print("[POWER TEST] Completed sleep cycles this power-on: ");
+    Serial.println(rtcSleepTestCycle);
+
+    // The counter only describes one continuous battery run, so clear it
+    // along with the test rather than letting it leak into the next one.
+    rtcSleepTestMagic = 0;
+    rtcSleepTestCycle = 0;
+  }
+
+  if (accountingWasSuspended) {
+    if (!resumeIntervalAccounting()) {
+      persistedStateCleared = false;
+    }
+  }
+
+  if (persistedStateCleared) {
+    Serial.println("[POWER TEST] Power test stopped: ALL OK");
+    Serial.println("[POWER TEST] Normal continuous logging resumed.");
+  } else {
+    Serial.println(
+        "[POWER TEST] NOT ALL OK - power test stop did not fully succeed.");
+  }
+}
+
+
+// ============================================================================
+// COMBINED POWER-TEST STATUS
+// ============================================================================
+
+void printPowerTestStatus() {
+  Serial.println();
+
+  Serial.print("[POWER TEST] Active test: ");
+
+  switch (armedPowerTestMode()) {
+    case POWER_TEST_NONE:
+      Serial.println("NONE");
+      break;
+    case POWER_TEST_WIFI:
+      Serial.println("WIFI");
+      break;
+    case POWER_TEST_SLEEP:
+      // Naming the variant here is the whole point: "SLEEP" alone would not
+      // tell you whether the INA228 is converting through the sleep phase.
+      Serial.print("SLEEP (");
+      Serial.print(sleepPowerTestVariantName());
+      Serial.println(")");
+      break;
+    case POWER_TEST_CONFLICT:
+      Serial.println("CONFLICT");
+      Serial.println(
+          "[POWER TEST] ERROR: Both power-test flags are armed. No test is "
+          "running. Send POWER TEST STOP to clear both.");
+      break;
+  }
+
+  printWifiPowerTestStatus();
+
+  Serial.print("[POWER TEST] Sleep test armed: ");
+  Serial.println(sleepPowerTestArmed ? "YES" : "NO");
+
+  if (sleepPowerTestArmed) {
+    Serial.print("[POWER TEST] Sleep test variant: ");
+    Serial.println(sleepPowerTestVariantName());
+
+    Serial.print("[POWER TEST] INA228 during sleep phase: ");
+    Serial.println(
+        sleepPowerTestInaOff
+            ? "SHUTDOWN, measurement suspended"
+            : "continuous conversion, measurement active");
+  }
+
+  Serial.print("[POWER TEST] Sleep test running: ");
+  Serial.println(sleepPowerTestRunning ? "YES" : "NO");
+
+  // Report what the INA228 says about itself, not what we intended.
+  Serial.print("[POWER TEST] INA228 mode right now: ");
+
+  if (inaIsInContinuousMode(false)) {
+    Serial.println("continuous conversion");
+  } else {
+    Serial.println("NOT continuous conversion");
+    printPowerTestInaModeDetail();
+  }
+
+  if (sleepPowerTestRunning) {
+    Serial.print("[POWER TEST] Sleep test cycle: ");
+    Serial.println(rtcSleepTestCycle);
+
+    Serial.print("[POWER TEST] Elapsed in awake phase: ");
+    Serial.print((millis() - sleepPowerTestAwakeStartedMs) / 1000.0, 1);
+    Serial.println(" seconds");
+
+    Serial.print("[POWER TEST] Awake phase length: ");
+    Serial.print(SLEEP_POWER_TEST_AWAKE_MS / 1000UL);
+    Serial.println(" seconds");
+
+    Serial.print("[POWER TEST] Deep sleep length: ");
+    Serial.print(
+        static_cast<unsigned long>(SLEEP_POWER_TEST_SLEEP_US / 1000000ULL));
+    Serial.println(" seconds");
+  }
+
+  Serial.print("[POWER TEST] Interval accounting: ");
+
+  if (intervalAccountingSuspended()) {
+    Serial.print("SUSPENDED: ");
+    Serial.println(intervalAccountingSuspendReason());
+  } else {
+    Serial.println("ACTIVE");
+  }
+
+  printBootWakeReason();
 }
 
 
@@ -1845,14 +3084,22 @@ void printHelp() {
   Serial.println(
       "  WIFI STATUS - print Wi-Fi state and mode");
 
-    Serial.println(
-      "  POWER TEST WIFI - arm the repeating Wi-Fi power test");
+  Serial.println(
+      "  POWER TEST WIFI   - arm the repeating Wi-Fi power test");
 
-    Serial.println(
-      "  POWER TEST STOP - stop the Wi-Fi power test");
+  Serial.println(
+      "  POWER TEST SLEEP  - arm the deep-sleep power test, INA228 stays in "
+      "continuous conversion");
 
-    Serial.println(
-      "  POWER TEST STATUS - print Wi-Fi power-test state");
+  Serial.println(
+      "  POWER TEST SLEEP INA OFF - arm the deep-sleep power test, INA228 "
+      "enters its own shutdown mode before each sleep");
+
+  Serial.println(
+      "  POWER TEST STOP   - stop whichever power test is active");
+
+  Serial.println(
+      "  POWER TEST STATUS - print power-test state");
 
   Serial.println(
       "  RESET      - explain reset confirmation");
@@ -1888,6 +3135,27 @@ void printStatus() {
   Serial.println(" mWh");
 
 
+  // Without this line, the interval number above reads like a live counter
+  // while it is actually frozen.
+  if (intervalAccountingSuspended()) {
+    Serial.print("[STATUS] Interval accounting = SUSPENDED: ");
+    Serial.println(intervalAccountingSuspendReason());
+    Serial.println(
+        "[STATUS] The interval and totals above are frozen, not advancing.");
+  } else {
+    Serial.println("[STATUS] Interval accounting = ACTIVE");
+  }
+
+
+  if (inaShutdownActive) {
+    Serial.println(
+        "[STATUS] INA228               = SHUTDOWN, measurement suspended");
+    Serial.println(
+        "[STATUS] Voltage/current/power are NOT being updated and are not "
+        "reported.");
+    return;
+  }
+
   SensorReading reading;
 
   if (readSensor(reading, false)) {
@@ -1914,10 +3182,26 @@ void printStatus() {
 // ============================================================================
 
 bool resetExperiment() {
+  // A new experiment created while accounting is suspended would be frozen
+  // from the moment it was born, and its first interval would never close.
+  // Refuse instead of creating an experiment that silently does nothing.
+  if (intervalAccountingSuspended()) {
+    Serial.println();
+    Serial.print("[RESET] ERROR: Interval accounting is SUSPENDED: ");
+    Serial.println(intervalAccountingSuspendReason());
+    Serial.println(
+        "[RESET] A new experiment would be created and then immediately "
+        "frozen. Its first interval would never close.");
+    Serial.println(
+        "[RESET] Clear the suspension first, then send RESET YES again.");
+    Serial.println("[RESET] No experiment was created.");
+    return false;
+  }
+
   intervalStartMs = millis();
   lastHeartbeatMs = intervalStartMs;
   lastLiveSampleMs = intervalStartMs;
-  
+
   Serial.println();
 
   Serial.println(
@@ -2067,13 +3351,21 @@ void processCommand(String command) {
 
     armWifiPowerTest();
 
+  } else if (command == "POWER TEST SLEEP") {
+
+    armSleepPowerTest(false);
+
+  } else if (command == "POWER TEST SLEEP INA OFF") {
+
+    armSleepPowerTest(true);
+
   } else if (command == "POWER TEST STOP") {
 
-    stopWifiPowerTest();
+    stopAllPowerTests();
 
   } else if (command == "POWER TEST STATUS") {
 
-    printWifiPowerTestStatus();
+    printPowerTestStatus();
 
   } else if (command == "RESET") {
 
@@ -2183,6 +3475,16 @@ void handleSerialCommands() {
 // ============================================================================
 
 void printHeartbeat() {
+  // A shut-down INA228 still answers I2C reads, but the values it returns are
+  // left over from before shutdown. Printing them next to "ALL OK" would be
+  // presenting stale registers as a live measurement.
+  if (inaShutdownActive) {
+    Serial.println(
+        "[HEARTBEAT] INA228 is in SHUTDOWN. No conversions are running and "
+        "no values are being updated.");
+    return;
+  }
+
   SensorReading reading;
 
   if (!readSensor(reading, false)) {
@@ -2201,12 +3503,35 @@ void printHeartbeat() {
   Serial.print(" | experiment ");
   Serial.print(experimentId);
 
-  Serial.print(" | next interval ");
-  Serial.print(completedInterval + 1);
+  if (sleepPowerTestRunning) {
+    // "next interval N" would be a lie here: no interval is going to close
+    // while accounting is suspended. Report the sleep test's clock instead.
+    Serial.print(" | SLEEP TEST cycle ");
+    Serial.print(rtcSleepTestCycle);
 
-  Serial.print(" | elapsed ");
-  Serial.print(elapsedMs / 1000.0, 1);
-  Serial.print(" s | ");
+    Serial.print(" | awake ");
+    Serial.print(
+        (millis() - sleepPowerTestAwakeStartedMs) / 1000.0, 1);
+    Serial.print(" s of ");
+    Serial.print(SLEEP_POWER_TEST_AWAKE_MS / 1000UL);
+
+    Serial.print(" s | interval accounting SUSPENDED | ");
+
+  } else if (intervalAccountingSuspended()) {
+    // The test is over but accounting could not safely resume. Saying
+    // "next interval N" here would promise an interval that will not close.
+    Serial.print(" | interval accounting SUSPENDED (");
+    Serial.print(intervalAccountingSuspendReason());
+    Serial.print(") | ");
+
+  } else {
+    Serial.print(" | next interval ");
+    Serial.print(completedInterval + 1);
+
+    Serial.print(" | elapsed ");
+    Serial.print(elapsedMs / 1000.0, 1);
+    Serial.print(" s | ");
+  }
 
   Serial.print(reading.voltage_V, 4);
   Serial.print(" V | ");
@@ -2530,10 +3855,20 @@ bool closeMeasurementInterval() {
 // ============================================================================
 
 void setup() {
+  // Capture the wake cause before anything else can run. A deep-sleep wake
+  // arrives here as an ordinary boot, so this register read is the only way
+  // to tell "the user plugged it in" apart from "our sleep timer fired".
+  bootWakeupCause = esp_sleep_get_wakeup_cause();
+
   Serial.begin(115200);
 
   // Give USB Serial time to enumerate before printing the boot sequence.
+  //
+  // After a deep-sleep wake the USB device has to re-enumerate on the host,
+  // so this delay is doing real work on every wake, not just at power-on.
   delay(1500);
+
+  printBootWakeReason();
 
   initializeWifiOff();
 
@@ -2652,6 +3987,37 @@ void setup() {
     while (true) {
       Serial.println(
           "[FATAL] NOT ALL OK - Wi-Fi power-test NVS state requires attention.");
+
+      delay(5000);
+    }
+  }
+
+  // Same reasoning for the deep-sleep test: the whole point is that arming it
+  // over USB survives the USB disconnect and the switch to AA battery power.
+  if (!loadSleepPowerTestArmed()) {
+    Serial.println(
+        "[FATAL] Deep-sleep test state could not be loaded. Logger halted.");
+
+    while (true) {
+      Serial.println(
+          "[FATAL] NOT ALL OK - deep-sleep test NVS state requires attention.");
+
+      delay(5000);
+    }
+  }
+
+  // The variant matters as much as the armed flag. Without this load, an
+  // armed INA-OFF test would silently resume as the INA-continuous variant
+  // after every power cycle, and STATUS would report the wrong one while the
+  // DMM measured something else entirely.
+  if (!loadSleepPowerTestInaOff()) {
+    Serial.println(
+        "[FATAL] Deep-sleep test variant could not be loaded. Logger halted.");
+
+    while (true) {
+      Serial.println(
+          "[FATAL] NOT ALL OK - deep-sleep variant NVS state requires "
+          "attention.");
 
       delay(5000);
     }
@@ -2855,11 +4221,111 @@ void setup() {
 
   printHelp();
 
-  if (wifiPowerTestArmed) {
+  // --------------------------------------------------------------------------
+  // Resume a persisted power test, if one is armed.
+  // --------------------------------------------------------------------------
+  //
+  // Exactly one test may run. armedPowerTestMode() is the single place that
+  // decides which, so a boot can never start both.
+
+  PowerTestMode mode = armedPowerTestMode();
+
+  if (mode == POWER_TEST_CONFLICT) {
+    // Never guess which test the user meant. Refuse both, keep logging
+    // normally, and say exactly how to fix it.
+    Serial.println();
+    Serial.println(
+        "[POWER TEST] ERROR: Both the Wi-Fi test flag and the deep-sleep "
+        "test flag are armed in NVS.");
+    Serial.println(
+        "[POWER TEST] Only one power test may run, so NEITHER was started.");
+    Serial.println(
+        "[POWER TEST] Send POWER TEST STOP to clear both flags.");
+    Serial.println(
+        "[POWER TEST] Normal continuous logging continues in the meantime.");
+
+  } else if (mode == POWER_TEST_WIFI) {
     wifiPowerTestRunning = true;
     Serial.println("[POWER TEST] Persisted Wi-Fi power test found.");
     Serial.println("[POWER TEST] Wi-Fi power test ARMED");
     startWifiPowerTestPhase(1);
+
+  } else if (mode == POWER_TEST_SLEEP) {
+    Serial.println();
+    Serial.println("[POWER TEST] Persisted deep-sleep power test found.");
+
+    bool rtcStateValid = (rtcSleepTestMagic == SLEEP_POWER_TEST_RTC_MAGIC);
+
+    if (bootWakeupCause == ESP_SLEEP_WAKEUP_TIMER) {
+
+      if (rtcStateValid) {
+        if (sleepPowerTestInaOff) {
+          Serial.println(
+              "[POWER TEST] Woke from INA-OFF deep sleep: ALL OK");
+        } else {
+          Serial.println("[POWER TEST] Woke from deep sleep timer: ALL OK");
+        }
+
+        Serial.println("[POWER TEST] Starting next AWAKE phase.");
+
+      } else {
+        // Woke from our timer, but RTC memory does not hold our marker. The
+        // cycle count is genuinely unknown, so say that instead of printing
+        // whatever number happened to be in RAM.
+        Serial.println("[POWER TEST] Woke from deep sleep timer: ALL OK");
+        Serial.println(
+            "[POWER TEST] WARNING: RTC-retained test state was lost. The "
+            "cycle counter is restarting from 0.");
+        Serial.println(
+            "[POWER TEST] Sleep-current measurements are unaffected; only "
+            "the cycle count is.");
+
+        rtcSleepTestMagic = SLEEP_POWER_TEST_RTC_MAGIC;
+        rtcSleepTestCycle = 0;
+      }
+
+      printSleepTestEvent("SLEEP_TEST_WAKE", rtcSleepTestCycle);
+
+    } else {
+      // Power-on or reset. This is the expected path when the user unplugs
+      // USB and applies AA battery power, which is the whole reason the
+      // armed flag lives in NVS.
+      Serial.print("[POWER TEST] This boot was not a deep-sleep wake (");
+      Serial.print(wakeupCauseName(bootWakeupCause));
+      Serial.println("), so the test is starting a fresh cycle count.");
+
+      rtcSleepTestMagic = SLEEP_POWER_TEST_RTC_MAGIC;
+      rtcSleepTestCycle = 0;
+
+      printSleepTestEvent("SLEEP_TEST_RESUMED", rtcSleepTestCycle);
+    }
+
+    // setup() has already run configureIna228(), which writes and verifies
+    // CONFIG, ADC_CONFIG, and SHUNT_CAL. For the INA-OFF variant, confirm
+    // from the device that continuous conversion is genuinely back before
+    // saying so, rather than assuming the boot path worked.
+    if (sleepPowerTestInaOff) {
+      if (inaIsInContinuousMode(true)) {
+        inaShutdownActive = false;
+        Serial.println("[INA228] Continuous measurement restored: ALL OK");
+      } else {
+        Serial.println(
+            "[INA228] ERROR: INA228 does not report continuous mode after "
+            "wake, even though boot configuration reported success.");
+
+        if (!restoreInaContinuousMode()) {
+          Serial.println(
+              "[POWER TEST] ERROR: Stopping the sleep test. Continuing would "
+              "measure an INA228 in an unknown state.");
+          stopAllPowerTests();
+          return;
+        }
+
+        inaShutdownActive = false;
+      }
+    }
+
+    startSleepPowerTestAwakePhase();
   }
 }
 
@@ -2891,6 +4357,11 @@ void loop() {
   // INA228 measurements, heartbeat output, CSV output, and NVS accounting
   // continue running normally during every Wi-Fi phase.
   updateWifiPowerTest(now);
+
+
+  // The deep-sleep test's awake phase ends here. On success this call does
+  // not return: the chip powers down and the next code to run is setup().
+  updateSleepPowerTest(now);
 
 
 // --------------------------------------------------------------------------
@@ -2933,7 +4404,15 @@ if (
   // 60-SECOND MEASUREMENT
   // --------------------------------------------------------------------------
 
+  // Interval accounting is explicitly gated rather than left to arithmetic.
+  //
+  // During the deep-sleep test the 60-second timer would never fire anyway,
+  // because millis() restarts on every wake and the awake phase is only 30
+  // seconds. Relying on that accident would mean the logger was silently not
+  // accounting while nothing said so. The suspension is announced when the
+  // awake phase starts and reported by STATUS and POWER TEST STATUS.
   if (
+      !intervalAccountingSuspended() &&
       now - intervalStartMs >=
       MEASUREMENT_INTERVAL_MS) {
 
