@@ -239,7 +239,7 @@ The Python logger printed repeated `CONNECTED-BUT-SILENT` warnings during each a
 
 `POWER TEST SLEEP INA OFF` was added alongside the existing `POWER TEST SLEEP`. Both remain available; they are two variants of one test, and only one can be armed at a time.
 
-**No measurement has been taken yet for this variant.** The firmware compiles for `esp32:esp32:XIAO_ESP32C3` and has not been uploaded or run on hardware. The 1.07 mA figure recorded above is the INA-continuous variant and remains the baseline to beat.
+This entry records how the variant works. It was measured the same day; results are in [2026-09-10: INA-shutdown deep-sleep measurement results](#2026-09-10-ina-shutdown-deep-sleep-measurement-results) below.
 
 ### What differs between the variants
 
@@ -251,7 +251,7 @@ Only what the INA228 does during the ESP32's sleep phase. Neither variant remove
 | INA228 during sleep phase | continuous conversion | its own shutdown mode |
 | Hardware CHARGE/ENERGY accumulation | continues | stops |
 | Solar measurement during sleep | preserved | sacrificed |
-| Measured sleep current | 1.07 mA | pending |
+| Measured sleep current | 1.07 mA | 0.33 mA |
 
 ### How shutdown is entered
 
@@ -307,3 +307,55 @@ and on each wake:
 The `ADC_CONFIG after` value above is what the arithmetic predicts from writing MODE `0h` into `0xFB6B` while preserving the other fields. Confirm it against what the board actually prints rather than assuming it.
 
 If shutdown cannot be verified, the firmware prints an explicit error, does **not** enter deep sleep, and stops the test. A sleep current measured with the INA228 in an unknown state would be worthless.
+
+## 2026-09-10: INA-shutdown deep-sleep measurement results
+
+`POWER TEST SLEEP INA OFF` was run on hardware. Conditions were identical to the INA-continuous run recorded above: XIAO ESP32-C3 and INA228 connected normally, XIAO powered from the 3xAA holder through VUSB with the DMM in series, USB physically disconnected during the measurement, Wi-Fi off, true ESP32 deep sleep with timer wake.
+
+### Measured
+
+| Phase | Displayed current |
+| --- | ---: |
+| Initial cold-start awake | approximately 28.7-28.8 mA |
+| Post-deep-sleep awake | approximately 28.3-28.4 mA |
+| Normal awake steady state | approximately 28.2-28.6 mA |
+| Deep sleep, INA228 continuous | 1.07 mA |
+| Deep sleep, INA228 shutdown | 0.33 mA |
+
+The saving from putting the INA228 into its own shutdown mode:
+
+```text
+1.07 mA - 0.33 mA = 0.74 mA
+```
+
+Against the awake baseline, deep sleep with the INA228 shut down is roughly a 98.8% reduction, about 86x.
+
+### The datasheet prediction held
+
+The predicted saving from SLYS021A was roughly 640 µA, from IQ 640 µA typical against IQSD 2.8 µA typical. The measured saving is 740 µA, which sits between the datasheet's typical and maximum IQ figures of 640 µA and 750 µA.
+
+That agreement is worth stating plainly because it was a genuine prediction made before the measurement, not a number fitted afterwards.
+
+### What the residual 0.33 mA is not
+
+IQSD is specified at 2.8 µA typical and 5 µA maximum, so the INA228 can account for at most about 5 µA of the remaining 0.33 mA. The other ~0.325 mA belongs to the XIAO ESP32-C3 board itself: the ESP32-C3 in deep sleep plus whatever the onboard regulator and the rest of the board draw.
+
+This is an inference from the measurement plus the datasheet, not a separate measurement. Isolating the board's own floor would need a different test.
+
+### Key architectural conclusion
+
+**Leaving the INA228 continuously measuring while the ESP32 sleeps costs roughly 0.74 mA, and buys continuous hardware CHARGE and ENERGY accumulation through the sleep window.**
+
+**Shutting both down reaches roughly 0.33 mA, and measurement and accumulation are completely suspended for that period.**
+
+That is the tradeoff, and it is now a measured one rather than an estimated one. Neither option is simply better: 0.74 mA is the price of not having a hole in the charge record.
+
+### Cold-start awake current differs from post-sleep awake current
+
+Cold start read approximately 28.7-28.8 mA, while awake phases following a deep-sleep wake read approximately 28.3-28.4 mA. The difference is roughly 0.4 mA and it was repeatable enough to notice.
+
+No explanation is recorded here, because none has been established. Both boots run the same `setup()` path. Do not assume a cause; if this difference matters to a future power budget, it needs its own test.
+
+### Wake transient still uncharacterized
+
+The DMM again briefly displayed overload around some wake transitions. No peak-current value was captured. This is the same limitation recorded for the INA-continuous run and for the Wi-Fi test, and it will keep recurring until the transient is looked at with an instrument faster than a handheld meter.

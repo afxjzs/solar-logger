@@ -6,11 +6,7 @@ The BMW Solar Logger measures an INA228-powered solar measurement path with an X
 
 ## Repository
 
-Canonical repository:
-
-```text
-/Users/afxjzs/dev/projects/solar-charger
-```
+All paths in these documents are relative to the repository root.
 
 | Area | Path |
 | --- | --- |
@@ -276,14 +272,36 @@ If the device does not report continuous mode despite boot configuration reporti
 | Hardware charge/energy accumulation | preserved | lost during sleep |
 | High-resolution samples during sleep | lost | lost |
 | Solar measurement during sleep | preserved | sacrificed |
-| Measured supply current | 1.07 mA | pending |
+| Measured supply current | 1.07 mA | 0.33 mA |
 
-The INA-continuous variant is the one a real duty-cycled logger would probably want, because the INA228's hardware accumulators keep integrating charge through the sleep window even though the ESP32 is not sampling. The INA-OFF variant tells us what that preservation costs.
+**Continuous INA228 measurement through the ESP32's sleep costs roughly 0.74 mA, and buys continuous hardware CHARGE and ENERGY accumulation through the sleep window. Shutting both down reaches roughly 0.33 mA, with measurement and accumulation completely suspended for that period.**
 
-#### Expected saving, from the datasheet
+Neither option is simply better. 0.74 mA is the price of not having a hole in the charge record, and whether that price is worth paying depends on the deployment.
 
-INA228 IQ is specified at 640 µA typical and 750 µA maximum; IQSD in shutdown is 2.8 µA typical and 5 µA maximum. Arithmetic suggests shutdown should save roughly 640 µA against the 1.07 mA baseline. **That is a datasheet prediction, not a measurement.** Record what the DMM shows.
+#### Measured result
+
+Run on 2026-09-10. Full conditions and qualifications are in [LAB_NOTES.md](LAB_NOTES.md).
+
+| Phase | Displayed current |
+| --- | ---: |
+| Initial cold-start awake | approximately 28.7-28.8 mA |
+| Post-deep-sleep awake | approximately 28.3-28.4 mA |
+| Deep sleep, INA228 continuous | 1.07 mA |
+| Deep sleep, INA228 shutdown | 0.33 mA |
+
+```text
+1.07 mA - 0.33 mA = 0.74 mA saved by INA228 shutdown
+```
+
+Against the awake baseline, deep sleep with the INA228 shut down is roughly a 98.8% reduction, about 86x.
+
+The datasheet prediction held. SLYS021A specifies IQ at 640 µA typical and 750 µA maximum against IQSD of 2.8 µA typical, predicting a saving near 640 µA before the test was run; the measured 740 µA sits between the typical and maximum figures.
+
+Two things this run did not settle:
+
+- **The wake transient.** The DMM again briefly displayed overload around some wake transitions. Peak current remains uncharacterized.
+- **Why cold-start awake current differs from post-sleep awake current** by roughly 0.4 mA. Observed and repeatable, cause not established, no explanation assumed.
 
 #### Next measurement goal
 
-Run `POWER TEST SLEEP INA OFF` on hardware and compare against the 1.07 mA INA-continuous baseline. Hardware power-gating stays a fallback and should only be considered once this result is in.
+Nothing is scheduled here. The INA228 shutdown question this variant existed to answer is answered. Remaining power work and future concepts are tracked in [BACKLOG.md](BACKLOG.md).
