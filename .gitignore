@@ -20,6 +20,7 @@ data/*.log
 *.swp
 *~
 .upload-in-progress
+.serial-command
 
 # Arduino build output, if we later choose local build directories
 build/

@@ -11,6 +11,11 @@
 		"/^bash -n tools/upload\\.sh$/": {
 			"approve": true,
 			"matchCommandLine": true
-		}
+		},
+		"/^bash -n tools/send\\.sh$/": {
+			"approve": true,
+			"matchCommandLine": true
+		},
+		"uv": true
 	}
 }

@@ -225,6 +225,7 @@ constexpr uint32_t NVS_CHECKPOINT_EVERY_INTERVALS = 1;
 Preferences preferences;
 
 constexpr char NVS_NAMESPACE[] = "solarlog";
+constexpr char NVS_WIFI_POWER_TEST_KEY[] = "wifi_test_armed";
 
 constexpr uint32_t NVS_SCHEMA_VERSION = 2;
 
@@ -271,6 +272,13 @@ unsigned long lastHeartbeatMs = 0;
 // millis() timestamp for the most recent high-resolution CSV_SAMPLE sent to
 // the laptop. This is independent of the 60-second accounting interval.
 unsigned long lastLiveSampleMs = 0;
+
+constexpr unsigned long WIFI_POWER_TEST_PHASE_MS = 30UL * 1000UL;
+
+bool wifiPowerTestArmed = false;
+bool wifiPowerTestRunning = false;
+uint8_t wifiPowerTestPhase = 0;
+unsigned long wifiPowerTestPhaseStartedMs = 0;
 
 
 // This is OUR command-building buffer.
@@ -1276,6 +1284,56 @@ bool saveCheckpoint() {
 }
 
 
+// The Wi-Fi power-test flag is stored under its own key. It is deliberately
+// separate from the experiment checkpoint so arming or stopping this bench
+// test cannot alter experiment totals, interval numbers, or experiment IDs.
+bool saveWifiPowerTestArmed(bool armed) {
+  Serial.print("[NVS] Writing ");
+  Serial.print(NVS_WIFI_POWER_TEST_KEY);
+  Serial.print(" = ");
+  Serial.println(armed ? "true" : "false");
+
+  if (!preferences.begin(NVS_NAMESPACE, false)) {
+    Serial.println("[ERROR] Could not open NVS for Wi-Fi power-test flag.");
+    return false;
+  }
+
+  size_t written = preferences.putBool(NVS_WIFI_POWER_TEST_KEY, armed);
+  preferences.end();
+
+  if (written != sizeof(bool)) {
+    Serial.println("[ERROR] Failed to write Wi-Fi power-test NVS flag.");
+    return false;
+  }
+
+  Serial.println("[NVS] Wi-Fi power-test flag saved: ALL OK");
+  return true;
+}
+
+
+bool loadWifiPowerTestArmed() {
+  if (!preferences.begin(NVS_NAMESPACE, true)) {
+    Serial.println(
+        "[NVS] Wi-Fi power-test flag unavailable; defaulting to not armed.");
+    return true;
+  }
+
+  if (!preferences.isKey(NVS_WIFI_POWER_TEST_KEY)) {
+    preferences.end();
+    wifiPowerTestArmed = false;
+    Serial.println("[NVS] Wi-Fi power-test flag: not armed.");
+    return true;
+  }
+
+  wifiPowerTestArmed = preferences.getBool(NVS_WIFI_POWER_TEST_KEY, false);
+  preferences.end();
+
+  Serial.print("[NVS] Wi-Fi power-test flag: ");
+  Serial.println(wifiPowerTestArmed ? "armed" : "not armed");
+  return true;
+}
+
+
 // ============================================================================
 // LOAD STATE FROM NVS
 // ============================================================================
@@ -1666,6 +1724,107 @@ void initializeWifiOff() {
 }
 
 
+void startWifiPowerTestPhase(uint8_t phase) {
+  wifiPowerTestPhase = phase;
+  wifiPowerTestPhaseStartedMs = millis();
+
+  if (phase == 1) {
+    // Explicitly turn the radio OFF for each OFF phase, including adjacent
+    // OFF phases at the boundary between repeated cycles.
+    disableWifi();
+    Serial.println("[POWER TEST] Phase 1/3: WIFI OFF for 30 seconds");
+
+  } else if (phase == 2) {
+    enableWifi();
+    Serial.println("[POWER TEST] Phase 2/3: WIFI ON for 30 seconds");
+
+  } else if (phase == 3) {
+    disableWifi();
+    Serial.println("[POWER TEST] Phase 3/3: WIFI OFF for 30 seconds");
+
+  } else {
+    Serial.print("[POWER TEST] ERROR: Invalid phase: ");
+    Serial.println(phase);
+  }
+}
+
+
+void updateWifiPowerTest(unsigned long now) {
+  if (!wifiPowerTestRunning ||
+      now - wifiPowerTestPhaseStartedMs < WIFI_POWER_TEST_PHASE_MS) {
+    return;
+  }
+
+  if (wifiPowerTestPhase == 1) {
+    startWifiPowerTestPhase(2);
+
+  } else if (wifiPowerTestPhase == 2) {
+    startWifiPowerTestPhase(3);
+
+  } else if (wifiPowerTestPhase == 3) {
+    Serial.println("[POWER TEST] Cycle complete. Repeating...");
+    startWifiPowerTestPhase(1);
+
+  } else {
+    Serial.println("[POWER TEST] ERROR: Stopping due to invalid phase.");
+    wifiPowerTestRunning = false;
+  }
+}
+
+
+void armWifiPowerTest() {
+  if (!saveWifiPowerTestArmed(true)) {
+    Serial.println("[POWER TEST] ERROR: Test was not armed.");
+    return;
+  }
+
+  wifiPowerTestArmed = true;
+  wifiPowerTestRunning = true;
+  Serial.println("[POWER TEST] Wi-Fi power test ARMED");
+  startWifiPowerTestPhase(1);
+}
+
+
+void stopWifiPowerTest() {
+  wifiPowerTestRunning = false;
+  wifiPowerTestPhase = 0;
+  disableWifi();
+
+  if (!saveWifiPowerTestArmed(false)) {
+    Serial.println(
+        "[POWER TEST] ERROR: Could not clear persisted test flag.");
+    wifiPowerTestArmed = true;
+    return;
+  }
+
+  wifiPowerTestArmed = false;
+  Serial.println("[POWER TEST] Wi-Fi power test stopped.");
+  Serial.println("[POWER TEST] Persisted test flag cleared.");
+}
+
+
+void printWifiPowerTestStatus() {
+  Serial.print("[POWER TEST] Armed: ");
+  Serial.println(wifiPowerTestArmed ? "YES" : "NO");
+
+  Serial.print("[POWER TEST] Running: ");
+  Serial.println(wifiPowerTestRunning ? "YES" : "NO");
+
+  if (!wifiPowerTestRunning) {
+    Serial.println("[POWER TEST] Phase: NONE");
+    return;
+  }
+
+  Serial.print("[POWER TEST] Phase: ");
+  Serial.print(wifiPowerTestPhase);
+  Serial.println("/3");
+
+  Serial.print("[POWER TEST] Elapsed in phase: ");
+  Serial.print((millis() - wifiPowerTestPhaseStartedMs) / 1000UL);
+  Serial.println(" seconds");
+}
+
+
 void printHelp() {
   Serial.println();
 
@@ -1685,6 +1844,15 @@ void printHelp() {
 
   Serial.println(
       "  WIFI STATUS - print Wi-Fi state and mode");
+
+    Serial.println(
+      "  POWER TEST WIFI - arm the repeating Wi-Fi power test");
+
+    Serial.println(
+      "  POWER TEST STOP - stop the Wi-Fi power test");
+
+    Serial.println(
+      "  POWER TEST STATUS - print Wi-Fi power-test state");
 
   Serial.println(
       "  RESET      - explain reset confirmation");
@@ -1894,6 +2062,18 @@ void processCommand(String command) {
   } else if (command == "WIFI STATUS") {
 
     printWifiStatus();
+
+  } else if (command == "POWER TEST WIFI") {
+
+    armWifiPowerTest();
+
+  } else if (command == "POWER TEST STOP") {
+
+    stopWifiPowerTest();
+
+  } else if (command == "POWER TEST STATUS") {
+
+    printWifiPowerTestStatus();
 
   } else if (command == "RESET") {
 
@@ -2463,6 +2643,20 @@ void setup() {
     }
   }
 
+  // The flag must survive a USB disconnect and reboot before battery power is
+  // applied, so load it independently from the experiment checkpoint.
+  if (!loadWifiPowerTestArmed()) {
+    Serial.println(
+        "[FATAL] Wi-Fi power-test state could not be loaded. Logger halted.");
+
+    while (true) {
+      Serial.println(
+          "[FATAL] NOT ALL OK - Wi-Fi power-test NVS state requires attention.");
+
+      delay(5000);
+    }
+  }
+
 
   // --------------------------------------------------------------------------
   // Let the ADC settle.
@@ -2660,6 +2854,13 @@ void setup() {
   printCsvHeader();
 
   printHelp();
+
+  if (wifiPowerTestArmed) {
+    wifiPowerTestRunning = true;
+    Serial.println("[POWER TEST] Persisted Wi-Fi power test found.");
+    Serial.println("[POWER TEST] Wi-Fi power test ARMED");
+    startWifiPowerTestPhase(1);
+  }
 }
 
 
@@ -2685,6 +2886,11 @@ void loop() {
 
   unsigned long now =
       millis();
+
+  // Keep the power test responsive without delay(30000), so Serial commands,
+  // INA228 measurements, heartbeat output, CSV output, and NVS accounting
+  // continue running normally during every Wi-Fi phase.
+  updateWifiPowerTest(now);
 
 
 // --------------------------------------------------------------------------

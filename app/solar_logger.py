@@ -38,6 +38,10 @@ from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import mplcursors
+from matplotlib.ticker import FormatStrFormatter
+from matplotlib.widgets import Button
 import serial
 from serial.tools import list_ports
 
@@ -64,6 +68,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DATA_DIR = PROJECT_ROOT / "data"
 UPLOAD_HANDSHAKE_FILE = PROJECT_ROOT / ".upload-in-progress"
+SERIAL_COMMAND_FILE = PROJECT_ROOT / ".serial-command"
 
 SAMPLES_FILE = DATA_DIR / "samples.csv"
 INTERVALS_FILE = DATA_DIR / "intervals.csv"
@@ -86,6 +91,22 @@ RECONNECT_DELAY_SECONDS = 1
 # may instead be in its ROM downloader, resetting, or otherwise silent.
 SILENT_WARNING_SECONDS = 3
 SILENT_DISCONNECT_SECONDS = 10
+
+# Matplotlib stores only this recent display window. CSV files remain the
+# durable, complete history and are never trimmed by the plotter.
+PLOT_HISTORY_SECONDS = 900
+
+LOCAL_TIMEZONE = datetime.now().astimezone().tzinfo
+PLOT_STATE = {
+    "auto_follow": True,
+    "cursors": [],
+    "buttons": [],
+    "lines": [],
+    "status_text": None,
+    "axes": [],
+    "follow_button": None,
+    "window_seconds": PLOT_HISTORY_SECONDS,
+}
 
 
 # ============================================================================
@@ -237,6 +258,87 @@ def close_serial_connection(connection):
     return True
 
 
+def remove_pending_command():
+    """Remove a rejected command file and report filesystem failures."""
+
+    try:
+        SERIAL_COMMAND_FILE.unlink()
+
+    except FileNotFoundError:
+        return True
+
+    except OSError as error:
+        print(f"[COMMAND] ERROR: Could not remove pending command: {error}")
+        return False
+
+    return True
+
+
+def send_pending_command(ser, sent_command):
+    """
+    Send one command handed off by tools/send.sh.
+
+    The newline is required because the firmware processes a command only
+    when it receives the line terminator. A failed send is rejected explicitly
+    and removed so it cannot execute unexpectedly after a later reconnect.
+    """
+
+    if not SERIAL_COMMAND_FILE.exists():
+        return None
+
+    try:
+        command = SERIAL_COMMAND_FILE.read_text(encoding="utf-8")
+
+    except OSError as error:
+        print(f"[COMMAND] ERROR: Could not read pending command: {error}")
+        return sent_command
+
+    if not command.endswith("\n"):
+        print("[COMMAND] ERROR: Pending command is incomplete; rejecting it.")
+        remove_pending_command()
+        return None
+
+    command = command[:-1]
+
+    if not command or "\n" in command or "\r" in command:
+        print("[COMMAND] ERROR: Pending command is malformed; rejecting it.")
+        remove_pending_command()
+        return None
+
+    if ser is None:
+        print(
+            "[COMMAND] ERROR: Serial is not connected; command was not sent: "
+            f"{command}"
+        )
+        remove_pending_command()
+        return None
+
+    if command == sent_command:
+        return sent_command
+
+    try:
+        ser.write((command + "\n").encode("utf-8"))
+        ser.flush()
+
+    except (serial.SerialException, OSError) as error:
+        print(
+            "[COMMAND] ERROR: Could not send command over Serial: "
+            f"{error}"
+        )
+        remove_pending_command()
+        return None
+
+    print(f"[COMMAND] Sending to ESP32: {command}")
+    if not remove_pending_command():
+        print(
+            "[COMMAND] ERROR: Command was sent but remains pending; "
+            "it will not be sent again during this logger run."
+        )
+        return command
+
+    return None
+
+
 # ============================================================================
 # CSV PARSING
 # ============================================================================
@@ -373,6 +475,20 @@ def current_host_timestamp():
     return datetime.now().astimezone().isoformat()
 
 
+def parse_captured_at(value):
+    """Parse one stored ISO 8601 timestamp and require timezone information."""
+
+    if isinstance(value, datetime):
+        captured_at = value
+    else:
+        captured_at = datetime.fromisoformat(value)
+
+    if captured_at.tzinfo is None or captured_at.utcoffset() is None:
+        raise ValueError("captured_at is not timezone-aware")
+
+    return captured_at
+
+
 def open_csv_file(path, columns):
     """
     Open a CSV file for append.
@@ -419,6 +535,149 @@ def open_csv_file(path, columns):
     return handle, writer
 
 
+def load_recent_samples(path):
+    """Load the latest experiment's recent valid samples for the plot."""
+
+    print(f"[PLOT] Loading recent history from {path}...")
+
+    if not path.exists():
+        print("[PLOT] No historical samples available. Starting with empty plot.")
+        return []
+
+    valid_rows = []
+
+    try:
+        with path.open("r", newline="") as handle:
+            reader = csv.DictReader(handle)
+
+            if reader.fieldnames != SAMPLE_COLUMNS:
+                print(
+                    "[PLOT] ERROR: Historical samples header changed while "
+                    "loading; refusing to plot it."
+                )
+                return []
+
+            for row_number, row in enumerate(reader, start=2):
+                try:
+                    row["experiment_id"] = int(row["experiment_id"])
+                    for column in SAMPLE_FIRMWARE_COLUMNS[1:]:
+                        row[column] = float(row[column])
+                    row["captured_at"] = parse_captured_at(row["captured_at"])
+
+                except (KeyError, TypeError, ValueError) as error:
+                    print(
+                        "[PLOT] WARNING: Skipping malformed historical sample "
+                        f"at row {row_number}: {error}"
+                    )
+                    continue
+
+                valid_rows.append(row)
+
+    except OSError as error:
+        print(f"[PLOT] ERROR: Could not read historical samples: {error}")
+        return []
+
+    if not valid_rows:
+        print("[PLOT] No historical samples available. Starting with empty plot.")
+        return []
+
+    newest_sample = max(valid_rows, key=lambda row: row["captured_at"])
+    latest_experiment_id = newest_sample["experiment_id"]
+    newest_time = newest_sample["captured_at"]
+    cutoff = newest_time.timestamp() - PLOT_HISTORY_SECONDS
+
+    recent_rows = [
+        row
+        for row in valid_rows
+        if (
+            row["experiment_id"] == latest_experiment_id
+            and row["captured_at"].timestamp() >= cutoff
+        )
+    ]
+    recent_rows.sort(key=lambda row: row["captured_at"])
+
+    print(f"[PLOT] Latest experiment: {latest_experiment_id}")
+    print(
+        f"[PLOT] Loaded {len(recent_rows)} samples covering "
+        f"{PLOT_HISTORY_SECONDS // 60} minutes."
+    )
+    print("[PLOT] Historical plot initialization: ALL OK")
+    return recent_rows
+
+
+def load_recent_intervals(path, experiment_id=None):
+    """Load recent interval accounting rows for the displayed experiment."""
+
+    print(f"[PLOT] Loading recent charge history from {path}...")
+
+    if not path.exists():
+        print("[PLOT] No historical charge intervals available.")
+        return []
+
+    valid_rows = []
+
+    try:
+        with path.open("r", newline="") as handle:
+            reader = csv.DictReader(handle)
+
+            if reader.fieldnames != INTERVAL_COLUMNS:
+                print(
+                    "[PLOT] ERROR: Historical intervals header does not match "
+                    "the current schema; refusing to plot it."
+                )
+                return []
+
+            for row_number, row in enumerate(reader, start=2):
+                try:
+                    row["experiment_id"] = int(row["experiment_id"])
+                    row["running_charge_mAh"] = float(row["running_charge_mAh"])
+                    row["captured_at"] = parse_captured_at(row["captured_at"])
+
+                except (KeyError, TypeError, ValueError) as error:
+                    print(
+                        "[PLOT] WARNING: Skipping malformed historical interval "
+                        f"at row {row_number}: {error}"
+                    )
+                    continue
+
+                valid_rows.append(row)
+
+    except OSError as error:
+        print(f"[PLOT] ERROR: Could not read historical intervals: {error}")
+        return []
+
+    if experiment_id is None and valid_rows:
+        newest_row = max(valid_rows, key=lambda row: row["captured_at"])
+        experiment_id = newest_row["experiment_id"]
+
+    valid_rows = [
+        row for row in valid_rows
+        if row["experiment_id"] == experiment_id
+    ]
+
+    newest_time = max((row["captured_at"] for row in valid_rows), default=None)
+
+    if newest_time is None:
+        print(
+            f"[PLOT] No historical charge intervals for experiment "
+            f"{experiment_id}."
+        )
+        return []
+
+    cutoff = newest_time.timestamp() - PLOT_HISTORY_SECONDS
+    recent_rows = [
+        row
+        for row in valid_rows
+        if row["captured_at"].timestamp() >= cutoff
+    ]
+    recent_rows.sort(key=lambda row: row["captured_at"])
+    print(
+        f"[PLOT] Loaded {len(recent_rows)} charge intervals covering "
+        f"{PLOT_HISTORY_SECONDS // 60} minutes."
+    )
+    return recent_rows
+
+
 # ============================================================================
 # LIVE GRAPH
 # ============================================================================
@@ -433,28 +692,305 @@ def create_graphs():
     plt.ion()
 
     figure, axes = plt.subplots(
-        3,
+        4,
         1,
-        figsize=(11, 9),
+        figsize=(11, 10),
         sharex=True,
     )
 
+    figure.subplots_adjust(
+        top=0.90,
+        bottom=0.12,
+        hspace=0.30,
+    )
+
     figure.suptitle("BMW Solar Logger")
+    figure.canvas.mpl_connect("key_press_event", handle_plot_key)
+    figure.canvas.mpl_connect("button_press_event", handle_plot_press)
+    figure.canvas.mpl_connect("button_release_event", handle_plot_release)
+    add_plot_controls(figure)
+    initialize_plot_lines(figure, axes)
+    print(f"[PLOT] History window: {PLOT_HISTORY_SECONDS // 60} minutes")
+    print("[PLOT] Auto-follow: ON")
+    print("[PLOT] Hover inspection: enabled")
 
     return figure, axes
 
 
-def update_graphs(figure, axes, samples):
+def set_auto_follow(enabled):
+    """Set whether redraws follow new data or preserve the user's view."""
+
+    if PLOT_STATE["auto_follow"] == enabled:
+        return
+
+    PLOT_STATE["auto_follow"] = enabled
+    print(f"[PLOT] Auto-follow: {'ON' if enabled else 'OFF'}")
+
+    if PLOT_STATE["status_text"] is not None:
+        PLOT_STATE["status_text"].set_text(
+            f"Auto-follow: {'ON' if enabled else 'OFF'}"
+        )
+        PLOT_STATE["status_text"].figure.canvas.draw_idle()
+
+    if PLOT_STATE["follow_button"] is not None:
+        PLOT_STATE["follow_button"].label.set_text(
+            "Follow ON" if enabled else "Follow OFF"
+        )
+
+
+def add_plot_controls(figure):
+    """Add visible controls because the native backend toolbar may be hidden."""
+
+    control_specs = [
+        ("Home", 0.55, reset_plot_view),
+        ("-", 0.64, zoom_out),
+        ("+", 0.73, zoom_in),
+        ("Follow", 0.82, toggle_follow),
+    ]
+
+    for label, left, callback in control_specs:
+        button_axis = figure.add_axes([left, 0.035, 0.075, 0.04])
+        button = Button(button_axis, label)
+        button.on_clicked(callback)
+        PLOT_STATE["buttons"].append(button)
+
+    PLOT_STATE["status_text"] = figure.text(
+        0.08,
+        0.055,
+        "Auto-follow: ON",
+        ha="left",
+        va="center",
+    )
+    PLOT_STATE["follow_button"] = next(
+        button
+        for button in PLOT_STATE["buttons"]
+        if button.label.get_text() == "Follow"
+    )
+    PLOT_STATE["follow_button"].label.set_text("Follow ON")
+
+
+def get_plot_toolbar(event):
+    """Return the active Matplotlib toolbar, if this backend provides one."""
+
+    canvas = getattr(event, "canvas", None)
+    manager = getattr(canvas, "manager", None)
+    return getattr(manager, "toolbar", None)
+
+
+def reset_plot_view(event=None):
+    set_auto_follow(True)
+    print("[PLOT] Home: auto-follow restored.")
+
+
+def toggle_plot_zoom(event=None):
+    toolbar = get_plot_toolbar(event) if event is not None else None
+
+    if toolbar is None:
+        print("[PLOT] WARNING: Zoom control is unavailable in this backend.")
+        return
+
+    set_auto_follow(False)
+    toolbar.zoom()
+
+
+def toggle_plot_pan(event=None):
+    toolbar = get_plot_toolbar(event) if event is not None else None
+
+    if toolbar is None:
+        print("[PLOT] WARNING: Pan control is unavailable in this backend.")
+        return
+
+    set_auto_follow(False)
+    toolbar.pan()
+
+
+def set_plot_window(seconds):
+    """Change the shared visible time window without touching stored data."""
+
+    axes = PLOT_STATE["axes"]
+
+    if len(axes) == 0:
+        print("[PLOT] WARNING: Plot axes are not ready for zoom.")
+        return
+
+    current_start, current_end = axes[0].get_xlim()
+    current_center = (current_start + current_end) / 2
+    current_width = current_end - current_start
+    new_width = seconds / 86400
+
+    if current_width <= 0:
+        print("[PLOT] WARNING: Current plot window is invalid.")
+        return
+
+    if seconds < current_width * 86400:
+        new_center = current_center
+    else:
+        new_center = current_end
+
+    for axis in axes:
+        axis.set_xlim(
+            new_center - new_width / 2,
+            new_center + new_width / 2,
+        )
+
+    PLOT_STATE["window_seconds"] = seconds
+    axes[0].figure.canvas.draw_idle()
+    axes[0].figure.canvas.flush_events()
+
+
+def zoom_in(event=None):
+    """Show a narrower time window around the current view."""
+
+    axes = PLOT_STATE["axes"]
+
+    if len(axes) == 0:
+        return
+
+    set_plot_window(max(PLOT_STATE["window_seconds"] * 0.5, 1))
+    print("[PLOT] Zoom: IN")
+
+
+def zoom_out(event=None):
+    """Show a wider time window around the current view."""
+
+    axes = PLOT_STATE["axes"]
+
+    if len(axes) == 0:
+        return
+
+    set_plot_window(min(PLOT_STATE["window_seconds"] * 2, PLOT_HISTORY_SECONDS))
+    print("[PLOT] Zoom: OUT")
+
+
+def toggle_follow(event=None):
+    set_auto_follow(not PLOT_STATE["auto_follow"])
+
+
+def handle_plot_key(event):
+    """Handle the keyboard shortcut for resuming the live plot view."""
+
+    if event.key and event.key.lower() == "f":
+        toggle_follow(event)
+
+    elif event.key and event.key.lower() == "h":
+        reset_plot_view(event)
+
+    elif event.key and event.key.lower() == "z":
+        zoom_in(event)
+
+    elif event.key and event.key.lower() == "p":
+        zoom_out(event)
+
+
+def handle_plot_press(event):
+    """Stop auto-follow as soon as a toolbar zoom or pan starts."""
+
+    toolbar = get_plot_toolbar(event)
+
+    if toolbar is not None and toolbar.mode:
+        set_auto_follow(False)
+
+
+def handle_plot_release(event):
+    """Stop auto-follow after a toolbar zoom or pan operation."""
+
+    toolbar = get_plot_toolbar(event)
+
+    if toolbar is not None and toolbar.mode:
+        set_auto_follow(False)
+
+
+def configure_hover(figure, lines, labels, units):
+    """Attach hover annotations to the current plot lines."""
+
+    for cursor in PLOT_STATE["cursors"]:
+        cursor.remove()
+
+    PLOT_STATE["cursors"] = []
+
+    for line, label, unit in zip(lines, labels, units):
+        cursor = mplcursors.cursor(line, hover=True)
+
+        @cursor.connect("add")
+        def on_add(selection, label=label, unit=unit):
+            x_value, y_value = selection.target
+            timestamp = mdates.num2date(x_value, tz=LOCAL_TIMEZONE)
+            selection.annotation.set_text(
+                f"{timestamp:%H:%M:%S}\n{label}: {y_value:.3f} {unit}"
+            )
+
+        PLOT_STATE["cursors"].append(cursor)
+
+    if not lines:
+        print("[PLOT] WARNING: Hover inspection has no plotted data yet.")
+
+
+def initialize_plot_lines(figure, axes):
+    """Create persistent artists once; live updates only replace their data."""
+
+    for axis in axes:
+        axis.grid(True)
+        axis.xaxis.set_major_locator(
+            mdates.AutoDateLocator(minticks=5, maxticks=9)
+        )
+        axis.xaxis.set_major_formatter(
+            mdates.DateFormatter("%H:%M:%S", tz=LOCAL_TIMEZONE)
+        )
+        axis.tick_params(axis="x", rotation=0)
+
+    axes[0].set_ylabel("Voltage (V)")
+    axes[0].yaxis.set_major_formatter(FormatStrFormatter("%.4f"))
+    axes[1].set_ylabel("Current (mA)")
+    axes[1].yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+    axes[2].set_ylabel("Power (mW)")
+    axes[2].yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+    axes[3].set_ylabel("Accumulated charge (mAh)")
+    axes[3].yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+    axes[3].set_xlabel("Local time")
+
+    PLOT_STATE["axes"] = axes
+    PLOT_STATE["lines"] = [
+        axes[0].plot([], [])[0],
+        axes[1].plot([], [])[0],
+        axes[2].plot([], [])[0],
+        axes[3].plot([], [])[0],
+    ]
+    configure_hover(
+        figure,
+        PLOT_STATE["lines"],
+        ["Voltage", "Current", "Power", "Charge"],
+        ["V", "mA", "mW", "mAh"],
+    )
+
+
+def update_graphs(figure, axes, samples, charge_intervals):
     """
     Redraw the live charts using collected high-resolution samples.
     """
 
-    if not samples:
+    if not samples and not charge_intervals:
         return
 
-    times = [
-        row["elapsed_seconds"]
+    preserved_limits = None
+
+    if not PLOT_STATE["auto_follow"]:
+        preserved_limits = [
+            (axis.get_xlim(), axis.get_ylim())
+            for axis in axes
+        ]
+
+    sample_times = [
+        math.nan
+        if row.get("plot_gap")
+        else mdates.date2num(parse_captured_at(row["captured_at"]))
         for row in samples
+    ]
+
+    charge_times = [
+        math.nan
+        if row.get("plot_gap")
+        else mdates.date2num(parse_captured_at(row["captured_at"]))
+        for row in charge_intervals
     ]
 
     voltages = [
@@ -472,53 +1008,140 @@ def update_graphs(figure, axes, samples):
         for row in samples
     ]
 
-    for axis in axes:
-        axis.clear()
-        axis.grid(True)
+    accumulated_charge = [
+        row["running_charge_mAh"]
+        for row in charge_intervals
+    ]
 
-    axes[0].plot(times, voltages)
-    axes[0].set_ylabel("Voltage (V)")
+    voltage_line, current_line, power_line, charge_line = PLOT_STATE["lines"]
+    voltage_line.set_data(sample_times, voltages)
+    current_line.set_data(sample_times, currents)
+    power_line.set_data(sample_times, powers)
+    charge_line.set_data(charge_times, accumulated_charge)
 
-    axes[1].plot(times, currents)
-    axes[1].set_ylabel("Current (mA)")
+    if PLOT_STATE["auto_follow"]:
+        all_times = [
+            value
+            for value in sample_times + charge_times
+            if not math.isnan(value)
+        ]
 
-    axes[2].plot(times, powers)
-    axes[2].set_ylabel("Power (mW)")
-    axes[2].set_xlabel("Experiment elapsed time (seconds)")
+        if all_times:
+            newest_time = max(all_times)
+            oldest_time = (
+                newest_time
+                - PLOT_STATE["window_seconds"] / 86400
+            )
 
-    experiment_id = samples[-1]["experiment_id"]
+            for axis in axes:
+                axis.set_xlim(oldest_time, newest_time)
+
+        for axis in axes:
+            axis.relim()
+            axis.autoscale_view(scalex=False, scaley=True)
+    else:
+        for axis, (x_limits, y_limits) in zip(axes, preserved_limits):
+            axis.set_xlim(x_limits)
+            axis.set_ylim(y_limits)
+
+    experiment_id = (
+        samples[-1]["experiment_id"]
+        if samples
+        else charge_intervals[-1]["experiment_id"]
+    )
 
     figure.suptitle(
         f"BMW Solar Logger - Experiment {experiment_id}"
     )
 
-    figure.tight_layout()
-
     figure.canvas.draw_idle()
     figure.canvas.flush_events()
 
-    # Without this tiny pause, matplotlib's GUI event loop does not always get
-    # enough time to repaint the window.
-    plt.pause(0.01)
+    # draw_idle schedules the repaint without blocking telemetry capture. The
+    # main loop continues to call flush_events while waiting for Serial data.
 
 
-def insert_plot_discontinuity(samples):
-    """Insert one display-only NaN row so matplotlib breaks every line."""
+def trim_plot_history(samples):
+    """Keep only the rolling display window and meaningful gap markers."""
 
-    if not samples or samples[-1].get("plot_gap"):
+    timestamped_samples = [
+        row
+        for row in samples
+        if not row.get("plot_gap")
+    ]
+
+    if not timestamped_samples:
+        return []
+
+    newest_time = max(
+        parse_captured_at(row["captured_at"])
+        for row in timestamped_samples
+    )
+    cutoff = newest_time.timestamp() - PLOT_HISTORY_SECONDS
+    retained_samples = [
+        row
+        for row in timestamped_samples
+        if parse_captured_at(row["captured_at"]).timestamp() >= cutoff
+    ]
+
+    retained_ids = {id(row) for row in retained_samples}
+    trimmed = []
+
+    for index, row in enumerate(samples):
+        if not row.get("plot_gap"):
+            if id(row) in retained_ids:
+                trimmed.append(row)
+            continue
+
+        has_retained_before = any(
+            id(previous) in retained_ids
+            for previous in samples[:index]
+            if not previous.get("plot_gap")
+        )
+        has_retained_after = any(
+            id(next_row) in retained_ids
+            for next_row in samples[index + 1:]
+            if not next_row.get("plot_gap")
+        )
+
+        if has_retained_before and has_retained_after:
+            trimmed.append(row)
+
+    return trimmed
+
+
+def insert_plot_discontinuity(samples, charge_intervals):
+    """Insert one display-only gap marker into both chart data sets."""
+
+    if (
+        (samples and samples[-1].get("plot_gap"))
+        or (charge_intervals and charge_intervals[-1].get("plot_gap"))
+    ):
+        return False
+
+    if not samples and not charge_intervals:
         return False
 
     # NaN is understood by matplotlib as a missing point, so the line is
     # broken instead of connecting the samples on either side. This marker is
     # display metadata only and must never be written to telemetry CSV files.
-    samples.append({
-        "plot_gap": True,
-        "elapsed_seconds": math.nan,
-        "voltage_V": math.nan,
-        "current_mA": math.nan,
-        "power_mW": math.nan,
-        "experiment_id": samples[-1]["experiment_id"],
-    })
+    if samples:
+        samples.append({
+            "plot_gap": True,
+            "elapsed_seconds": math.nan,
+            "voltage_V": math.nan,
+            "current_mA": math.nan,
+            "power_mW": math.nan,
+            "experiment_id": samples[-1]["experiment_id"],
+        })
+
+    if charge_intervals:
+        charge_intervals.append({
+            "plot_gap": True,
+            "captured_at": None,
+            "running_charge_mAh": math.nan,
+            "experiment_id": charge_intervals[-1]["experiment_id"],
+        })
     print("[PLOT] Serial interruption: inserting graph discontinuity.")
     return True
 
@@ -566,6 +1189,54 @@ def main():
         EVENT_COLUMNS,
     )
 
+    live_samples = load_recent_samples(SAMPLES_FILE)
+    current_experiment_id = (
+        live_samples[-1]["experiment_id"]
+        if live_samples
+        else None
+    )
+    live_charge_intervals = load_recent_intervals(
+        INTERVALS_FILE,
+        current_experiment_id,
+    )
+
+    if current_experiment_id is None and live_charge_intervals:
+        current_experiment_id = live_charge_intervals[-1]["experiment_id"]
+
+    historical_times = [
+        row["captured_at"]
+        for row in live_samples + live_charge_intervals
+        if not row.get("plot_gap")
+    ]
+
+    print("[PLOT] Loading historical telemetry...")
+    print(f"[PLOT] Loaded {len(live_samples)} sample rows.")
+    print(f"[PLOT] Loaded {len(live_charge_intervals)} interval rows.")
+
+    if historical_times:
+        history_start = min(historical_times)
+        history_end = max(historical_times)
+        print(
+            f"[PLOT] History range: {history_start:%H:%M:%S} -> "
+            f"{history_end:%H:%M:%S}"
+        )
+
+        newest_history = max(historical_times)
+        history_age = datetime.now(tz=newest_history.tzinfo) - newest_history
+
+        if history_age.total_seconds() > PLOT_HISTORY_SECONDS:
+            print(
+                "[PLOT] WARNING: Historical telemetry is stale; live data "
+                "will replace it as it arrives."
+            )
+
+        print("[PLOT] Loaded historical telemetry: ALL OK")
+    else:
+        print(
+            "[PLOT] No valid historical telemetry loaded; waiting for live "
+            "data."
+        )
+
 
     # ------------------------------------------------------------------------
     # Create graph
@@ -573,10 +1244,12 @@ def main():
 
     figure, axes = create_graphs()
 
-    live_samples = []
-    plot_gap_inserted = False
+    if live_samples:
+        update_graphs(figure, axes, live_samples, live_charge_intervals)
+    elif live_charge_intervals:
+        update_graphs(figure, axes, [], live_charge_intervals)
 
-    current_experiment_id = None
+    plot_gap_inserted = False
 
 
     # ------------------------------------------------------------------------
@@ -584,6 +1257,7 @@ def main():
     # ------------------------------------------------------------------------
 
     ser = None
+    sent_command_pending_cleanup = None
     serial_opened_at = None
     last_serial_line_at = None
     silent_warning_printed = False
@@ -614,6 +1288,13 @@ def main():
                 if not upload_release_acknowledged:
                     print("[SERIAL] Upload REQUESTED. Releasing ESP32 port...")
 
+                    if SERIAL_COMMAND_FILE.exists():
+                        print(
+                            "[COMMAND] ERROR: Firmware upload is in progress. "
+                            "Command not sent."
+                        )
+                        remove_pending_command()
+
                     if ser is not None:
                         if not close_serial_connection(ser):
                             print(
@@ -623,7 +1304,10 @@ def main():
                             plt.pause(0.01)
                             continue
 
-                        if insert_plot_discontinuity(live_samples):
+                        if insert_plot_discontinuity(
+                            live_samples,
+                            live_charge_intervals,
+                        ):
                             plot_gap_inserted = True
 
                         ser = None
@@ -677,6 +1361,11 @@ def main():
             if upload_release_acknowledged:
                 upload_release_acknowledged = False
                 print("[SERIAL] Upload finished. Resuming ESP32 discovery...")
+
+            sent_command_pending_cleanup = send_pending_command(
+                ser,
+                sent_command_pending_cleanup,
+            )
 
             # ================================================================
             # DISCONNECTED STATE
@@ -766,7 +1455,10 @@ def main():
                 )
 
                 close_serial_connection(ser)
-                if insert_plot_discontinuity(live_samples):
+                if insert_plot_discontinuity(
+                    live_samples,
+                    live_charge_intervals,
+                ):
                     plot_gap_inserted = True
 
                 ser = None
@@ -813,7 +1505,10 @@ def main():
                         "and retrying discovery."
                     )
                     close_serial_connection(ser)
-                    if insert_plot_discontinuity(live_samples):
+                    if insert_plot_discontinuity(
+                        live_samples,
+                        live_charge_intervals,
+                    ):
                         plot_gap_inserted = True
 
                     ser = None
@@ -902,16 +1597,19 @@ def main():
                     # We do not want experiment 1 and experiment 2 joined by a
                     # misleading line on the same graph.
                     live_samples = []
+                    live_charge_intervals = []
                     plot_gap_inserted = False
 
 
                 live_samples.append(sample)
+                live_samples = trim_plot_history(live_samples)
 
 
                 update_graphs(
                     figure,
                     axes,
                     live_samples,
+                    live_charge_intervals,
                 )
 
 
@@ -927,6 +1625,23 @@ def main():
                     **interval,
                 }
 
+                if current_experiment_id != interval["experiment_id"]:
+                    print(
+                        "[LOGGER] Live experiment changed from interval data: "
+                        f"{current_experiment_id} -> "
+                        f"{interval['experiment_id']}"
+                    )
+                    current_experiment_id = interval["experiment_id"]
+                    live_samples = []
+                    live_charge_intervals = []
+                    plot_gap_inserted = False
+
+                # Use the firmware's completed-interval running total rather
+                # than integrating one-second samples again on the host. This
+                # keeps the chart aligned with canonical INA228 accounting.
+                live_charge_intervals.append(interval)
+                live_charge_intervals = trim_plot_history(live_charge_intervals)
+
                 intervals_writer.writerow(interval)
                 intervals_handle.flush()
 
@@ -934,6 +1649,13 @@ def main():
                     "[CAPTURE] Saved interval "
                     f"{interval['experiment_id']}:"
                     f"{interval['interval']}"
+                )
+
+                update_graphs(
+                    figure,
+                    axes,
+                    live_samples,
+                    live_charge_intervals,
                 )
 
 
