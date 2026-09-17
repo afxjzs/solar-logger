@@ -6,6 +6,595 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-17: Correctness stint - six MUST-FIX defects resolved, first tests added
+
+**No hardware was touched.** Experiment 3 was not reset, storage was not
+cleared, and nothing was uploaded. Everything below is a source, compile, or
+host-test result. **No firmware behavior claimed here has been observed on
+hardware**; the acceptance sequence that would observe it is at the end of this
+entry and is pending.
+
+All six defects recorded under "MUST FIX BEFORE MODULARIZATION" in
+[BACKLOG.md](BACKLOG.md) were re-confirmed against current source and fixed. The
+findings and their resolutions stay in BACKLOG; only results are recorded here.
+
+### Firmware identity changed
+
+```text
+[FIRMWARE] Version:  0.2.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+A minor bump, per the policy in [PROJECT.md](PROJECT.md): `CMD_RESULT` changed
+what it reports, which is a change to what every command reports and to the host
+protocol. The build ID exists precisely to mark a protocol generation, so it
+moved too. `-dev` stays until an image is confirmed on hardware.
+
+**The board is still running an image that predates all of this**, and still
+predates the revision field, so it cannot identify itself. The first upload
+after this stint makes that answerable permanently.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `arduino-cli compile --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` | passed, no warnings |
+| firmware image size | 1,100,973 bytes, 83% of the app partition (was 1,097,445 before the stint) |
+| globals | 36,324 bytes, 11% of DRAM, unchanged |
+| `uv run pytest` | 57 passed |
+| `uvx pyright --pythonpath .venv/bin/python` on all five app/tools Python files | 0 errors, 0 warnings |
+| `python -m py_compile` on all Python files including tests | passed |
+| `bash -n` on `send.sh`, `upload.sh`, `intellisense.sh`, `watch-port.sh` | passed |
+| `git diff --check` | clean |
+
+### The regression tests were verified to fail before the fix
+
+A test that has never failed proves nothing. Each source-shape assertion was run
+against a reconstruction of the pre-fix code and confirmed to fail:
+
+```text
+CAUGHT   defect 1: rtcAutoRunChargeUAh +=
+CAUGHT   defect 1b: commit before append guard
+CAUGHT   defect 2: uninitialized SensorReading
+CAUGHT   defect 5: NVS failure -> exp 0
+```
+
+The running-total specification test was checked the same way: against the
+pre-fix rule it produces a running total of 352 where 236 is correct, which is
+exactly the first interval's 116 counted twice.
+
+### Two host defects found while testing, not by the review
+
+Both were found because a test asserted the documented behavior and the code
+disagreed:
+
+- **`SessionClient` discarded a `CMD_RESULT` whose `CMD_ACK` had been dropped.**
+  The outcome was only processed if the ACK had been seen first. D-036 is
+  explicit that a protocol line can be lost under HWCDC backpressure, so a lease
+  the firmware had genuinely granted could go unrecorded, and the next KEEPALIVE
+  would then be refused by a board the host thought it had never claimed. The
+  outcome is now accepted for a command still awaiting its ACK.
+- **A failed command was reported as possibly-truncated output.** Capture ended
+  only on a successful result, so every `ERROR` waited out the full hard cap and
+  then warned that output might be incomplete — pointing the reader at a
+  reporting limit instead of at the failure. Termination now keys on "an outcome
+  arrived", success still keys on `OK`.
+
+`tools/send.sh` also now prints the firmware's response on the failure path. It
+used to return before printing it, which left an operator with a failure and no
+reason for it.
+
+### Not done, deliberately
+
+**No storage-full policy was implemented.** The stint brief asked whether one of
+the six MUST-FIX defects covered it. It does not — that item is in BACKLOG /
+LATER — and the policy it would implement is Section 9 of
+[STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md), which is marked PROPOSED and
+says of itself that it "should be confirmed rather than assumed". The decision
+needed is written up in [BACKLOG.md](BACKLOG.md).
+
+One consequence did improve as a side effect: a full partition no longer
+corrupts the running totals as well as stopping the log, because the totals are
+now committed only after a successful append.
+
+**No modularization.** The RTC ownership correction from the review stint stands
+as documentation only; no state moved.
+
+### Hardware acceptance sequence - PENDING, nothing below has been run
+
+This supersedes nothing in the entries below; those procedures remain pending
+too. Run after a deliberate `tools/upload.sh`.
+
+1. **Identity.** `tools/send.sh VERSION` — expect `0.2.0-dev`, a real revision
+   hash, and `solar-logger-protocol-ack-v3`. A missing revision means the image
+   did not come from `tools/upload.sh`.
+2. **Experiment 3 storage survived the upload.** `tools/send.sh LOGGER STORAGE
+   INFO` — expect the same record count and sequence range as before the upload,
+   and an intact tail. A different result means the upload disturbed the
+   filesystem, which is itself worth knowing.
+3. **`CMD_RESULT` now means completion.** `tools/send.sh LOGGER INTERVAL 5` —
+   out of range, so expect `CMD_RESULT,LOGGER INTERVAL 5,ERROR` and **exit 1**.
+   Before this stint it returned `OK` and exit 0. This is the single most
+   important check in the list, because everything else's reporting depends on
+   it.
+4. **A valid command still succeeds.** `tools/send.sh LOGGER INTERVAL 60` —
+   expect `OK` and exit 0.
+5. **Arming reports its own success.** On an unarmed board, `tools/send.sh
+   LOGGER AUTONOMOUS ON` — expect `CMD_ACK`, then `CMD_RESULT,...,OK`, then
+   **exit 0**, then the board sleeps. Before this stint the board slept without
+   ever emitting a result and the host reported failure for a successful arm.
+6. **Session lifecycle.** On a later timer wake: `tools/send.sh LOGGER SESSION
+   HOLD` (waits for the rendezvous by default), then three
+   `LOGGER SESSION KEEPALIVE`, then `LOGGER SESSION RELEASE`. Each must show
+   machine ACK and `CMD_RESULT,...,OK` and exit 0. RELEASE must deliver its
+   result before the port disappears, and report the teardown as expected.
+   KEEPALIVE and RELEASE must not wait for a future rendezvous.
+7. **Lease expiry.** Hold a session and stop sending keepalives. Expect expiry
+   near 15 s with no multi-second Serial stall, and a return to autonomous
+   operation.
+8. **Return to timer-wake operation.** Collect at least five consecutive
+   unclaimed records. Verify each `interval_ms` is near 60000, that
+   `session_elapsed_ms` never decreases while `boot_id` is unchanged, and that
+   the new `[AUTO] Commanded sleep for that interval:` line appears and reads
+   near 50000 ms after a 10-second rendezvous.
+9. **Defect 6.** Hold a session, send `LOGGER AUTONOMOUS OFF` (the session is
+   kept, per D-031), then send `LOGGER AUTONOMOUS ON`. Expect a refusal with
+   `CMD_RESULT,...,ERROR`, exit 1, the session still held, and **the board still
+   awake**. Before this stint it deep-slept immediately and discarded the open
+   tethered interval.
+10. **Defect 4.** During a USB rendezvous, send `POWER TEST STOP`. Expect a
+    refusal naming the autonomous state, `CMD_RESULT,...,ERROR`, and the next
+    record's `interval_ms` and charge unaffected.
+11. **`POWER TEST STOP` with nothing armed.** On an idle tethered board, expect
+    it to say nothing was armed, to leave the accumulators alone, and for the
+    open interval to close normally at its full length afterwards.
+
+Defects 1, 2 and 5 are failure-path fixes and cannot be triggered on demand
+without injecting an I2C or NVS fault. Their cover is the source assertions in
+`tests/test_autonomous_accounting.py`; step 8 confirms the normal path still
+produces correct running totals.
+
+## 2026-09-17: Architecture review stint - no code changed
+
+A read-only review of the firmware, the host tooling, and the storage and
+accounting model. **No hardware was touched.** Experiment 3 was not reset,
+storage was not cleared, nothing was uploaded, and no runtime source file was
+modified. The only changes are to [BACKLOG.md](BACKLOG.md) and
+[PROJECT.md](PROJECT.md).
+
+Findings live in [BACKLOG.md](BACKLOG.md) under "Known bugs and issues", grouped
+by when they should be fixed. They are all **confirmed by reading the source**;
+none is a runtime observation, and the entries say so.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `arduino-cli compile --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` | passed, no warnings |
+| firmware image size | 1,097,445 bytes, 83% of the app partition; globals 36,324 bytes, 11% of DRAM |
+| `python -m py_compile` on all five Python files | passed |
+| `pyright` against the project venv, all five Python files | 0 errors, 0 warnings, 0 informations |
+| `bash -n` on `send.sh`, `upload.sh`, `intellisense.sh`, `watch-port.sh` | passed |
+| JSON parse of the four VS Code / workspace files | passed |
+| `git diff --check` | clean |
+
+The compile was run to establish the size and warning state as facts rather than
+because source changed; it did not. `pyright` is not installed in the repo or on
+`PATH` and was run through `uvx pyright --pythonpath .venv/bin/python`. Without
+that flag it cannot see the venv's packages and reports seven import errors,
+which is a tooling artifact and not a regression.
+
+### Counts re-measured, and one correction
+
+`grep -c RTC_DATA_ATTR` on the sketch returns **12**, not the 11 recorded in the
+modularization plan on 2026-09-16. Ten are `rtcAuto*`; the other two,
+`rtcSleepTestMagic` and `rtcSleepTestCycle`, belong to the deep-sleep power test
+(D-011). The plan assigned "all 11" to the `auto_state` module, which would have
+put the power test's cycle counter under the autonomous module's magic guard.
+The plan is corrected.
+
+`rtcAutoCommandedSleepMs` is assigned once and read nowhere. That matters beyond
+tidiness: the session clock is pre-advanced by the *commanded* sleep before
+sleeping, so `interval_ms` and `session_elapsed_ms` are commanded values plus
+measured awake time, not measurements of elapsed wall time. The firmware
+therefore has no device-side way to answer the RTC-drift question in
+[STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) Section 12. Recorded in
+[BACKLOG.md](BACKLOG.md).
+
+### Nothing here supersedes the pending hardware work
+
+Every acceptance procedure in the three 2026-09-16 entries below remains
+pending, unchanged and unrun. In particular the board is still running whatever
+image predates the revision field, so it cannot identify itself, and the
+cadence, `session_elapsed_ms` monotonicity, RELEASE-teardown and lease-expiry
+tests have still not been run on hardware.
+
+## 2026-09-16: Tooling stint - IntelliSense, firmware identity, host types, send.sh
+
+No hardware was touched. Experiment 3 was not reset, storage was not cleared,
+and nothing was uploaded.
+
+### IntelliSense: four separate defects, all confirmed by reading the build
+
+The reported symptom was that ESP-IDF headers (`soc/soc_caps.h`,
+`freertos/FreeRTOS.h`, `esp_sleep.h`, `esp_rom_crc.h`) failed while Arduino
+headers (`Wire.h`, `Preferences.h`, `WiFi.h`, `LittleFS.h`) resolved, and that
+reloading the window cleared it temporarily.
+
+Confirmed against the generated database and the installed core, not inferred:
+
+1. **The compile database describes a file nobody edits.** Arduino CLI's entry
+   names `<build>/sketch/solar-logger.ino.cpp`. The previous tooling appended an
+   alias whose `file` was the `.ino` but whose `arguments` still named the
+   generated `.cpp` as the input, and it cloned entry `[0]` on the assumption
+   that Arduino CLI always emits the sketch first.
+
+2. **The reported split is exactly the flag split.** The sketch's compile
+   command carries the Arduino library paths as plain `-I` flags and the entire
+   ESP-IDF path as:
+
+   ```text
+   -iprefix <sdk>/include/  @<sdk>/flags/includes
+   ```
+
+   That response file was measured at 16,823 bytes holding 325
+   `-iwithprefixbefore` entries. Every failing header lives behind it; every
+   resolving header lives behind a plain `-I`. Nothing in the database exposed
+   those paths any other way.
+
+3. **cpptools excludes `**/.vscode` from its own file operations by default.**
+   `C_Cpp.files.exclude` defaults to `{"**/.vscode": true, "**/.vs": true}` in
+   cpptools 1.34.4's `package.json`. Both the database and a 254 KB generated
+   near-duplicate of the sketch were inside `.vscode/arduino-build/`.
+
+4. **The `.ino` was not a valid C++ translation unit.** Compiled directly with
+   the fully expanded flag set plus `-include Arduino.h`, GCC reported 18
+   distinct undeclared functions and no other errors. Arduino CLI synthesizes
+   those prototypes into the generated `.cpp`; the real build therefore never
+   saw the problem.
+
+   This one had been masked. `C_Cpp.errorSquiggles` defaults to
+   `enabledIfIncludesResolve`, which suppresses every other error while any
+   include fails — so fixing only the includes would have uncovered a second
+   wave of errors that had been present the whole time.
+
+A fifth observation, worth recording: the generated `.ino.cpp` in the old build
+directory was **stale**. It contained neither `FIRMWARE_BUILD_ID` nor
+`COMMAND_PROTOCOL_WRITE_TIMEOUT_MS`, both of which are in the current source, and
+nothing detected or reported that.
+
+**Not established:** which of (2) and (3) the editor was actually tripping over
+at any given moment, or why a window reload helped temporarily. Reproducing
+cpptools' internal configuration selection was not possible from the command
+line. The fix removes all four defects rather than betting on one.
+
+### What replaced it
+
+`tools/intellisense.py` expands every `@response` file and resolves
+`-iprefix`/`-iwithprefixbefore` into absolute `-I` flags, so the editor entry
+has no indirection left to follow. The build path moved from
+`.vscode/arduino-build/` to `build/intellisense/`.
+
+Then it **compiles the raw `.ino` with `-fsyntax-only` using exactly the flags
+the editor is about to be handed, and refuses to write the database if that
+fails.** That check earned its place immediately: the first version of this
+work force-included a generated prototypes header, and the check caught that
+those prototypes reference sketch-defined types (`AutoState`, `SensorReading`)
+that cannot exist at the top of the file where a forced include lands. The
+approach was wrong and the verification said so before anything shipped.
+
+The eighteen forward declarations went into the sketch instead, which is where
+they belong.
+
+Observed:
+
+```text
+[INTELLISENSE] Expanded the compile command to 335 absolute include paths
+[INTELLISENSE] No response file or -iprefix indirection remains in the editor entry
+[INTELLISENSE] Verifying the editor configuration by compiling the sketch with it...
+[INTELLISENSE] Editor configuration compiles the sketch cleanly: ALL OK
+[INTELLISENSE] Entries: 80 (including the editor entry for solar-logger.ino)
+```
+
+`--check` was confirmed to report stale after the sketch changed and ALL OK
+after regeneration.
+
+### Firmware identity
+
+Version, revision, and build ID are now three fields in
+`Arduino/solar-logger/firmware_version.h`. See [DECISIONS.md](DECISIONS.md)
+D-038.
+
+Both revision branches were verified in the **linked image**, not just at the
+source level:
+
+```text
+arduino-cli compile --build-property 'compiler.cpp.extra_flags=-DFIRMWARE_GIT_REV="deadbee-dirty"'
+    -> strings in solar-logger.ino.elf: 0.1.0-dev, deadbee-dirty,
+       solar-logger-protocol-ack-v2
+
+arduino-cli compile            (no property)
+    -> strings in solar-logger.ino.elf: 0.1.0-dev,
+       "UNKNOWN - not injected by this build (use tools/upload.sh)"
+```
+
+The quoting was checked separately rather than assumed:
+`riscv32-esp-elf-g++ -E '-DFIRMWARE_GIT_REV="abc1234-dirty"'` expands to
+`const char *r = "abc1234-dirty";`, and arduino-cli execs the compiler directly
+so the embedded quotes survive as one argument.
+
+Flash use went from 1,097,445 to 1,097,405 bytes (83%) — the identity block and
+the `VERSION` command cost nothing measurable.
+
+### Host type errors
+
+Pyright 1.1.414 against the project interpreter reported 3 errors in
+`app/solar_logger.py` and 1 in `app/device_session.py`. All four were real:
+
+- `preserved_limits` was `list | None` because `PLOT_STATE["auto_follow"]` was
+  **read twice**, once to decide whether to capture axis limits and again a
+  hundred lines later to decide whether to restore them. A Follow toggle
+  between the two reads would capture and never restore, or restore what was
+  never captured. Fixed by reading it once into a local.
+- `now - serial_opened_at` on `float | None`. `ser` and `serial_opened_at` are
+  set and cleared together, but nothing enforced it. Substituting `0.0` would
+  have produced a silence age of several decades and closed the port; the
+  invariant is now checked explicitly at the top of the connected state and
+  reported as a logger bug.
+- `SerialDevice._read_line()` dereferenced `self._serial` without the None
+  check its caller has. Now raises `DeviceError` like every other read failure.
+
+Annotating `update_graphs(axes: Sequence[Axes])` surfaced a fourth:
+`mdates.date2num` is typed as returning `float | NDArray` because it also takes
+sequences. It is given one datetime here, so the two call sites became one
+`plot_x_coordinate()` helper that says so.
+
+Final state: **0 errors, 0 warnings** across `app/solar_logger.py`,
+`app/device_session.py`, `app/device_tool.py`, `tools/archive-data.py`, and
+`tools/intellisense.py`.
+
+No `# type: ignore` was added, and no None was coerced to a default.
+
+### send.sh
+
+Waiting for a rendezvous is now the default; `--no-wait` opts out; SESSION
+KEEPALIVE and RELEASE never wait and refuse an explicit `--wait`. See
+[DECISIONS.md](DECISIONS.md) D-040.
+
+One regression was found and fixed while making the change: `tools/upload.sh`
+calls `device_tool.py session hold` inside its retry loop and relied on it
+failing fast. Under the new default it would have blocked indefinitely on a
+port that vanished between discovery and the claim. It now passes `--no-wait`
+explicitly.
+
+Behavior confirmed with no board attached:
+
+| Invocation | Result |
+| --- | --- |
+| `tools/send.sh --no-wait STATUS` | fails immediately, exit 1 |
+| `tools/send.sh LOGGER SESSION RELEASE` | fails immediately with the session explanation, exit 1 |
+| `tools/send.sh --wait LOGGER SESSION RELEASE` | refused, exit 2 |
+| `device_tool.py send --timeout 2 -- LOGGER AUTONOMOUS STATUS` | waits, then times out, exit 1 |
+
+### Validation performed
+
+- `arduino-cli compile --warnings all` — passed, with and without the injected revision
+- editor-flag `-fsyntax-only` compile of the raw `.ino` — passed
+- `pyright` on all five Python files — 0 errors
+- `python3 -m py_compile` on all Python files — passed
+- `bash -n` on all four shell scripts — passed
+- JSON validation of all four VS Code / workspace files — passed
+- `git diff --check` — clean
+
+**There is no automated test suite in this repository.** Nothing was run that
+could be called a unit or session test, and none is claimed.
+
+### Firmware behavior deliberately unchanged
+
+`CMD_ACK`, `CMD_RESULT`, the bounded 100 ms protocol writer,
+`Serial.setTxTimeoutMs(0)`, deferred `SESSION RELEASE` sleep, host lease
+behavior, session accounting, autonomous cadence scheduling, and durable
+storage semantics were not touched. The firmware changes are: eighteen forward
+declarations, an include, the identity print, and one new `VERSION` command
+branch that goes through the existing dispatch and result path.
+
+### CORRECTION, same day: the modularization plan's cycle claim was wrong
+
+The first version of the plan in [BACKLOG.md](BACKLOG.md) said there was
+"exactly one hard cycle, `command` ↔ `autonomous`." That was based on spot
+checks of a handful of call sites, not on a full graph, and it was wrong.
+
+A complete call-graph pass over all 119 top-level functions, with `//` and
+`/* */` comments **and string literals** stripped, found **three** mutual
+pairs, every one of them through autonomous scheduling:
+
+| Boundary | down | up |
+| --- | ---: | ---: |
+| commands ↔ autonomous scheduling | 6 | 2 |
+| host sessions ↔ autonomous scheduling | 8 | 8 |
+| measurement/accounting ↔ autonomous scheduling | 3 | 8 |
+
+Stripping string literals mattered: without it,
+`autonomousDeepSleepAgain()` and `runAutonomousWakeCycle()` appear to call
+`setup()`. They do not — the text occurs inside `Serial.println(...)`
+arguments. That artifact produced a fourth, non-existent cycle in an
+intermediate run.
+
+The real finding is better than the wrong one. **Autonomous scheduling is not a
+layer**: its state half (`AutoState`, the RTC globals, record append) sits
+below measurement and its orchestration half (wake cycle, rendezvous,
+scheduler) sits above it. One box spanning levels 1 through 4 of an 8-level
+stack is why every arrow through it read as bidirectional.
+
+With that split plus `connection` separated from `host_session`, two cycles
+remain and both run through the same single edge — `autonomousUsbRendezvous()`
+(line 6177) and `autonomousColdBootMaintenanceWindow()` (line 6636) calling
+`handleSerialCommands()`. Removing that one edge and re-running cycle detection
+gives **0 cycles**. The plan and its extraction order have been rewritten
+around the measured stack.
+
+Nothing was refactored. This is a correction to the plan, not to the firmware.
+
+### Still pending on hardware
+
+Everything listed in the three entries below this one remains pending. Nothing
+in this stint tested any of it, and the firmware on the board is still whatever
+was last uploaded — which, since the revision field did not exist until now,
+cannot be identified from the board itself. The first upload after this change
+makes that answerable permanently.
+
+## 2026-09-16: Experiment 3 cadence and session elapsed audit
+
+The first five clean autonomous records from Experiment 3 were inspected
+without resetting the experiment, clearing storage, or rewriting records:
+
+```text
+#0 seq=1412 boot=13 exp=3 elapsed_ms=748385 interval_ms=60005
+#1 seq=1413 boot=13 exp=3 elapsed_ms=818401 interval_ms=70008
+#2 seq=1414 boot=13 exp=3 elapsed_ms=888420 interval_ms=70009
+#3 seq=1415 boot=13 exp=3 elapsed_ms=299700 interval_ms=60005
+#4 seq=1416 boot=13 exp=3 elapsed_ms=369725 interval_ms=70011
+```
+
+All five records were CRC-valid, with `invalid=0` and `exp=3`.
+
+The source audit confirmed that autonomous sleep used the complete configured
+60-second interval after the wake measurement and 10-second USB rendezvous had
+already elapsed. The rendezvous was therefore added to the next measured
+interval, producing approximately 70 seconds. The firmware now targets the
+interval deadline and sleeps only for its measured remainder.
+
+The same source audit found the elapsed rollback: host release rebased
+`rtcAutoSessionElapsedMs` to `millis()`. Because timer wake is a reboot,
+`millis()` restarted near zero while `boot_id` remained the RTC-retained power
+session identifier. The field is documented as monotonic within `boot_id`, so
+the rebasing was a firmware bug, not an intentional session-relative reset.
+Timer-wake release now continues the retained session clock.
+
+Observed validation:
+
+- `arduino-cli compile --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` passed after both changes.
+- No hardware upload was performed.
+
+The later host-session audit found that the shared deadline scheduler had one
+path-selection defect: `AUTO_SLEEP_HOST_RELEASE` was using post-boot `millis()`
+even when RELEASE or lease expiry occurred during a timer wake. The scheduler
+could then compare that small value with the retained session deadline and
+request an inflated sleep. The selector now treats timer-wake host handoff as
+retained-session time too. No upload was performed for this correction.
+
+The local build artifact inspected before this correction contained the normal
+deadline diagnostic strings, so it was newer than the pre-cadence source. That
+does not prove which image is currently on hardware. The runtime line
+`[AUTO] Sleeping until interval deadline; remaining: ... ms.` is the definitive
+test for the fixed scheduler; an old image will not print it.
+
+The complete acceptance test is:
+
+1. Set `LOGGER INTERVAL 60` and leave autonomous mode armed.
+2. On an unclaimed wake, verify the record interval is near 60000 ms and the
+   sleep diagnostic reports a remainder near 50000 ms after a 10-second
+   rendezvous.
+3. On a later wake, send `LOGGER SESSION HOLD`, renew it three times, then send
+   `LOGGER SESSION RELEASE` while the port is actively owned. Verify RELEASE is
+   acknowledged and the sleep diagnostic reports a remainder near 60000 ms
+   from the newly established release boundary, not an inflated value.
+4. Repeat with the host stopped or keepalives withheld. Verify lease expiry
+   enters the same scheduler and the next autonomous record is near 60000 ms.
+5. If the diagnostic is absent, the hardware is running an older image; if it
+   is present but the handoff sleep is inflated, capture the printed retained
+   elapsed, interval start, target, and sleep values for a new diagnosis.
+
+Hardware acceptance remains pending. With `LOGGER INTERVAL 60`, leave the USB
+rendezvous at 10 seconds, collect at least five consecutive unclaimed records,
+and verify each `interval_ms` is approximately 60000 ms and that
+`session_elapsed_ms` never decreases while `boot_id` is unchanged. Also test a
+host `LOGGER SESSION HOLD` followed by `LOGGER SESSION RELEASE` across a timer
+wake and verify the same invariant.
+
+## 2026-09-16: RELEASE acknowledgement teardown race
+
+Hardware reproduced a RELEASE command that disappeared without even delivering
+`[COMMAND] Received: LOGGER SESSION RELEASE`, including when sent immediately
+after a successful KEEPALIVE. Source confirms the race: `processCommand()`
+printed the echo, `hostSessionRelease()` cleared the connection and performed
+the accounting transition, then directly entered
+`esp_deep_sleep_start()`. With nonblocking HWCDC output, the echo and success
+lines could still be queued when USB was destroyed.
+
+The fix preserves `Serial.setTxTimeoutMs(0)`. RELEASE now prepares the safe
+handoff, prints `[SESSION] Released: ALL OK`, sets a pending transition, and
+returns to the main loop. The loop waits at most 250 ms, then enters the same
+autonomous scheduler. Lease expiry remains direct because it has no command
+acknowledgement to protect.
+
+Acceptance after a deliberate upload:
+
+1. Send `LOGGER SESSION HOLD`.
+2. Send `LOGGER SESSION KEEPALIVE` and wait for its successful response.
+3. Immediately send `LOGGER SESSION RELEASE`.
+4. Require `tools/send.sh` exit 0 and output containing both
+   `CMD_ACK,LOGGER SESSION RELEASE` and
+   `CMD_RESULT,LOGGER SESSION RELEASE,OK` before the port disappears.
+5. Repeat the sequence five times and verify each board returns on a later
+   timer wake.
+6. Separately hold a session, stop sending keepalives, and verify lease expiry
+   occurs at approximately 15 seconds without multi-second serial blocking.
+
+## 2026-09-16: Command acknowledgement path audit
+
+The two hardware observations are now explained by source and the installed
+ESP32 Arduino core. `tools/send.sh` opens one direct reader before writing,
+then reads from that same port; it does not start a late background reader.
+Its `reset_input_buffer()` runs before the command write, so it can discard
+older rendezvous or boot output but cannot discard bytes generated after the
+write. The host was incorrectly treating the human diagnostic echo as the
+only acknowledgement.
+
+In ESP32 core 3.3.11, `HWCDC::write()` uses the configured timeout when adding
+to its TX ring. With `Serial.setTxTimeoutMs(0)`, a full ring causes a short
+write; Arduino `Print::print()` ignores that returned count. `HWCDC::flush()`
+also has no wait budget when the timeout is zero. This explains both facts:
+HOLD can execute and later print successfully while its first human echo is
+missing, and RELEASE can queue output but lose USB before the host observes it.
+
+The firmware now emits machine protocol lines independently of verbose text:
+
+```text
+CMD_ACK,LOGGER SESSION HOLD
+CMD_RESULT,LOGGER SESSION HOLD,OK
+```
+
+Protocol lines retry short writes for at most 100 ms. `setTxTimeoutMs(0)` stays
+unchanged for all other output. RELEASE emits its result before its existing
+250 ms deferred-sleep grace; lease expiry has no command result to protect and
+continues directly to sleep after accounting.
+
+The host now requires both machine ACK and RESULT. A result observed before
+USB disappears is retained as success and the teardown is reported explicitly
+instead of being mislabeled as a parse failure. The human diagnostic echo is
+still useful for people but is no longer protocol state.
+
+The firmware build identity is `solar-logger-protocol-ack-v2`, printed at boot
+and in `STATUS`.
+
+Validation completed:
+
+- warning-enabled Arduino CLI compile passed
+- Python syntax compilation passed for the protocol and logger modules
+- shell syntax checks passed
+- no hardware upload was performed after this change
+
+Acceptance after a deliberate upload:
+
+1. Run `tools/send.sh --wait LOGGER SESSION HOLD` five times; each must show
+   `CMD_ACK,...`, `CMD_RESULT,...,OK`, and exit 0.
+2. Send KEEPALIVE, then RELEASE immediately. Each of five RELEASE cycles must
+   show machine ACK and `CMD_RESULT,...,OK`, exit 0, report expected transport
+   teardown, and return on a later timer wake.
+3. Separately hold a session, stop sending keepalives, and verify lease expiry
+   near 15 seconds without multi-second Serial blocking.
+
 ## 2026-09-09: Serial ownership and upload workflow
 
 The upload workflow was bench-tested with both host states:
@@ -359,3 +948,515 @@ No explanation is recorded here, because none has been established. Both boots r
 ### Wake transient still uncharacterized
 
 The DMM again briefly displayed overload around some wake transitions. No peak-current value was captured. This is the same limitation recorded for the INA-continuous run and for the Wi-Fi test, and it will keep recurring until the transient is looked at with an instrument faster than a handheld meter.
+
+## 2026-09-10: Autonomous-storage design audit
+
+A design/audit pass for the autonomous local logging milestone. No code was changed and nothing was measured on hardware. The full design is in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md); recorded here are the two findings that change what should be measured next, plus the bench tests the design could not settle by reading.
+
+### Finding: the current boot path would silently destroy sleep-period accumulation
+
+The INA228 hardware CHARGE and ENERGY registers are read in exactly two places, both inside `closeMeasurementInterval()`. `setup()` never reads them and calls `resetInaAccumulators()` on every boot.
+
+Deep sleep wakes by reboot, so an autonomous wake that reused the present `setup()` would clear the entire sleep interval's integral before anything read it. Every record would report near-zero charge and nothing would say why.
+
+This is harmless today only because both deep-sleep power-test variants suspend interval accounting. Recorded as decision D-020: reads come before resets.
+
+### Finding: awake time dominates the power budget, not cadence
+
+Using the measured 28.4 mA awake and 1.07 mA deep-sleep figures, with the current 3.5-second boot path:
+
+| Wake cadence | Average current |
+| --- | ---: |
+| 60 s | 2.66 mA |
+| 300 s | 1.39 mA |
+| 900 s | 1.18 mA |
+
+Deep-sleep floor is 1.07 mA. At 60-second cadence the boot overhead alone costs more than the sleep it enables — roughly 2.5x the floor.
+
+The 3.5 seconds is `delay(1500)` for USB enumeration plus `delay(2000)` for ADC settling. On a timer wake with USB disconnected and the INA228 already converting continuously, neither is needed. This is a stronger argument for restructuring the wake path than storage capacity was.
+
+### Bench tests needed before implementation
+
+1. LittleFS mount, open, append, close time per wake. If it costs hundreds of milliseconds it changes the storage recommendation, because awake time is the dominant power term.
+2. Minimum achievable autonomous wake duration with the USB delay and ADC settle removed. The 0.3 s figure used in the design arithmetic is an assumption.
+3. RTC drift on this board. Compare commanded sleep duration against host `captured_at` deltas over many cycles. Until this is measured, no absolute-time accuracy claim may be published.
+4. Real LittleFS usable fraction, against the 90% planning assumption.
+5. Whether CHARGE or ENERGY overflow at 5- or 15-minute intervals at realistic solar currents. `DIAG_ALRT` at register `0Bh` answers this directly: ENERGYOF bit 11, CHARGEOF bit 10, MATHOF bit 9.
+6. RSTACC self-clearing, confirmed from a CONFIG readback rather than inferred.
+
+### One thing confirmed from existing data rather than the datasheet
+
+The datasheet says the CONFIG `RST` bit self-clears but says nothing about `RSTACC`. The committed telemetry settles it: across 1,174 intervals in `data/intervals.csv`, `interval_charge_mAh` stays around 1.5 mAh per interval instead of growing cumulatively, and `running_charge_mAh` advances by exactly the interval value each minute. If `RSTACC` were sticky, accumulation would either stop or never reset. It should still be printed rather than inferred.
+
+### Timekeeping addendum: confirmed platform facts
+
+Two things were verified from the installed core's `sdkconfig` rather than assumed:
+
+```text
+CONFIG_RTC_CLK_SRC_INT_RC=y            RTC slow clock is the internal RC oscillator
+CONFIG_RTC_CLK_CAL_CYCLES=576          calibrated against the main crystal at boot
+CONFIG_LIBC_TIME_SYSCALL_USE_RTC_HRT=y system clock backed by RTC + high-res timer
+CONFIG_ESP32C3_TIME_SYSCALL_USE_RTC_SYSTIMER=y
+```
+
+The first says this board has **no 32.768 kHz crystal for the RTC** — it runs on an RC oscillator that IDF calibrates at boot. Good enough to schedule sleep, not precision wall-clock hardware, and it drifts with temperature and supply voltage. A logger in a car sees both.
+
+The second says the build is configured so `gettimeofday()` is carried across deep sleep by the RTC counter. **That is configuration, not tested behavior**, and it is now bench test 4 in the design document. Until it passes, the sequence number stays the load-bearing mechanism and retained wall-clock is treated as expected-but-unproven.
+
+Neither fact changes the storage design. Both change what may be claimed: no absolute-time accuracy figure belongs anywhere in this project until drift is actually measured, ideally at more than one ambient temperature.
+
+## 2026-09-10: Autonomous logger bench prototype implemented
+
+One sleep/read/store cycle is implemented as `LOGGER TEST AUTONOMOUS`. It compiles for `esp32:esp32:XIAO_ESP32C3` at 82% of the app partition with no warnings.
+
+**Nothing has been run on hardware. No timing figures have been measured.** The prototype exists to produce them.
+
+### Hardware test procedure
+
+Run with USB connected first, to watch a few cycles, then optionally on battery.
+
+1. `tools/upload.sh`
+2. `tools/send.sh LOGGER STORAGE CLEAR YES` — the LittleFS partition has never been formatted, so this is required once. Mount deliberately does not auto-format.
+3. `tools/send.sh LOGGER STORAGE INFO` — confirm the filesystem mounts and reports roughly 1.4 MB total.
+4. `tools/send.sh LOGGER TEST STATUS` — confirm `Armed: NO`, interval 60 seconds.
+5. `tools/send.sh LOGGER TEST AUTONOMOUS` — arms, resets accumulators, and sleeps immediately.
+6. Watch several cycles. Each wake should print the `[AUTO]` block and the `[TIMING]` block.
+7. `tools/send.sh LOGGER TEST STOP` during an awake window. The awake window is short by design, so this may need retrying; that is itself a finding worth recording.
+8. `tools/send.sh LOGGER STORAGE DUMP` — decode the stored records.
+9. `tools/send.sh LOGGER STORAGE INFO` — confirm record count and sequence range.
+
+Stopping is expected to be awkward: the whole point is a wake short enough that there is little window to catch. If it proves impractical, note it — that is a real usability finding about the design, not a defect in the test.
+
+### What to record from the run
+
+- Every `[TIMING]` line, especially **LittleFS mount** and **record append+flush**. These decide whether LittleFS survives as the storage mechanism or whether a raw ring buffer is needed, because awake time dominates the power budget.
+- **Total work (no Serial)** versus **Total timer-wake duration**. The first is the production-relevant number; the second includes Serial output that production would not do. (The second was renamed on 2026-09-11 when it was found to be measuring the wrong span.)
+- The raw `DIAG_ALRT` value each cycle, and whether `ENERGYOF` or `CHARGEOF` ever set at 60 seconds.
+- Whether `interval_ms` lands near 60000. Deviation is RTC oscillator drift and feeds the drift question directly.
+- Whether the first wake after arming produces a sensible interval charge rather than near-zero. Near-zero would mean something still reset the accumulators before they were read.
+
+### Power-loss recovery test, worth doing deliberately
+
+With the test running, pull power mid-cycle, then restore it and run `LOGGER STORAGE INFO`. Expect either an intact tail or an explicit report of discarded trailing bytes. A silent result would be a defect.
+
+### Sequence behavior to verify
+
+Sequence numbers must never repeat across a power cycle. Gaps are expected and acceptable: blocks of 64 are reserved in NVS ahead of use, so a crash abandons the remainder of a block. `LOGGER STORAGE DUMP` shows the actual sequence progression.
+
+## 2026-09-11: First autonomous run on hardware - storage worked, management did not
+
+The autonomous logger produced durable records on real hardware for the first time. A later cold boot reported:
+
+```text
+[STORAGE] File bytes:     576
+[STORAGE] Valid records:  8
+[STORAGE] Sequence range: 1 -> 8
+[STORAGE] Log tail is intact: ALL OK
+```
+
+Eight 72-byte records, 576 bytes exactly, sequences 1 through 8, tail intact. The read-before-reset ordering, the durable append, the CRC and tail scan, the experiment/storage isolation, and the refusal to auto-format all held up. That part of the design is confirmed, not assumed.
+
+**No timing figures came out of this run.** The instrumentation was wrong (see below), so the numbers the design is waiting on still have not been measured.
+
+### The board could not be stopped over USB
+
+With the Python logger stopped, a retry loop on `tools/send.sh LOGGER TEST STOP` eventually printed:
+
+```text
+[SERIAL] Port: /dev/cu.usbmodem1101
+[COMMAND] Sent: LOGGER TEST STOP
+[COMMAND] ALL OK
+```
+
+The next boot then printed `[AUTO] Persisted autonomous bench test found after a cold boot.` The flag had not been cleared.
+
+Root cause: `handleSerialCommands()` is called only from `loop()`, and an armed cold boot returned from `setup()` into deep sleep without ever reaching `loop()`. The command's bytes arrived and sat unread in the USB CDC receive buffer until deep sleep discarded them. No amount of retiming would have helped, because there was no code path that could parse the command.
+
+The short awake window made this harder to diagnose but was not the cause. Even a perfectly timed command would have been ignored.
+
+This is recorded as [DECISIONS.md](DECISIONS.md) D-021, and fixed with a 15-second cold-boot maintenance window.
+
+### `send.sh` reported success for a command that never ran
+
+`[COMMAND] ALL OK` meant only that the write to `/dev/cu.usbmodem1101` succeeded. It said nothing about whether the firmware read the bytes, and in this case the firmware never did.
+
+The firmware already echoes `[COMMAND] Received: <COMMAND>` from `processCommand()`, so an acknowledgement was available and simply was not being checked. `tools/send.sh` now waits for that echo and reports `ALL OK` only when it appears, with an exit status to match. See D-022.
+
+A second gap showed up immediately afterward: the script proved a command had been parsed and then exited before showing what the firmware said in reply, so `LOGGER TEST STATUS` and `LOGGER STORAGE INFO` were unreadable without starting the Python logger. Direct mode now keeps reading and printing after the acknowledgement, ending on a 600 ms quiet period or a hard cap of 2 seconds (10 seconds for `LOGGER STORAGE DUMP`). The stop reason is printed every time, and a capture that hits the cap warns that it may be truncated.
+
+The 600 ms threshold was chosen against the firmware's measured output cadence rather than picked arbitrarily: `LIVE_SAMPLE_INTERVAL_MS` is 1000 ms and `HEARTBEAT_INTERVAL_MS` is 5000 ms, so 600 ms reads as quiet in both states. Inside the maintenance window `loop()` is not running, so there is no CSV at all and ordinary commands return in about a second, which is what keeps recovery commands from eating the 15-second window.
+
+### Timing instrumentation was measuring the wrong span
+
+A cold boot printed:
+
+```text
+[TIMING] Total wake duration: 0.014 ms (includes Serial output)
+```
+
+Fourteen microseconds for a multi-second boot. `autonomousDeepSleepAgain()` took its start time from an argument, and three of its four callers passed `micros()` evaluated at the call site, a few microseconds before the print. The function was faithfully reporting the interval between two adjacent lines of its own code.
+
+The timer-wake path was less wrong, since it passed the top of `runAutonomousWakeCycle()`, but all four paths shared one label, so a cold-boot total and a timer-wake total were presented as the same measurement.
+
+Every total is now measured from `setupEntryMicros`, captured on the first line of `setup()`, and each path prints a label that says what it is: `Total timer-wake duration`, `COLD-BOOT startup duration`, `Arm-to-sleep duration`, or `Degraded timer-wake duration`. The three non-wake labels carry an explicit line saying they are not wake timings and must not be compared against one. The `micros()` value at `setup()` entry is printed alongside, so the bootloader time that none of these figures include is visible rather than hidden.
+
+Append timing is now broken into open, write, and flush+close, since a single combined number would not say which one dominates.
+
+### Why the next sequence jumped to 131
+
+Observed:
+
+```text
+Next sequence from log: 9
+Next sequence from NVS reservation: 131
+Using: 131
+```
+
+Reservation size is 64. The old code reserved unconditionally on every arm and every cold boot, and always took the next sequence as one past the reservation, so every restart consumed 65 numbers:
+
+| Event | Next sequence | High-water after |
+|---|---|---|
+| `LOGGER TEST AUTONOMOUS` | 1 | 65 |
+| 8 wake cycles, sequences 1-8 | 9 | 65 (no reservation needed) |
+| First cold boot while armed | 66 | 130 |
+| Second cold boot while armed | 131 | 195 |
+
+The observed boot was the second cold boot after arming. Neither cold boot completed a wake cycle, which is why no records above 8 exist.
+
+A wake cycle does not re-reserve until the block is exhausted, so the cycles themselves cost nothing. The whole jump came from restarts.
+
+The gap-safety design is unchanged. What changed is that an intact log tail is now treated as the sequence authority, so a clean restart continues from record 9 instead of skipping past the reservation, and a reservation is written only when the current one does not already cover the next sequence. An empty, partial, corrupt, or out-of-order log still falls back to the NVS floor. See D-023.
+
+### USB presence detection, investigated
+
+On this board `Serial` is `HWCDC` (the USB Serial/JTAG peripheral; `ARDUINO_USB_MODE=1` and `ARDUINO_USB_CDC_ON_BOOT=1` for `XIAO_ESP32C3`). Two calls exist:
+
+- `Serial.isPlugged()` calls `usb_serial_jtag_is_connected()`, a timer-based check for USB start-of-frame packets. The ESP32 core's own source comments state it has several milliseconds of tolerance and "is known to flap even on a healthy link".
+- `Serial.isConnected()` additionally requires that the host has clocked bytes out of the TX FIFO. It reads false whenever no terminal holds the port open, even with USB physically attached.
+
+Neither reliably answers "can an operator reach me right now", so neither gates anything. Both are printed as diagnostics when the maintenance window opens and closes and in `LOGGER TEST STATUS`. Several bench runs of that output are what would justify depending on either one later.
+
+### Firmware state
+
+Compiles for `esp32:esp32:XIAO_ESP32C3` at 1,079,785 bytes, 82% of the app partition, with no warnings under `--warnings all`. Not uploaded.
+
+### Next hardware procedure
+
+The existing eight records are deliberately preserved. Do not clear storage.
+
+1. `tools/upload.sh`
+2. `tools/send.sh LOGGER STORAGE INFO` - expect the same 576 bytes, 8 records, sequences 1-8, intact tail. A different result means the upload disturbed the filesystem, which is itself worth knowing.
+3. `tools/send.sh LOGGER STORAGE DUMP` - decode and inspect the eight records from the first successful run.
+4. `tools/send.sh LOGGER TEST STATUS` - confirm `Armed: NO` before arming anything.
+5. `tools/send.sh LOGGER TEST AUTONOMOUS`
+6. Watch several wake cycles and record every `[TIMING]` line.
+7. Reset or power-cycle the board. The maintenance window should open and count down from 15 seconds.
+8. `tools/send.sh LOGGER TEST STOP` during the window. It should now report `Firmware acknowledged command: ALL OK`, and the firmware should print `[AUTO] Autonomous test STOPPED.`
+9. `tools/send.sh LOGGER STORAGE INFO` - confirm the new records appended after sequence 8 with no reuse.
+
+What to check specifically:
+
+- The first record of the new run should continue from sequence 9, not jump.
+- `LittleFS mount` and `record append` sub-timings are the numbers the storage-mechanism decision waits on.
+- `Total timer-wake duration` should now be a plausible multi-hundred-millisecond figure rather than microseconds, and the cold-boot total should be several seconds larger and labeled as such.
+- The first interval after a cold boot should be close to one cadence, because the accumulators are now reset at the end of the maintenance window rather than inheriting startup charge.
+
+## 2026-09-11: 65 autonomous records inspected - accumulation works, experiment context did not
+
+`LOGGER STORAGE INFO` after the first hardware runs:
+
+```text
+Filesystem total: 1441792 bytes
+Filesystem used:  16384 bytes
+Filesystem free:  1425408 bytes
+Record size:      72 bytes
+Log bytes:        4680
+Valid records:    65
+Oldest sequence:  1
+Newest sequence:  187
+Trailing bytes:   0
+Tail status:      INTACT
+Room for 19797 more records
+```
+
+65 valid records, 72 bytes each, 4680 bytes, tail intact, no trailing bytes. The sequence range 1 to 187 against 65 records is the reservation behavior described in the 2026-09-11 entry above, from restarts that reserved a block without completing a cycle. Gaps, not losses.
+
+### What the records confirm
+
+The thing the whole architecture rests on works: **charge and energy accumulated in INA228 hardware survived ESP32 deep sleep and were read before anything reset them.**
+
+```text
+#0 seq=1 boot=1 exp=0 elapsed_ms=243577 interval_ms=60003
+   V=12.892382 I_mA=1.099 P_mW=26.790 T_C=21.914
+   dQ_uAh=116 dE_uWh=1579 Qsum_uAh=116 Esum_uWh=1579
+   time=UNKNOWN epoch=0 flags=0x4
+
+#1 seq=2 boot=1 exp=0 elapsed_ms=303591 interval_ms=60006
+   V=12.893359 I_mA=11.312 P_mW=145.843 T_C=21.921
+   dQ_uAh=116 dE_uWh=1584 Qsum_uAh=232 Esum_uWh=3163
+```
+
+Observed, not predicted:
+
+- Interval durations of 60003 to 60006 ms against a 60000 ms commanded cadence. Roughly 0.01% over one minute, which is the awake time being added to each interval rather than oscillator drift; separating the two still needs the drift test in Section 12.
+- First-minute interval charge 116 µAh and energy 1579 µWh.
+- Running totals summing correctly across records: 116, 232, 352, 472 µAh.
+- Bus voltage stable around 12.892 to 12.894 V, die temperature around 21.9 °C.
+
+Record #0 shows `I_mA=1.099` against `#1 I_mA=11.312` while `dQ_uAh` is 116 in both. The snapshot is one instantaneous reading taken at the wake, and the interval charge is the hardware integral over the whole minute. They are different quantities and are not expected to track each other.
+
+### Bug: records stored exp=0 while the board was running experiment 2
+
+Confirmed from source, not inferred. `experimentId` is declared at [solar-logger.ino:371](../Arduino/solar-logger/solar-logger.ino#L371) initialized to 0, and the only thing that populates it is `loadCheckpoint()`, called from `setup()` well below the autonomous timer-wake branch. A timer wake reaches `runAutonomousWakeCycle()` before that line ever runs, so the record was stamped with the startup value.
+
+Nothing errored. The field was populated, well-formed, and CRC-correct. It was simply wrong, which is the failure mode that survives every check a reader might apply.
+
+This is a **development bug in the prototype firmware, not filesystem corruption**. The stored bytes are exactly what the firmware wrote, and their CRCs verify.
+
+The fix adds `loadExperimentIdOnly()`, a read-only NVS helper that reads one key with almost no Serial output, called after `Wire.begin()` and before any INA228 access. Read-only NVS cannot disturb the CHARGE and ENERGY registers, so the protected ordering is unchanged. See [DECISIONS.md](DECISIONS.md) D-024.
+
+### Historical boundary in the log
+
+The existing 65 records are deliberately left alone. Their CRCs are untouched and they remain valid evidence from the prototype.
+
+```text
+seq 1 .. 187, exp=0    prototype records, written before the fix.
+                       exp=0 is a known bug, NOT experiment 0.
+seq 188 onward, exp=2  post-fix records, real experiment attribution.
+```
+
+Any host reading this log has to treat the boundary as real. There is no way to tell a buggy `exp=0` from a legitimate one within a record, which is exactly why the fix marks unknown attribution explicitly instead of writing a plausible number.
+
+### flags decode
+
+`flags=0x4` on record #0 is `FIRST_AFTER_BOOT` with `TIME_QUALITY = UNKNOWN`. `flags=0x0` on the rest is the same time quality with no other bit set; `UNKNOWN` is zero, so it adds nothing to the byte. Neither indicates a problem.
+
+Bit definitions are now written down in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) Section 5, and `LOGGER STORAGE DUMP` prints decoded flag names next to the hex so a dump no longer needs the table.
+
+### Field audit
+
+Every other `AutoRecord` field was checked against the timer-wake path rather than assumed correct. `experiment_id` was the only one affected. The scaling constants used by `readSensor()` and the accumulator readers (`CURRENT_LSB_A`, `CHARGE_LSB_C`, `ENERGY_LSB_J`, `VBUS_LSB_V`, `DIETEMP_LSB_C`) are all `constexpr`, so they need no runtime initialization.
+
+## 2026-09-11: USB rendezvous implemented - BLOCKING GATE NOT YET PROVEN
+
+### What the hardware already proved, and what it did not
+
+Durable records grew from 65 to 99 while the board was unreachable over USB. That proves the timer wake itself works:
+
+```text
+deep sleep -> timer wake -> read INA accumulation -> append durable record
+           -> deep sleep -> repeat
+```
+
+**It does not prove that USB becomes usable on a timer wake.** Those are separate claims and the records only support the first one. The board writing records while nobody could reach it is, if anything, evidence for the opposite.
+
+### The blocking question
+
+```text
+ESP deep sleep -> TIMER wake -> USB CDC becomes usable by macOS -> host connects
+with NO reset, NO BOOT button, NO power cycle, NO USB replug
+```
+
+**This has never worked on hardware and is not proven by anything currently recorded.** Nothing below should be treated as working until it is.
+
+What can be said from source, and only from source:
+
+- Nothing in the firmware suppresses USB on a wake. There is exactly one `Serial.begin(115200)`, on the third line of `setup()` and well before the autonomous branch. No `Serial.end()`, no GPIO isolation, no sleep GPIO configuration anywhere.
+- Deep sleep is a full reboot, so `setup()` re-initializes the USB Serial/JTAG peripheral on every wake the same way it does on a cold boot.
+- The rendezvous gives the host 10 seconds, against roughly 1 to 2 seconds for macOS enumeration on this board when cold-booted.
+
+All three are reasons to expect it to work. **None of them is a measurement**, and whether the ESP32-C3's USB Serial/JTAG peripheral re-enumerates to a macOS host after a deep-sleep wake is exactly the thing that has to be observed rather than reasoned about.
+
+### Rendezvous window
+
+`AUTONOMOUS_USB_RENDEZVOUS_MS = 10000`. Ten seconds, chosen to be unmissable rather than efficient. A window tuned for power would confuse "USB never came up" with "USB came up too briefly to catch", and those need different fixes.
+
+It opens only after the measurement is stored and the accumulators are reset, so nothing about it can put an unstored interval at risk. Once per second it prints:
+
+```text
+[AUTO] Rendezvous: N / 10 s
+[AUTO] USB plugged: YES/NO
+[AUTO] CDC connected: YES/NO
+[CONNECTION] Active transports: NONE
+[CONNECTION] Host claimed: NO
+```
+
+A 10-second rendezvous on a 60-second cadence is a sixth of the duty cycle awake and will cost real power. That is accepted while the behavior is being proved. Measurement work and rendezvous cost are timed and printed separately so the price is visible from the first run.
+
+### FIRST ACCEPTANCE TEST - USB enumeration alone
+
+Do not involve `app/solar_logger.py`. Test one thing.
+
+On the Mac:
+
+```bash
+while true; do
+    date '+%H:%M:%S'
+    ls /dev/cu.usbmodem* 2>/dev/null || echo "NO USB PORT"
+    sleep 0.2
+done
+```
+
+Then:
+
+1. `tools/upload.sh`
+2. `tools/send.sh LOGGER TEST STATUS` - confirm `Armed: NO` and experiment id 2
+3. `tools/send.sh LOGGER TEST AUTONOMOUS`
+4. Board sleeps. **Do not touch it.**
+5. Wait for the timer wake.
+
+PASS requires all of:
+
+- `/dev/cu.usbmodem*` appears on its own
+- it stays for about 10 seconds
+- it disappears again only after the unclaimed rendezvous expires
+- the cycle repeats for at least **two** timer wakes
+- **no reset, no BOOT button, no power cycle, no replug**
+
+**If the port never appears, stop there.** The remaining work is host-side lease logic built around a rendezvous that does not exist, and building more of it would be building on an unproven foundation. Diagnose ESP32-C3 USB behavior after a deep-sleep timer wake instead.
+
+### SECOND ACCEPTANCE TEST - claiming a wake
+
+Only after the first test passes. Start this before a wake is due and do not touch the board:
+
+```bash
+while true; do tools/send.sh LOGGER SESSION HOLD && break; sleep 0.2; done
+```
+
+PASS if the wake creates the port and `send.sh` reports the exact firmware acknowledgement. Then check `tools/send.sh LOGGER SESSION STATUS` shows:
+
+```text
+[CONNECTION] Active transports: USB
+[CONNECTION] Any host connected: YES
+[SESSION] Host session held: YES
+```
+
+and that the board is still awake well past the 10-second rendezvous. Then `tools/send.sh LOGGER SESSION RELEASE`, and confirm transports return to `NONE`, autonomous mode is still **ARMED**, the board sleeps, and the next timer wake exposes USB again.
+
+Note that a manual `HOLD` from `send.sh` is not renewed by anything, so the 15-second lease expires on its own. That is deliberate: a command typed once must not be able to hold the board awake forever. Expiry is itself worth watching, because it exercises the crash-safety path.
+
+### Python logger integration is phase 3
+
+`app/solar_logger.py` is deliberately **unchanged**. Automatic claim, keepalive, and release come after the two tests above pass. Wiring a host-side lease into the logger before the rendezvous is proven would only make a failure harder to localize.
+
+## 2026-09-11: USB rendezvous PASSED on hardware, and two bugs it exposed
+
+### CONFIRMED MILESTONE - the blocking gate is passed
+
+With **no reset, no BOOT button, no power cycle and no USB replug**:
+
+```text
+deep sleep -> TIMER wake -> USB rendezvous
+           -> tools/send.sh LOGGER SESSION HOLD -> firmware ACK
+           -> HOST_SESSION
+           -> tools/send.sh LOGGER SESSION RELEASE -> deep sleep
+```
+
+Timer-wake USB re-enumeration and explicit host claiming both work on real hardware. This was the gate, and everything above it in the design now rests on something measured rather than assumed. **Do not regress this.**
+
+### BUG 1: the 15-second lease never expired
+
+Observed: `HOLD` advertised a 15-second lease, zero keepalives were sent, and the session was still alive 74 seconds later. Only `RELEASE` put the board to sleep. The crash-safety design was therefore not working at all.
+
+**Root cause, confirmed from the ESP32 core source rather than inferred.** `HWCDC` defaults to `tx_timeout_ms = 100` with `max_consec_timeouts = 20`, so one blocked `Serial` write stalls for roughly **two seconds** once the 256-byte TX ring buffer fills and nothing drains it. That is exactly the state after `send.sh` captures a few seconds of response and closes the port: `isPlugged()` keeps reporting true, so the driver keeps waiting rather than giving up.
+
+`setup()` prints well over a hundred lines after the claim. At up to two seconds each that is the missing ~74 seconds, spent inside `setup()`. The only lease check lived in `loop()`, which was never reached. When `setup()` finally finished, the `RELEASE` bytes were already sitting in the RX buffer, and `handleSerialCommands()` runs first in `loop()` — so the lease check never got a single turn.
+
+Fixes:
+
+- `Serial.setTxBufferSize(4096)` before `begin()`, sixteen times the default, so overflow is rare rather than routine.
+- `Serial.setTxTimeoutMs(0)`, so a departed host can never stall the firmware. Output is dropped instead of waited on. Diagnostics must never be allowed to stall measurement, sleep decisions, or lease expiry, and text nobody is draining has no recipient anyway.
+- The 1500 ms USB delay and 2000 ms ADC settle are skipped when a host session is held. USB is demonstrably up, the INA never stopped converting, and 3.5 seconds of a 15-second lease is not affordable.
+- Lease expiry moved into `serviceHostLease()` so the check is not welded to one call site.
+
+### BUG 2: release closed a 9 ms interval after a 74-second session
+
+Observed: `[AUTO] Closing the open tethered interval first (0.008 s)` and `Interval charge: 0.000047 mAh`.
+
+**Root cause.** The tethered baseline was established at the very end of `setup()`, hundreds of lines after the claim, and `setup()` called `resetInaAccumulators()` on the way past. Everything accumulated between the autonomous reset and that second reset was discarded without a word. With Bug 1 stretching `setup()` to 74 seconds, that discarded the entire session, and the 9 ms interval was just the sliver between the late reset and the already-queued `RELEASE`.
+
+**About 74 seconds of charge was silently lost.** The instinct that measurement time had disappeared was correct.
+
+Fix, matching the required semantics exactly:
+
+```text
+HOLD:     discard and DOCUMENT rendezvous accumulation
+          -> reset INA accumulators
+          -> START tethered interval timestamp
+          -> HOST_SESSION
+SESSION:  normal accounting runs
+RELEASE / EXPIRY:
+          -> close the tethered interval at its REAL elapsed duration
+          -> save experiment accounting
+          -> establish clean autonomous baseline
+          -> deep sleep
+```
+
+`setup()` now skips its reset entirely when `HOLD` already established the baseline, and says so rather than doing it silently.
+
+**A short final interval is not always a bug.** When a normal 60-second interval closes moments before release, the remainder legitimately is milliseconds, and the session's charge is accounted across all the intervals that closed during it. Release now prints the session length and how many ordinary intervals closed inside it, so that case can never again be mistaken for lost measurement.
+
+### TEST A: lease expiry, no keepalives
+
+1. `tools/upload.sh`
+2. `tools/send.sh LOGGER TEST AUTONOMOUS`
+3. Wait for a timer wake, then catch it: `while true; do tools/send.sh LOGGER SESSION HOLD && break; sleep 0.2; done`
+4. **Send nothing else. Touch nothing.**
+
+PASS requires:
+
+- at roughly 15 seconds the firmware expires the lease by itself
+- it prints `[SESSION] Host lease EXPIRED after N ms without keepalive`, `[CONNECTION] USB transport RELEASED due to lease expiry`, and the `HOST_SESSION -> HOST_LEASE_EXPIRED` transition
+- the USB port disappears because the board sleeps
+- the next timer wake exposes USB again automatically
+
+No `RELEASE` is sent during this test.
+
+### TEST B: keepalives and honest session accounting
+
+1. Catch the next wake with `HOLD`
+2. `tools/send.sh LOGGER SESSION KEEPALIVE` every ~5 seconds for at least 30 seconds
+3. `tools/send.sh LOGGER SESSION STATUS` partway through
+4. `tools/send.sh LOGGER SESSION RELEASE`
+
+PASS requires:
+
+- the board stays awake across several 15-second lease periods
+- `STATUS` reports a sane lease remaining, time since the last HOLD/KEEPALIVE, and the tethered interval open time
+- release closes an interval **approximately equal to the time since the baseline was established**, not milliseconds, with plausible charge for that duration
+- if a 60-second interval closed just before release, the printed session length and interval count account for the difference
+- autonomous mode stays **ARMED**, the board sleeps, and the next timer wake happens on its own
+
+The host-session lifecycle is not complete until both tests pass.
+
+## 2026-09-11: Test B PASSED, autonomous promoted to a real mode
+
+### TEST B CONFIRMED on hardware
+
+```text
+HOLD -> 3 KEEPALIVEs -> STATUS -> RELEASE
+```
+
+`STATUS` mid-session reported a sane lease remaining, time since the last renewal, and a tethered interval age that tracked the session. `RELEASE` closed a **25.517-second** tethered interval with 0.089697778 mAh and 1.165482667 mWh, average 12.655 mA and 164.429 mW. Autonomous mode stayed **armed** and the board returned to deep sleep on its own.
+
+The accounting fix works: a 25-second session closed a 25-second interval, not a 9-millisecond one.
+
+### TEST A STILL UNPROVEN
+
+```text
+HOLD -> zero KEEPALIVEs -> zero RELEASE -> ~15 s -> firmware expires its own lease
+```
+
+Until that runs, **crash safety is unproven**. It is the only path that covers a host that dies, a cable pulled, or a laptop suspending, and those are the cases a lease exists for. A passing Test B says nothing about it: Test B exercises the cooperative path and Test A exercises the one where the host does nothing at all.
+
+### The interval-count diagnostic bug
+
+`[AUTO] Session lasted 25.521 s; normal 60 s intervals already closed during it: 2350`
+
+2350 was the restored interval number, not a count. `hostSessionHold()` runs during the USB rendezvous, which is before `loadCheckpoint()` restores `completedInterval` from NVS, so the captured baseline was always 0 and the subtraction returned whatever NVS held.
+
+Same class as D-024, and introduced while fixing D-024. Replaced with `hostSessionIntervalCloses`, incremented inside `closeMeasurementInterval()` at the actual event, which cannot be wrong about initialization order. A 25-second session now reports 0.
+
+### Commands promoted
+
+`LOGGER AUTONOMOUS ON` / `OFF` / `STATUS` are canonical. The `LOGGER TEST *` spelling still works and prints a deprecation notice. Procedures recorded in earlier entries above keep the names that were actually typed at the time, so the record stays accurate; use the canonical names for anything new.

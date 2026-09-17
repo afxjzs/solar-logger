@@ -4,6 +4,8 @@
 
 The BMW Solar Logger measures an INA228-powered solar measurement path with an XIAO ESP32-C3 and records live firmware output on a Mac.
 
+The system is currently **host-tethered**: detailed telemetry exists only while the Python logger is attached. The next milestone is autonomous local logging with later synchronization, designed in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) and not yet implemented.
+
 ## Repository
 
 All paths in these documents are relative to the repository root.
@@ -16,8 +18,13 @@ All paths in these documents are relative to the repository root.
 | Current interval telemetry | `data/intervals.csv` |
 | Current firmware events | `data/events.csv` |
 | Legacy/archive data | `logs/` |
+| Firmware version and revision | `Arduino/solar-logger/firmware_version.h` |
 | Firmware upload | `tools/upload.sh` |
 | Firmware command sender | `tools/send.sh` |
+| CSV archiver | `tools/archive-data.py` |
+| Shared host/device protocol | `app/device_session.py` |
+| Host protocol CLI | `app/device_tool.py` |
+| Editor IntelliSense config | `tools/intellisense.sh`, `tools/intellisense.py` |
 
 `data/` is the current telemetry directory. `logs/` is archive/legacy data and is not the live polling destination.
 
@@ -33,6 +40,64 @@ The logger uses pyserial at 115200 baud, discovers `/dev/cu.usbmodem*`, prints a
 
 Use `tools/upload.sh` as the canonical compile/upload mechanism. Compilation runs before serial coordination because it does not need the USB port.
 
+### Tests
+
+```text
+uv run pytest
+```
+
+Host-side tests covering the machine command protocol, the session lease, and the autonomous accounting rule. They touch no hardware and open no serial port.
+
+`tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source. The wake-cycle math lives inside the `.ino` and cannot be compiled on the host until the modularization in [BACKLOG.md](BACKLOG.md) happens, so that module does not execute firmware code. What remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+
+### Firmware version policy
+
+`Arduino/solar-logger/firmware_version.h` is the one place the human version lives. The firmware prints three different facts, and they answer three different questions — see [DECISIONS.md](DECISIONS.md) D-038 for why they are not one string:
+
+```text
+[FIRMWARE] Version:  0.2.0-dev
+[FIRMWARE] Revision: 063e048-dirty
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+They appear at boot, on every autonomous wake, inside `STATUS`, and on the `VERSION` command, which exists so the question can be answered inside a short rendezvous window without printing a whole status block.
+
+**Version** is edited by hand. While pre-1.0:
+
+- **Bump the patch** for a bug fix, a diagnostic change, or a correction that leaves the observable behavior of every command and every stored record the same.
+- **Bump the minor** when behavior changes: a new or removed command, a change to what a command does or reports, a change to the record format, a change to the autonomous cadence rules, or a change to the host protocol. Reset the patch to zero.
+- **`-dev` stays on the version** until an image has been uploaded and confirmed on hardware. Drop it in the commit that records the successful hardware check.
+- **1.0.0 is reserved** for firmware that has run unattended in the car and been read back successfully. That has not happened, so the number stays below it.
+
+The version starts at 0.1.0 because this is the first firmware to carry one. It is not a statement about how much has been built.
+
+**Revision** is injected only by `tools/upload.sh`, from `git rev-parse --short HEAD`, with `-dirty` when the sketch directory differs from `HEAD` — including a new untracked file in it. Any other build prints:
+
+```text
+[FIRMWARE] Revision: UNKNOWN - not injected by this build (use tools/upload.sh)
+```
+
+IDE builds and plain `arduino-cli compile` are unaffected and produce a working image; they simply cannot claim a revision, and say so rather than printing a blank.
+
+**Build ID** marks the command-protocol generation and is deliberately coarse. Bump it when `CMD_ACK`/`CMD_RESULT` semantics, the bounded protocol writer, or the deferred-RELEASE handshake change, and not otherwise.
+
+### Editor IntelliSense
+
+`tools/intellisense.sh` generates the VS Code C/C++ configuration; `.vscode/c_cpp_properties.json` points at `build/intellisense/compile_commands.json`, which the script writes.
+
+```text
+tools/intellisense.sh            regenerate the database
+tools/intellisense.sh --check    report staleness only, change nothing
+```
+
+Run it after adding an `#include`, and after adding a function that is called above where it is defined. `--check` answers "is it stale?" in well under a second; both are also VS Code tasks.
+
+**Nothing in the repository writes down a path under `~/Library/Arduino15`.** Every include path, define, and flag comes from the database Arduino CLI produces. The script resolves the `@response-file` and `-iprefix` indirection the ESP32 core uses, because the editor does not, and that indirection is where the entire ESP-IDF include path lives. See [DECISIONS.md](DECISIONS.md) D-039.
+
+**The script compiles the sketch with the flags it is about to hand the editor, and refuses to write the database if that fails**, leaving the previous configuration in place and printing the compiler's own diagnostics. A configuration nobody compiled is a claim rather than a fact.
+
+The sketch's half of this is a forward-declaration block near the top of `solar-logger.ino`. Arduino CLI synthesizes prototypes into the generated `.ino.cpp` it actually compiles, so a sketch can call a function defined further down and still build — while the file a person edits is not valid C++. Those eighteen declarations are written out now, and the verification step names the next missing one instead of leaving a squiggle to explain.
+
 ### Upload ownership
 
 The upload marker is the repository-root file `.upload-in-progress`. Its content protocol is:
@@ -43,6 +108,34 @@ REQUESTED -> RELEASED
 
 When the Python logger is running, `tools/upload.sh` detects it, writes `REQUESTED`, waits for the logger to close Serial, and waits for the logger to write `RELEASED`. The uploader discovers the current modem port only after release. The logger stays disconnected while the marker remains present, then resumes discovery after the marker is removed.
 
+### Uploading to a sleeping board
+
+Since the board can put itself into deep sleep and expose USB only during a rendezvous window, **"no `/dev/cu.usbmodem*` exists" is an ordinary state rather than a failure.**
+
+`tools/upload.sh` compiles exactly once, then waits for the board to appear and uploads the binary it already built:
+
+```text
+[BUILD] Compile successful: ALL OK
+[UPLOAD] No XIAO USB port is currently visible.
+[UPLOAD] The board may be in autonomous deep sleep.
+[UPLOAD] Waiting for the next USB rendezvous...
+[UPLOAD] Press Control-C to cancel.
+[UPLOAD] XIAO appeared: /dev/cu.usbmodem1101
+[UPLOAD] Starting upload attempt 1 using existing build...
+```
+
+Start it while the board is asleep and leave it: the next timer wake is caught automatically.
+
+If a rendezvous closes part way through an upload, the script waits for the next one and **retries the same artifact**. It never recompiles on a retry. Compile writes to a pinned build directory with `--output-dir` and every upload reads it back with `--input-dir`, so that is a property of the commands rather than an assumption about the build cache.
+
+Real failures are not retried. After any failed attempt the complete upload output is printed, then the failure is classified: a vanished port or a known device-presence error waits for the next rendezvous, while anything else (wrong FQBN, missing binary, bad arguments, permissions) exits nonzero. The strongest signal is simply whether the port still exists.
+
+The port is rediscovered before every attempt, because the board can come back as a different `usbmodem` number.
+
+There is no short default timeout, since waiting for a sleeping board can legitimately exceed one autonomous cadence. Control-C prints `[UPLOAD] Cancelled by user.`, releases the logger handshake, and exits 130. Tunable with `UPLOAD_PORT_POLL_SECONDS`, `UPLOAD_RETRY_SETTLE_SECONDS`, `UPLOAD_WAIT_HEARTBEAT_SECONDS`, and `UPLOAD_MAX_ATTEMPTS` (0 = unlimited).
+
+`UPLOAD_PORT_POLL_SECONDS` and `UPLOAD_WAIT_HEARTBEAT_SECONDS` work again as of 2026-09-17. They had regressed to doing nothing when port waiting moved into `app/device_tool.py wait-port`: the shell still read them into variables, and nothing passed them on. `wait-port` now takes `--poll-seconds` and `--heartbeat-seconds`, and `tools/upload.sh` passes both.
+
 This workflow has been bench-tested successfully in both cases:
 
 1. Python logger running: the logger released Serial, wrote `RELEASED`, upload succeeded, and the logger reconnected.
@@ -52,15 +145,116 @@ If a running logger does not acknowledge `RELEASED` within five seconds, the upl
 
 The upload script removes `.upload-in-progress` through its exit, interrupt, and termination cleanup traps.
 
+## Host Session Protocol
+
+`app/device_session.py` is the one host-side implementation of the sleeping-device protocol. `app/solar_logger.py`, `tools/send.sh`, and `tools/upload.sh` all use it, and none of them reimplements port discovery, rendezvous waiting, acknowledgement handling, or the session lease. Protocol strings and host timing constants are defined there and nowhere else.
+
+`app/device_tool.py` is the command-line front end the shell scripts call:
+
+```text
+device_tool.py find-port                print the port, exit 1 if the board is away
+device_tool.py wait-port                block until the next rendezvous
+device_tool.py send COMMAND ...         send, require the echo, print the response
+device_tool.py session hold|keepalive|release|status
+```
+
+**Who owns Serial, in every state:**
+
+| State | Owner |
+| --- | --- |
+| Logger running | `app/solar_logger.py`. `send.sh` queues through `.serial-command` and opens nothing. |
+| Logger not running, one-shot command | `device_tool.py` for the duration of that command only. |
+| Upload requested | `esptool`, after the logger acknowledges `RELEASED`. |
+| Board asleep | Nobody. There is no device to own. |
+
+Two different things are tracked, because the firmware echoes a command **before** dispatching it and therefore echoes commands it is about to refuse. The echo means parsed; a separate outcome line means succeeded or failed. See [DECISIONS.md](DECISIONS.md) D-030.
+
+### What `CMD_RESULT` means
+
+```text
+CMD_ACK,<command>             parsed and ACCEPTED FOR EXECUTION
+CMD_RESULT,<command>,OK       the command COMPLETED successfully
+CMD_RESULT,<command>,ERROR    parsed, but did not complete successfully
+```
+
+**`OK` means the command did what was asked.** Until 2026-09-17 it meant only that the dispatcher recognized the command, so `LOGGER AUTONOMOUS OFF` answered `OK` after an NVS write failure and `tools/send.sh` exited 0 for a board that was still armed. Every handler with a real failure mode now reports its own outcome. A refusal counts as a failure: a command that was declined did not do what was asked.
+
+Two cases are `OK` rather than `ERROR`, because the requested end state holds and nothing failed: arming something already armed, and disarming something already off. `RESET` and `LOGGER STORAGE CLEAR` without their confirmation word are also `OK` — explaining that confirmation is required is what those commands do.
+
+`LOGGER SESSION HOLD` still answers `REFUSED` and `LOGGER SESSION RELEASE` still answers `NOT_HELD`, because those say more than `ERROR` would. The host treats anything other than `OK` as not completed.
+
+The build ID is the way to tell the generations apart: `solar-logger-protocol-ack-v3` reports completion, `-v2` reported recognition. See [DECISIONS.md](DECISIONS.md) D-041.
+
+Running `uv run python app/solar_logger.py` against a sleeping board is now normal: it prints that the board is sleeping, waits for the next autonomous rendezvous, connects, claims a host session, and keeps it alive with a keepalive every 5 seconds against the firmware's 15-second lease. Control-C releases the board and waits for the firmware's acknowledgement. If the connection is already gone, it says so and notes that the firmware lease timeout resumes autonomous sleep anyway.
+
+## Archiving Telemetry
+
+`tools/archive-data.py` moves the three current CSV files into a dated directory and starts fresh empty ones:
+
+```text
+data/samples.csv     ->  logs/2026-09-11_132901-exp2/samples.csv
+data/intervals.csv   ->  logs/2026-09-11_132901-exp2/intervals.csv
+data/events.csv      ->  logs/2026-09-11_132901-exp2/events.csv
+```
+
+```text
+tools/archive-data.py --dry-run    # show exactly what would happen
+tools/archive-data.py              # do it
+tools/archive-data.py --exp 3      # name the directory explicitly
+```
+
+**This never touches the device.** It opens no serial port, sends no command, and changes nothing in NVS. The experiment id, interval number, running totals, and autonomous storage are all untouched, and the next row the firmware sends continues the same experiment into the new files. Archiving is a host-side file operation and nothing more.
+
+The experiment number in the directory name is read from the `experiment_id` column of each file's last row. When the files disagree, which a reset between one file's last row and another's can legitimately cause, the script prints each value and says which it chose rather than picking silently.
+
+Each new file is created with **the header copied from the file it replaced**, not a hardcoded copy. `open_csv_file()` in `app/solar_logger.py` compares an existing header against its expected columns and exits if they differ, so copying keeps the two in step when the columns change.
+
+It writes an `ARCHIVE.txt` manifest beside the CSVs recording the row counts, experiment number, and time span, so an archive directory explains itself later.
+
+**It refuses to run while `app/solar_logger.py` is running**, and this is the reason it exists as a script rather than three `mv` commands. The logger holds all three files open in append mode for its entire run. Moving a file out from under an open handle does not redirect that handle: the logger would keep writing into the archived file through the same inode while the new file stayed empty. Truncating in place is no better, because the handle keeps its offset and the next append lands past it, leaving a hole of NUL bytes. Either way the data goes somewhere nobody is looking and nothing reports an error. Stop the logger first; stopping it does not affect the device or the experiment.
+
 ## Serial Commands
 
 Use `tools/send.sh` from the repository root. Arguments are joined into one newline-terminated firmware command.
+
+### Waiting is the default
+
+The board's normal state is autonomous sleep, so a missing `/dev/cu.usbmodem*` is an ordinary condition rather than a failure. A plain send waits for the next USB rendezvous:
+
+```text
+tools/send.sh LOGGER STORAGE INFO
+
+    board awake   ->  sent now
+    board asleep  ->  waits for the next rendezvous, then sends
+```
+
+`--no-wait` asks for immediate failure instead. `--wait` still parses; it is now the default and says so.
+
+**Two commands never wait, and this is the point of the rule:**
+
+```text
+LOGGER SESSION KEEPALIVE
+LOGGER SESSION RELEASE
+```
+
+Both address a session that already exists. A session is a lease held over one transport, so once the port is gone the session is over — the firmware's 15-second lease expires by itself and the board resumes autonomous sleep with no help from the host. Waiting would deliver a stale command to a board that has since slept, woken, and opened a **new** rendezvous, possibly one another process just claimed. Both fail immediately with an explanation, and an explicit `--wait` on either is **refused with exit status 2** rather than silently ignored.
+
+`LOGGER SESSION HOLD` is not in that set. It creates a session rather than addressing one, so any rendezvous will do and waiting is exactly right:
+
+```text
+tools/send.sh LOGGER SESSION HOLD
+```
+
+replaces the old retry loop. Exit status is `0` acknowledged and completed, `1` not, `2` request refused, `130` cancelled.
+
+The classification lives in `app/device_session.py` as `requires_live_session()`, so all three host tools agree by construction. `tools/upload.sh` passes `--no-wait` explicitly, because it runs inside its own retry loop. See [DECISIONS.md](DECISIONS.md) D-040.
 
 ```text
 tools/send.sh WIFI STATUS
 tools/send.sh WIFI ON
 tools/send.sh WIFI OFF
 tools/send.sh STATUS
+tools/send.sh VERSION
 tools/send.sh HELP
 tools/send.sh POWER TEST WIFI
 tools/send.sh POWER TEST SLEEP
@@ -72,6 +266,24 @@ tools/send.sh POWER TEST STOP
 When `app/solar_logger.py` is running, `send.sh` writes `.serial-command`. The logger reads the complete command, writes it through its existing pyserial connection, flushes the output, and removes the handoff file. This prevents a second process from opening the port.
 
 When the logger is not running, `send.sh` discovers the current `/dev/cu.usbmodem*` port and sends the command directly at 115200 baud. It refuses to send when `.upload-in-progress` exists, so command sending cannot race a firmware upload. It also refuses to overwrite an existing pending command.
+
+In direct mode it then behaves like a short one-shot serial monitor: it waits for the firmware's `[COMMAND] Received:` echo, reports the acknowledgement, and prints the response that follows.
+
+```text
+tools/send.sh LOGGER AUTONOMOUS STATUS     # prints the [AUTO] status block
+tools/send.sh LOGGER STORAGE INFO    # prints the storage summary
+tools/send.sh LOGGER STORAGE DUMP    # prints the decoded records
+```
+
+Capture ends when the port has been quiet for 600 ms, or at a hard cap of 2 seconds (10 seconds for `LOGGER STORAGE DUMP`, the only command that streams one line per stored record). The stop reason is always printed, and a capture that hits the cap warns that output may be truncated.
+
+The 600 ms quiet threshold sits below both the firmware's 1-second CSV cadence and its 5-second heartbeat, so a finished response reads as quiet whether or not `loop()` is running. During normal logging a stray CSV line may still land inside the window; it is printed rather than filtered.
+
+Both windows are tunable per invocation with `--capture-seconds` and `--idle-seconds`, which `tools/send.sh` passes through to `app/device_tool.py`.
+
+The `SEND_RESPONSE_SECONDS`, `SEND_RESPONSE_SECONDS_DUMP` and `SEND_RESPONSE_IDLE_MS` environment variables this section used to document **no longer exist**. They belonged to the pure-shell `send.sh`, and nothing read them after the protocol moved into `app/device_session.py`; setting one had no effect and said nothing. Corrected 2026-09-17 after the architecture review found the drift by grep.
+
+Ordinary commands finish in about a second, which matters because recovery commands have to fit inside the 15-second cold-boot maintenance window.
 
 ## Telemetry Files
 
@@ -104,6 +316,102 @@ Startup prints the loaded sample and interval counts plus the historical time ra
 The plot includes visible `Home`, `−`, `+`, and `Follow` buttons. `+` narrows the shared time window and `−` widens it; neither changes the independent Follow state. When Follow is ON, live redraws shift the selected-width window to the newest data. When Follow is OFF, the current zoom remains stable. Toggle `Follow` or press `f` to change that state. `h` restores Follow ON; `z` and `p` mirror zoom in and zoom out. The native Matplotlib toolbar remains available when the backend exposes it. Hovering a plotted line shows its local time and value. Hover support uses the `mplcursors` dependency managed by `uv`.
 
 The renderer creates each line and hover cursor once, then updates line data in place. This avoids clearing axes, rebuilding cursor state, and blocking with a pause every sample, which keeps the desktop UI responsive during live telemetry.
+
+## Flash and Partition Layout
+
+The XIAO ESP32-C3 has 4 MiB of flash. The build uses the stock `default` partition scheme (`build.partitions=default` in the core's `boards.txt`), which allocates it as follows:
+
+| Name | Offset | Size | Used today |
+| --- | --- | ---: | --- |
+| bootloader + partition table | `0x000000` | 36,864 | yes |
+| `nvs` | `0x009000` | 20,480 | yes — experiment state and power-test flags |
+| `otadata` | `0x00E000` | 8,192 | no |
+| `app0` | `0x010000` | 1,310,720 | yes — the firmware |
+| `app1` | `0x150000` | 1,310,720 | no — never used, no OTA |
+| `spiffs` | `0x290000` | 1,441,792 | no — entirely free |
+| `coredump` | `0x3F0000` | 65,536 | no |
+
+The "Maximum is 1310720 bytes" line in every compile is the `app0` partition size, not the flash size and not a generic ESP32 limit.
+
+No filesystem is mounted. The core's LittleFS defaults to the partition labeled `spiffs`, so 1,441,792 bytes are available for durable local storage without changing the partition table — which means adopting storage cannot disturb the `nvs` partition holding experiment state. See [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
+
+## Autonomous Storage and Sync
+
+Designed, not implemented. Full design in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
+
+The target architecture keeps the INA228 converting continuously while the ESP32 sleeps for a configurable interval, wakes to harvest the hardware CHARGE and ENERGY accumulators into a durable 72-byte binary record, and sleeps again. A host later connects over any transport, asks for records after a given sequence number, stores them, and acknowledges; only acknowledged records become reclaimable.
+
+Two findings from the design audit matter to the current firmware:
+
+- **The present boot path would destroy sleep-period accumulation.** `setup()` calls `resetInaAccumulators()` without ever reading ENERGY or CHARGE, so an autonomous wake reusing it would silently discard every sleep interval's charge. The autonomous wake path must read accumulators before resetting them. This is harmless today only because both deep-sleep power tests suspend interval accounting.
+- **Awake time dominates the power budget, not cadence.** With the current 3.5-second boot, a 60-second wake cadence averages about 2.66 mA against a 1.07 mA deep-sleep floor. The 1500 ms USB enumeration delay and 2000 ms ADC settle are both unnecessary on a timer wake with the INA228 already converging.
+
+Wake cadence is governed by one setting, `autonomous_interval_seconds`, defaulting to 60 seconds for development. That is a bench default rather than an architectural commitment, and every record stores its own measured interval duration so a cadence change leaves the log self-describing.
+
+Wall-clock time is treated as synchronizable state rather than something the logger always has. Records are always creatable using the global sequence number, and each one carries a time-quality field distinguishing a clock that has never been set from one set recently and one set long enough ago to have drifted. Setting the clock is a single transport-independent `SET_TIME` operation, so the Python logger over USB, NTP over Wi-Fi, and a Bluetooth client all supply the same thing. The RTC slow clock here is the internal RC oscillator, not a crystal, so drift and periodic resync are normal considerations — and no accuracy figure will be published until drift is measured. No external RTC is required. See D-019.
+
+## Autonomous Logger Bench Test
+
+A bench-only prototype of one autonomous sleep/read/store cycle. Full design in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
+
+**Storage is confirmed on hardware.** As of 2026-09-11 the log holds 65 valid 72-byte records, 4680 bytes, tail intact, with hardware-accumulated charge and energy surviving deep sleep and interval durations of 60003 to 60006 ms. **Timings are still unmeasured**, because the first run's instrumentation was measuring the wrong span; it is fixed and needs another run.
+
+**Records before sequence 188 carry `exp=0` because of a known prototype bug**, not because they belong to experiment 0. The autonomous wake branch runs before `loadCheckpoint()`, so the `experimentId` global was still at its startup value when those records were stamped. Records from sequence 188 onward carry the real experiment id, read from NVS on each wake. The old records are deliberately left untouched; see [LAB_NOTES.md](LAB_NOTES.md) and [DECISIONS.md](DECISIONS.md) D-024.
+
+```text
+LOGGER AUTONOMOUS ON        enable autonomous sleep/wake/store mode
+LOGGER AUTONOMOUS STATUS    mode, cadence, storage, session state
+LOGGER AUTONOMOUS OFF       disable it; stored records are NOT deleted
+LOGGER INTERVAL <seconds>   the one authoritative cadence setting, 10-3600
+LOGGER STORAGE INFO         filesystem and durable-log summary
+LOGGER STORAGE DUMP         decode stored records to Serial
+LOGGER STORAGE CLEAR YES    erase stored records, never experiment state
+```
+
+Each cycle wakes on the timer, validates the INA228 **by reading only**, reads the accumulated CHARGE and ENERGY for the completed interval, reads `DIAG_ALRT` in the same wake because `CHARGEOF` clears when CHARGE is read, takes a V/I/P/temperature snapshot, appends one 72-byte CRC32-protected binary record to LittleFS, and only then resets the accumulators. If the record cannot be stored the accumulators are deliberately left alone, so the next interval covers both periods rather than losing one.
+
+The timer-wake path branches at the top of `setup()`, before any cold-boot initialization, and skips the 1500 ms USB enumeration delay and the 2000 ms ADC settle. Neither applies to a battery-powered timer wake where the INA228 never stopped converting. Cold-boot behavior is unchanged.
+
+**Accounting is isolated.** The running totals in these records are test-local, held in RTC memory and recovered from the durable log. This path never calls `saveCheckpoint()` and never modifies the experiment id, interval number, or experiment running totals. `LOGGER STORAGE CLEAR YES` erases stored records and nothing else — storage lifecycle stays separate from experiment lifecycle, as required by D-017.
+
+Storage uses LittleFS on the stock `spiffs` partition with no partition-table change. Mount never formats automatically: a first-run unformatted partition and a corrupted one look identical at mount time, so initializing is an explicit operator action.
+
+### Connecting to an armed board
+
+Every autonomous timer wake ends with a 10-second USB rendezvous window, so a host can claim the board without any physical intervention.
+
+```text
+LOGGER SESSION HOLD       claim this wake; stay awake (autonomous stays ARMED)
+LOGGER SESSION KEEPALIVE  renew the 15-second lease
+LOGGER SESSION RELEASE    hand the board back to autonomous sleep
+LOGGER SESSION STATUS     state, lease, transports, rendezvous
+```
+
+`LOGGER SESSION HOLD` is not `LOGGER AUTONOMOUS OFF`. HOLD keeps the board awake while a host is attached and leaves autonomous mode armed; STOP disarms it persistently. `autonomous armed = YES, host session held = YES` is a valid state.
+
+To catch a wake without touching the board:
+
+```bash
+tools/send.sh LOGGER SESSION HOLD
+```
+
+That now waits for the next rendezvous by itself. The retry loop this section used to recommend —
+
+```bash
+while true; do tools/send.sh LOGGER SESSION HOLD && break; sleep 0.2; done
+```
+
+— still works and is no longer needed. The waiting moved into `app/device_session.py`, which polls at the same 200 ms and prints a heartbeat during a long wait.
+
+**The rendezvous is confirmed on hardware.** On 2026-09-11 a timer wake exposed USB, `send.sh` claimed it with `LOGGER SESSION HOLD`, and `LOGGER SESSION RELEASE` returned the board to deep sleep, with no reset, BOOT button, power cycle, or replug. Lease expiry and host-session accounting were both broken in that first run and are fixed; see [LAB_NOTES.md](LAB_NOTES.md) for the two tests that still have to pass.
+
+### Stopping an armed board
+
+An armed board sleeps immediately on cold boot, and the Serial command parser runs only from `loop()`, so for a while there was no way to stop it short of reflashing. On a true cold boot the firmware now stays awake for 15 seconds (`AUTONOMOUS_COLD_BOOT_MAINTENANCE_MS`), announces the window, counts down, and parses commands throughout.
+
+To stop an armed board: reset or power-cycle it, then send `LOGGER AUTONOMOUS OFF` within the window. Timer wakes do not open a window and stay as short as possible, because awake time dominates the power budget.
+
+`tools/send.sh` waits for the firmware's `[COMMAND] Received:` echo on the direct-serial path and reports `ALL OK` only when it sees it, so a command that was written but never parsed is reported as a failure rather than a success. It then prints the firmware's response, so `LOGGER AUTONOMOUS STATUS` and `LOGGER STORAGE INFO` can be read during the window without starting the Python logger.
 
 ## Firmware Power Tests
 
