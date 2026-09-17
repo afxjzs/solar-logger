@@ -7,6 +7,8 @@
       "command": "arduino-cli",
       "args": [
         "compile",
+        "--warnings",
+        "all",
         "--fqbn",
         "esp32:esp32:XIAO_ESP32C3",
         "${workspaceFolder}/Arduino/solar-logger"
@@ -21,6 +23,23 @@
       "label": "Solar Logger: Upload",
       "type": "shell",
       "command": "${workspaceFolder}/tools/upload.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Solar Logger: Generate IntelliSense Database",
+      "detail": "Run after adding an #include or a new forward reference in the sketch.",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/intellisense.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Solar Logger: Check IntelliSense Database",
+      "detail": "Fast: reports whether the database still matches the sketch.",
+      "type": "shell",
+      "command": "${workspaceFolder}/tools/intellisense.sh",
+      "args": [
+        "--check"
+      ],
       "problemMatcher": []
     }
   ]
