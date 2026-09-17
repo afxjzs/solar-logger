@@ -9,3 +9,20 @@ dependencies = [
     "mplcursors>=0.7.1",
     "pyserial>=3.5",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.pyright]
+# app/ is a directory of scripts rather than an installed package, which is how
+# tools/send.sh and tools/upload.sh already reach it. conftest.py puts it on
+# sys.path at runtime; this is the same fact stated for static analysis, so
+# pyright and Pylance resolve `device_session` and `device_tool` the way the
+# tests actually import them.
+extraPaths = ["app", "tests"]

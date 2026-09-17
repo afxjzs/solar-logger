@@ -34,16 +34,24 @@ import csv
 import math
 import sys
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import mplcursors
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.widgets import Button
 import serial
 from serial.tools import list_ports
+
+# The shared host-side device and session protocol. Port discovery, rendezvous
+# waiting, and the SESSION lease live there and are used identically by
+# tools/send.sh and tools/upload.sh, so none of it is reimplemented here.
+import device_session as ds
 
 
 # ============================================================================
@@ -202,9 +210,6 @@ def find_xiao_port():
         if port.device.startswith("/dev/cu.usbmodem")
     ]
 
-    if len(usbmodem_ports) == 1:
-        return usbmodem_ports[0].device
-
     if len(usbmodem_ports) > 1:
         print("[WARNING] Multiple USB modem serial ports found:")
 
@@ -216,9 +221,11 @@ def find_xiao_port():
             "We should improve board identification if this becomes ambiguous."
         )
 
-        return usbmodem_ports[0].device
-
-    return None
+    # Selection itself is delegated so that the logger, send.sh and upload.sh
+    # can never disagree about which port is the board. list_ports is still
+    # used above because it carries descriptions worth printing, which a glob
+    # does not.
+    return ds.find_port()
 
 
 def read_upload_handshake():
@@ -475,7 +482,7 @@ def current_host_timestamp():
     return datetime.now().astimezone().isoformat()
 
 
-def parse_captured_at(value):
+def parse_captured_at(value) -> datetime:
     """Parse one stored ISO 8601 timestamp and require timezone information."""
 
     if isinstance(value, datetime):
@@ -963,7 +970,29 @@ def initialize_plot_lines(figure, axes):
     )
 
 
-def update_graphs(figure, axes, samples, charge_intervals):
+def plot_x_coordinate(row: dict) -> float:
+    """Matplotlib x-coordinate for one telemetry row, in host local time.
+
+    A display-only gap marker plots as NaN, which breaks the line without any
+    CSV row existing for it. See D-008.
+
+    date2num() is typed as returning a float OR an array because it also
+    accepts sequences. It is handed exactly one datetime here, so float() states
+    which of the two this is rather than converting anything.
+    """
+
+    if row.get("plot_gap"):
+        return math.nan
+
+    return float(mdates.date2num(parse_captured_at(row["captured_at"])))
+
+
+def update_graphs(
+    figure: Figure,
+    axes: Sequence[Axes],
+    samples: list[dict],
+    charge_intervals: list[dict],
+) -> None:
     """
     Redraw the live charts using collected high-resolution samples.
     """
@@ -971,27 +1000,30 @@ def update_graphs(figure, axes, samples, charge_intervals):
     if not samples and not charge_intervals:
         return
 
-    preserved_limits = None
+    # Read ONCE, into a local.
+    #
+    # PLOT_STATE["auto_follow"] is mutated by the Follow button and by the `f`
+    # key. Reading it here and again a hundred lines below would let a toggle
+    # that lands between the two reads capture no limits and then try to
+    # restore them, or capture them and then never put them back. One read,
+    # one decision, for the whole redraw.
+    auto_follow = bool(PLOT_STATE["auto_follow"])
 
-    if not PLOT_STATE["auto_follow"]:
+    # Only meaningful when Follow is OFF: those are the limits the user chose
+    # and that set_data() plus autoscaling would otherwise move. When Follow is
+    # ON there is genuinely nothing to preserve, and the empty list is that
+    # fact rather than a placeholder - the loop that consumes it runs only on
+    # the branch that filled it.
+    preserved_limits: list[tuple[tuple[float, float], tuple[float, float]]] = []
+
+    if not auto_follow:
         preserved_limits = [
             (axis.get_xlim(), axis.get_ylim())
             for axis in axes
         ]
 
-    sample_times = [
-        math.nan
-        if row.get("plot_gap")
-        else mdates.date2num(parse_captured_at(row["captured_at"]))
-        for row in samples
-    ]
-
-    charge_times = [
-        math.nan
-        if row.get("plot_gap")
-        else mdates.date2num(parse_captured_at(row["captured_at"]))
-        for row in charge_intervals
-    ]
+    sample_times = [plot_x_coordinate(row) for row in samples]
+    charge_times = [plot_x_coordinate(row) for row in charge_intervals]
 
     voltages = [
         row["voltage_V"]
@@ -1019,7 +1051,7 @@ def update_graphs(figure, axes, samples, charge_intervals):
     power_line.set_data(sample_times, powers)
     charge_line.set_data(charge_times, accumulated_charge)
 
-    if PLOT_STATE["auto_follow"]:
+    if auto_follow:
         all_times = [
             value
             for value in sample_times + charge_times
@@ -1263,6 +1295,11 @@ def main():
     silent_warning_printed = False
     upload_release_acknowledged = False
 
+    # Host session over the shared protocol. Recreated on every connect,
+    # because it writes through whichever serial handle is currently open.
+    session = None
+    sleeping_notice_printed = False
+
     print()
     print("[LOGGER] Starting serial connection manager.")
     print("[LOGGER] Press Control-C to stop.")
@@ -1382,17 +1419,42 @@ def main():
             #
             if ser is None:
 
+                # Every path that drops the port lands here, so clearing the
+                # session in one place cannot miss one. This never implies the
+                # firmware released anything: only that this process can no
+                # longer speak for the session. The firmware lease expires on
+                # its own, which is the whole point of it being a lease.
+                if session is not None:
+                    session.forget_session("serial connection closed")
+                    session = None
+
                 port = find_xiao_port()
 
                 if port is None:
-                    print(
-                        "[SERIAL] XIAO not found. "
-                        "Waiting..."
-                    )
+                    # NOT an error. The board exposes USB only during the
+                    # rendezvous window after each autonomous timer wake, so
+                    # absence is the expected state between wakes. Announced
+                    # once rather than every second, so a long wait does not
+                    # bury the rest of the output.
+                    if not sleeping_notice_printed:
+                        sleeping_notice_printed = True
+                        print()
+                        print("[SERIAL] XIAO is currently sleeping.")
+                        print(
+                            "[AUTO] Waiting for next autonomous USB "
+                            "rendezvous..."
+                        )
+                        print(
+                            "[AUTO] This can take up to one autonomous "
+                            "interval. Press Control-C to stop."
+                        )
+                        print()
 
                     plt.pause(0.01)
                     time.sleep(RECONNECT_DELAY_SECONDS)
                     continue
+
+                sleeping_notice_printed = False
 
 
                 print(f"[SERIAL] Found candidate port: {port}")
@@ -1420,6 +1482,29 @@ def main():
                     last_serial_line_at = None
                     silent_warning_printed = False
 
+                    # ----------------------------------------------------
+                    # Claim the board.
+                    # ----------------------------------------------------
+                    #
+                    # Sent unconditionally, because whether the board is in
+                    # autonomous mode is the firmware's business to answer,
+                    # not something worth guessing at from the host. An armed
+                    # board grants the lease; a board that is not armed
+                    # refuses it explicitly and the session layer records
+                    # that no lease is needed. Either way the outcome is
+                    # stated rather than assumed.
+                    #
+                    # The session writes through this handle but never reads
+                    # it: the loop below owns the port and feeds every line
+                    # to note_line(). A second reader here would steal the
+                    # telemetry this logger exists to collect.
+                    def write_line(command, handle=ser):
+                        handle.write((command + "\n").encode("utf-8"))
+                        handle.flush()
+
+                    session = ds.SessionClient(write_line=write_line)
+                    session.request_hold()
+
 
                 except serial.SerialException as error:
                     print(
@@ -1438,6 +1523,75 @@ def main():
             # ================================================================
             # CONNECTED STATE
             # ================================================================
+
+            # ----------------------------------------------------------------
+            # CONNECTION INVARIANT
+            # ----------------------------------------------------------------
+            #
+            # `ser` and `serial_opened_at` are set together on connect and
+            # cleared together on every disconnect path, so reaching here with
+            # one of them set and the other not means a path was added that
+            # updates only half the state.
+            #
+            # It matters because the silence watchdog below subtracts
+            # serial_opened_at from now. Substituting 0.0 or time.monotonic()
+            # for a missing value would produce an age of several decades or of
+            # zero seconds, either of which looks exactly like a real
+            # measurement and would drive a real decision about closing the
+            # port. Say so and reconnect instead.
+            if ser is None or serial_opened_at is None:
+                print(
+                    "[SERIAL] ERROR: Inconsistent connection state "
+                    f"(port={'open' if ser is not None else 'closed'}, "
+                    f"opened_at={'set' if serial_opened_at is not None else 'unset'})."
+                )
+                print(
+                    "[SERIAL] This is a logger bug, not a device fault. "
+                    "Dropping the connection and rediscovering."
+                )
+
+                if ser is not None:
+                    close_serial_connection(ser)
+
+                if session is not None:
+                    session.forget_session("inconsistent connection state")
+                    session = None
+
+                ser = None
+                serial_opened_at = None
+                last_serial_line_at = None
+
+                plt.pause(0.01)
+                time.sleep(RECONNECT_DELAY_SECONDS)
+                continue
+
+            # ----------------------------------------------------------------
+            # HOST SESSION UPKEEP
+            # ----------------------------------------------------------------
+            #
+            # Runs once per loop pass. readline() has a one second timeout, so
+            # this is reached at least that often even on a silent port, which
+            # is what keeps the keepalive cadence honest when the board goes
+            # quiet.
+            if session is not None:
+                # Never silently assume a lease is still valid. This surfaces
+                # any command the firmware did not echo within the ack timeout.
+                session.check_pending_timeout()
+
+                if session.due_for_keepalive():
+                    try:
+                        session.request_keepalive()
+
+                    except (serial.SerialException, OSError) as error:
+                        print(
+                            "[SESSION] ERROR: Could not send KEEPALIVE: "
+                            f"{error}"
+                        )
+                        print(
+                            "[SESSION] The firmware lease will expire and the "
+                            "board will resume autonomous sleep."
+                        )
+                        session.forget_session("keepalive write failed")
 
             try:
                 raw_line = ser.readline()
@@ -1545,6 +1699,13 @@ def main():
             # Parsing telemetry must never hide diagnostics.
             #
             print(line)
+
+
+            # The session layer watches for its own acknowledgements and
+            # outcome lines. It never consumes a line: telemetry parsing below
+            # still sees everything.
+            if session is not None:
+                session.note_line(line)
 
 
             # ================================================================
@@ -1701,6 +1862,63 @@ def main():
 
 
     finally:
+
+        # --------------------------------------------------------------------
+        # Hand the board back before closing the port.
+        # --------------------------------------------------------------------
+        #
+        # RELEASE is an optimization, not the recovery path. If it cannot be
+        # sent, the firmware's lease expires on its own and autonomous sleep
+        # resumes without any help from here. Saying so matters: an operator
+        # who sees a failed release should know the board still recovers.
+        if session is not None and session.held and ser is not None:
+            try:
+                session.request_release()
+
+                # Wait briefly for the firmware's own acknowledgement rather
+                # than assuming the write was enough.
+                release_deadline = time.monotonic() + ds.ACK_TIMEOUT_SECONDS
+
+                while time.monotonic() < release_deadline and session.held:
+                    raw = ser.readline()
+
+                    if not raw:
+                        continue
+
+                    text = raw.decode("utf-8", errors="replace").strip()
+
+                    if text:
+                        print(text)
+                        session.note_line(text)
+
+                if session.held:
+                    print(
+                        "[SESSION] WARNING: RELEASE was not acknowledged "
+                        f"within {ds.ACK_TIMEOUT_SECONDS:.0f}s."
+                    )
+                    print(
+                        "[SESSION] The firmware lease expires on its own, so "
+                        "autonomous sleep still resumes."
+                    )
+                else:
+                    print("[SESSION] Board released: ALL OK")
+
+            except (serial.SerialException, OSError) as error:
+                print(f"[SESSION] ERROR: Could not send RELEASE: {error}")
+                print(
+                    "[SESSION] The connection is already gone. The firmware "
+                    "lease timeout is the fallback and will resume autonomous "
+                    "sleep on its own."
+                )
+
+        elif session is not None and session.held:
+            print(
+                "[SESSION] Connection already gone; RELEASE could not be sent."
+            )
+            print(
+                "[SESSION] The firmware lease timeout is the fallback and "
+                "will resume autonomous sleep on its own."
+            )
 
         if ser is not None:
             if close_serial_connection(ser):
