@@ -6,6 +6,162 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-18: INA228 driver extracted into a module - NOT hardware validated
+
+**No hardware was touched.** Nothing was uploaded or committed, Experiment 3
+was not reset, and storage was not cleared. Every result below is a host test,
+a source audit, or a compile. **This image has not run on the board.**
+
+The first modularization stage. The INA228 driver moved out of
+`solar-logger.ino` into `Arduino/solar-logger/ina228.h` and `ina228.cpp`.
+Runtime behavior is intended to be unchanged, and nothing below found a change.
+The boundary rules are [DECISIONS.md](DECISIONS.md) D-047. The plan's status,
+and where this stage departs from it, are in [BACKLOG.md](BACKLOG.md).
+
+### What moved
+
+- **23 functions:** register reads and writes, sign extension, identity,
+  configuration, the ADC_CONFIG MODE decode, shutdown and continuous mode,
+  `resetInaAccumulators()`, `readSensor()`, `readAccumulatedCharge_mAh()` and
+  `readAccumulatedEnergy_mWh()`. Bodies unchanged. The 11 that nothing outside
+  the driver calls are now `static`.
+- **33 `constexpr` constants.** The 15 that the sketch still uses are in
+  `ina228.h`. The 18 that only the driver uses are private to `ina228.cpp`.
+- **`struct SensorReading`**, into the header, because `readSensor()` fills it.
+
+What stayed in the sketch:
+
+- `validateInaForWake()` and the wake cycle's DIAG_ALRT read. BACKLOG assigns
+  both to `auto_orchestrator`. They reach the part through `readRegister16()`,
+  which the header exports for them.
+- `Wire.begin()` and `Wire.setClock()` in `setup()` and
+  `runAutonomousWakeCycle()`. Bus bring-up is part of boot and wake ordering.
+  The header states it as a precondition.
+- `inaShutdownActive`. The power test writes it, and STATUS and the heartbeat
+  read it. The driver does neither.
+- Every decision about when to read, reset, or reconfigure.
+
+`solar-logger.ino` went from 9,126 to 7,949 lines by `wc -l`: 1,184 lines moved
+out, 4 added for the include, and one 4-line comment rewritten as 7 because the
+move made it false. `ina228.h` is 224 lines and `ina228.cpp` 1,048. Git's
+default diff misaligns this change; `git diff --diff-algorithm=histogram` shows
+it as 1,188 deletions and 11 additions.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `tools/check.sh` before the move | `ALL OK`: 153 passed, 1 xfailed; pyright 0 errors, 0 warnings; compile clean |
+| `tools/check.sh` after the move | `ALL OK`: 153 passed, 1 xfailed, the same overrun `xfail`; pyright 0 errors, 0 warnings, 0 informations; compile clean with `--warnings all`, no warnings |
+| firmware image | 1,102,133 → 1,101,475 bytes (84%, −658) |
+| globals | 36,332 → 36,332 bytes (11%, unchanged) |
+| `ina228.h`, `ina228.cpp` | untracked, so `git diff HEAD --check` does not cover them; checked separately, no trailing whitespace and no space before a tab |
+| `tools/intellisense.sh` | the raw `.ino`, which now includes `ina228.h`, compiles standalone with the editor's flags: ALL OK; 81 entries |
+
+No test was edited. The source tests read every sketch file (D-043), so they
+found the moved code without changes.
+
+### The move was audited as a move
+
+With the tokenizer from `tests/firmware_source.py`, which drops comments, so
+code is compared and prose is not:
+
+- The sketch's tokens equal the committed sketch's with three runs deleted and
+  `#include "ina228.h"` inserted. No remaining line of code changed.
+- No token of the committed sketch is missing from the three files. The only
+  tokens added are `#pragma once`, five includes, eleven `static`, and the
+  twelve declarations.
+- All 23 functions have identical bodies and parameter lists. Each header
+  declaration matches its definition.
+- All 33 constants have identical definitions. Every constant in `ina228.h` is
+  used by the sketch, and none private to `ina228.cpp` is referenced by it.
+
+The audit script was a scratch file for this stint and is not in the repository.
+
+### Where the 658 bytes went
+
+Measured with `nm` and `objdump` on both images: `.flash.text` −454 and
+`.eh_frame` −204.
+
+- The build has no LTO, so sketch code can no longer inline driver functions
+  across the file boundary: `closeMeasurementInterval()` −182,
+  `runAutonomousWakeCycle()` −90, `setup()` −72.
+- Five helpers that are now `static` no longer exist as separate functions,
+  because the compiler inlined them into their callers inside `ina228.cpp`:
+  `readRegister20Unsigned`, `readRegister24Unsigned`, `readRegister40Signed`,
+  `signExtend20` and `inaModeIsShutdown`. `readSensor()` grew 60 bytes and now
+  calls `readRegisterBytes()` where it used to call the first two. Its
+  soft-float library calls are the same operations in the same counts before
+  and after. `resetInaAccumulators()` and `readAccumulatedCharge_mAh()`, the
+  two callers of `readRegister40Signed`, grew 12 bytes each.
+- `inaModeFromAdcConfig()` had been inlined at every call. It now also exists
+  once as a 4-byte function.
+- The other moved functions shrank by 2 to 6 bytes or did not change.
+  `verifyInaIdentity()` was disassembled: the same 84 instructions, with
+  different string addresses and branch offsets.
+- Seven unrelated functions grew 2 bytes each. `connectionClaim()` and
+  `hostLeaseRemainingMs()` were disassembled: the same instructions, with
+  different addresses and branch offsets. The other five were not examined.
+- `printHeartbeat()` grew 18 bytes and `printLiveSample()` shrank 14. In both,
+  the return after a failed `readSensor()` is laid out differently. Each calls
+  the same set of functions before and after.
+
+### Found, not fixed
+
+**The editor database has no entry for `ina228.cpp` itself.** Arduino CLI's
+entry names the build copy, `build/intellisense/sketch/ina228.cpp`, and
+`tools/intellisense.py` adds an editor entry only for the `.ino`. BACKLOG said
+`.cpp` modules would get correct entries for free, and they do not. Predicted,
+not observed in the editor: cpptools will not apply the ESP32 include paths to
+`ina228.cpp`. The real build is unaffected. Recorded in
+[BACKLOG.md](BACKLOG.md).
+
+### The hardware baseline this stint relied on is not recorded here
+
+The stint brief says the monolith (0.3.0-dev, `solar-logger-protocol-ack-v3`)
+was checked on hardware before this extraction. It quotes an autonomous
+`interval_ms` of about 60,004, 2,022 records read with 0 invalid, a consecutive
+tail, and a first sleep after RELEASE of about 59,750 ms. No entry in this file
+records that run, and the entries below still list their acceptance as pending.
+The figures are quoted from the brief. They are not a recorded observation.
+
+### Firmware identity unchanged
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+A move changes no command, record, cadence rule or protocol, so the version
+policy calls for no bump. The revision that `tools/upload.sh` injects will
+differ, and that is what identifies this source.
+
+### Hardware acceptance - PENDING, nothing below has been run
+
+After a deliberate `tools/upload.sh`, send each command on its own and expect
+exit 0 from each. Everything after "PREDICTED" is read from the source, not
+observed.
+
+1. The smoke test in [BACKLOG.md](BACKLOG.md): `VERSION`,
+   `LOGGER STORAGE INFO`, `LOGGER AUTONOMOUS STATUS`, then `LOGGER SESSION
+   HOLD`, `KEEPALIVE` and `RELEASE`. PREDICTED: a real revision hash, a record
+   count at least as high as before the upload with `Tail status: INTACT`, and
+   `CMD_RESULT,...,OK` for all three session commands.
+2. `tools/send.sh STATUS`. PREDICTED: `[STATUS] Voltage`, `Current` and `Power`
+   lines with live values, and `CMD_RESULT,STATUS,OK`.
+3. `tools/send.sh POWER TEST STATUS`. PREDICTED:
+   `[POWER TEST] INA228 mode right now: continuous conversion`.
+4. After at least two unclaimed timer wakes, `tools/send.sh LOGGER STORAGE
+   DUMP`. PREDICTED: the records written since the upload have `interval_ms`
+   near 60,000, a nonzero `dQ_uAh`, and none of `ACCUM_SUSPECT`, `INA_MATHOF`
+   or `INA_ACCUM_OF`. The first carries `FIRST_AFTER_BOOT`, because the upload
+   was a cold boot. `ACCUM_SUSPECT` is what a failed `validateInaForWake()`,
+   accumulator read or DIAG_ALRT read would set.
+5. Only if a host is reading the port during the cold boot that follows the
+   upload. PREDICTED: `[INA228] Identity check: PASS` and
+   `[INA228] CONFIG / ADC_CONFIG / SHUNT_CAL readback: PASS`. Output with
+   nobody reading is dropped (D-027), so its absence proves nothing.
+
 ## 2026-09-18: Scheduler double-count stint - no hardware touched
 
 **No hardware was touched.** Experiment 3 was not reset, storage was not

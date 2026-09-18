@@ -15,18 +15,22 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
-## Firmware modularization — PLAN ONLY, nothing built
+## Firmware modularization — FIRST STAGE BUILT 2026-09-18, not hardware validated
 
-`Arduino/solar-logger/solar-logger.ino` is 9,126 lines by `wc -l` after the
-2026-09-18 scheduler fix. It is 8,823 at the committed HEAD, before that day's
-two firmware stints, and was 8,436 when this plan was written. The agreed direction is
+`Arduino/solar-logger/solar-logger.ino` is 7,949 lines by `wc -l` after the
+INA228 extraction on 2026-09-18. It was 9,126 just before it, and 8,436 when
+this plan was written. The agreed direction is
 real `.h`/`.cpp` modules, **not** additional Arduino `.ino` tabs: extra tabs are
 concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-No module has been extracted and runtime behavior is unchanged. The one part
-below that is built is the gate every stage passes (2026-09-18).
+**One module exists: the INA228 driver**, `ina228.h` and `ina228.cpp`, extracted
+on 2026-09-18. It is compiled and host-tested, and it has **not** run on
+hardware. Runtime behavior is intended to be unchanged; the audit and its
+hardware check are in [LAB_NOTES.md](LAB_NOTES.md), and the boundary rules it
+set are [DECISIONS.md](DECISIONS.md) D-047. The gate every stage passes was
+built earlier the same day.
 
 ### What the source actually contains
 
@@ -76,7 +80,7 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `pendingAutonomousSleep`, `pendingAutonomousSleepDeadlineMs`, `pendingAutonomousSleepPath` | V | `armPendingAutonomousSleep()`, `cancelPendingAutonomousSleep()`, `servicePendingAutonomousSleep()` | The deferred-sleep grace (D-035, D-044). Bounded, and must stay bounded. Row corrected 2026-09-18: it named `releaseSleepPending` and `servicePendingReleaseSleep()`, which do not exist in the current source. |
 | `hostHandoffAtMs` | V | `beginAutonomousSleepFromHostSession()` only | Added 2026-09-18 (D-046). The `millis()` instant at which the handoff set `rtcAutoSessionElapsedMs`; the scheduler's `AUTO_SLEEP_HOST_RELEASE` path adds only the time since it. |
 | `intervalAccountingBlocked` | V | `resumeIntervalAccounting()` | Deliberately not persisted: `setup()` clears accumulators on every boot, so a reset is the cure (D-012). |
-| `inaShutdownActive` | V | `enterInaShutdownMode()`, `stopAllPowerTests()`, cold-boot resume | While set, nothing may print INA registers as measurements (D-016). |
+| `inaShutdownActive` | V | `enterSleepPowerTestDeepSleep()` after a verified `enterInaShutdownMode()`, `stopAllPowerTests()`, cold-boot resume in `setup()`. Corrected 2026-09-18: this row named `enterInaShutdownMode()`, which never writes it. | While set, nothing may print INA registers as measurements (D-016). Read by STATUS and the heartbeat. The driver neither reads nor writes it, so it stayed in the sketch when the driver moved (D-047). |
 | `wifiPowerTest*`, `sleepPowerTest*` | N flags + V runtime | arm/stop/resume paths | One armed flag plus one variant flag makes "both variants armed" unrepresentable (D-013, D-014). |
 | `autonomousStopRequested` | V | `stopAutonomousTest()` | Set when a stop is *asked for*, before it is known to have worked. Plain RAM on purpose. |
 | `bootWakeupCause`, `setupEntryMicros` | V | first two lines of `setup()` | Write-once. Everything that reports a wake timing reads `setupEntryMicros`. |
@@ -105,8 +109,8 @@ forced them.
 | `nvs_rtc` | the single `Preferences` object and every typed get/put | Arduino |
 | `connection` | `activeTransports`, `anyHostConnected()`, claim/release, USB presence diagnostics | Arduino |
 | `auto_state` | `AutoState`, the ten `rtcAuto*` RTC globals, `setAutoState()`, `autonomousOwnsBoard()`, LittleFS mount, 72-byte record encode/CRC/append, tail scan, sequence reservation | `nvs_rtc` |
-| `ina228_regs` | I2C register read/write, sign extension | Arduino, `Wire` |
-| `ina228` | identity, configuration, shutdown, `readSensor`, accumulator read/reset, `inaShutdownActive` | `ina228_regs` |
+| `ina228_regs` | **Merged into `ina228`, built 2026-09-18.** I2C register read/write, sign extension | Arduino, `Wire` |
+| `ina228` | **BUILT 2026-09-18** as `ina228.h` / `ina228.cpp`: the register layer, identity, configuration, shutdown, `readSensor`, accumulator read/reset. `inaShutdownActive` stayed in the sketch (D-047) | Arduino, `Wire` |
 | `telemetry` | `CSV_SAMPLE` / `CSV_DATA` / `CSV_EVENT` formatting | Arduino |
 | `experiment` | `experimentId`, `completedInterval`, running totals, `intervalStartMs`, checkpoint save/load, interval close, accounting-suspension predicate | `ina228`, `nvs_rtc`, `telemetry`, `auto_state` |
 | `power_test` | Wi-Fi test, both deep-sleep variants, arm/stop/status | `ina228`, `nvs_rtc`, `experiment` |
@@ -118,6 +122,12 @@ forced them.
 `ina228_regs`, `ina228`, `telemetry` and `experiment` are shown separately
 because they are separate files worth having; the measured stack in the next
 section treats them as one `measurement` level, which is where they all sit.
+
+The first two were built as one module on 2026-09-18. Outside the driver, the
+only register-layer function anything calls is `readRegister16()`, used by
+`validateInaForWake()` and the wake cycle's DIAG_ALRT read. A separate
+`ina228_regs` would have had to export every register helper to `ina228`. As one
+module, nine of the ten are `static` and only `readRegister16()` is public.
 
 ### Dependency direction — CORRECTED 2026-09-16
 
@@ -274,8 +284,22 @@ calls. Each stage compiles and uploads on its own. **Do not batch them.**
 | 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls | reboot; `experiment_id` and interval number survive |
 | 2 | `connection` | the other true leaf; 1 global, 5 functions | `LOGGER SESSION STATUS` reports the same transports |
 | 3 | `ina228_regs` | leaf but for the bus; no globals | `STATUS` reports live V/I/P/temperature |
-| 4 | `ina228` | above stage 3; one global (`inaShutdownActive`) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
+| 4 | `ina228` | above stage 3; no globals, since `inaShutdownActive` stayed in the sketch (D-047) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
 | 5 | `telemetry` | formatting only, no state | one `CSV_SAMPLE` and one `CSV_DATA` row reach the logger unchanged |
+
+**Stages 3 and 4 are BUILT, 2026-09-18, as one module, `ina228`, ahead of
+stages 1 and 2. Their hardware checks are PENDING.** Two departures from this
+table, both at the direction of that stint's brief and recorded here so neither
+is silent:
+
+- **Order.** The driver calls nothing but `Wire`, `Serial` and `delay()`, so it
+  was a leaf in the same sense as stages 1 and 2. "Nothing moves before the
+  things it calls" still held.
+- **Batching.** The two stages were done as one, against "Do not batch them."
+  The hardware check afterwards is both rows' checks together. The full list is
+  in [LAB_NOTES.md](LAB_NOTES.md), under the 2026-09-18 INA228 entry.
+
+The remaining order is unchanged: 1, 2, 5, 6, 7, 8, 9, 10, 11.
 | 6 | `auto_state` | **the split. Read-only first, append last.** Carries the ten `rtcAuto*` RTC globals | `LOGGER STORAGE INFO` and `LOGGER STORAGE DUMP` decode the existing log with the same record count and an intact tail |
 | 7 | `experiment` | 8 globals; everything it calls has moved | a full 60-second interval closes with the same running totals |
 | 8 | `power_test` | self-contained; nothing else calls into it | arm and stop each variant; confirm the refusal to arm two |
@@ -374,11 +398,28 @@ them, including lease expiry (step 7), five consecutive unclaimed records
   not belong in these modules.
 - **Arduino CLI stops synthesizing prototypes** for code that moves out of the
   `.ino`. That is a gain, not a loss, and the forward-declaration block in the
-  sketch shrinks by one entry per function moved.
+  sketch shrinks by one entry per function moved. The INA228 stage removed no
+  entry: each of its functions was defined above its first caller, so none was
+  in the block.
+- **A `.cpp` does not get the `#include <Arduino.h>` that Arduino CLI prepends
+  to the sketch.** It includes `<Arduino.h>` and any library it uses itself
+  (D-047).
+- **A header included at the top of the sketch is above the generated
+  prototypes**, so a type it defines can appear in them. `struct SensorReading`
+  used to sit in the sketch at a position a comment guarded. That comment was
+  corrected in the INA228 stage rather than left describing a hazard that no
+  longer exists.
 - `.cpp` files in the sketch directory are compiled automatically; no build
-  file changes are needed.
-- `tools/intellisense.sh` already fingerprints every source file in the sketch
-  directory, and `.cpp` modules get correct database entries for free.
+  file changes are needed. Confirmed by the INA228 stage.
+- `tools/intellisense.sh` fingerprints every source file in the sketch
+  directory, `.h` and `.cpp` included. **CORRECTED 2026-09-18:** this line said
+  `.cpp` modules also get correct database entries for free. They do not. The
+  database's entry for `ina228.cpp` names the build copy,
+  `build/intellisense/sketch/ina228.cpp`, and `tools/intellisense.py` adds an
+  editor entry only for the `.ino`. Predicted, not observed in the editor:
+  cpptools applies no ESP32 include paths to `ina228.cpp`. The real build is
+  unaffected. Direction: have the script add and verify an entry for each
+  sketch `.cpp`, the way it does for the `.ino`. Not done in that stint.
 
 ### Target end state
 
@@ -479,6 +520,11 @@ register values is enough to drive `runAutonomousWakeCycle()`'s decision tree �
 read-before-reset ordering, the append-failure branch, the DIAG_ALRT flags —
 without a board. This needs the modularization to have happened first, which is
 an argument for doing group A now and group B as the modules land.
+
+**Updated 2026-09-18:** the seam is now `ina228.h`. Both register functions
+named above are `static` inside `ina228.cpp`, so a host fake replaces
+`ina228.cpp` and implements the header's twelve functions instead. The wake
+cycle itself is still in `solar-logger.ino` and cannot be host-compiled yet.
 
 **C. Hardware acceptance.** Irreducible, and already written down: the pending
 procedures in [LAB_NOTES.md](LAB_NOTES.md) and the per-stage checks in the
@@ -1153,6 +1199,12 @@ once `setup()` is calling into modules.
 accumulator reset, and gate `configureIna228()` on "the device is not already
 correctly configured and converting" — `validateInaForWake()` already answers
 that question with reads only.
+
+**Still open after the INA228 extraction (2026-09-18), and unchanged by it.**
+`configureIna228()` now lives in `ina228.cpp`, but the decision to call it is
+in `setup()`, and so is the fix. The driver knows nothing about a claimed
+rendezvous and should not learn it (D-047). The line references above predate
+the extraction.
 
 ### NVS load failures become plausible defaults with no signal
 

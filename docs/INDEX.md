@@ -15,6 +15,7 @@ These documents are the canonical engineering record for the BMW Solar Logger. U
 All paths below are relative to the repository root.
 
 - Firmware: `Arduino/solar-logger/solar-logger.ino`
+- INA228 driver module: `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp`
 - Python logger: `app/solar_logger.py`
 - Current telemetry: `data/samples.csv`, `data/intervals.csv`, `data/events.csv`
 - Legacy/archive data: `logs/`
@@ -27,7 +28,7 @@ All paths below are relative to the repository root.
 
 The firmware reports its own identity at boot, on every autonomous wake, in `STATUS`, and on the `VERSION` command: a hand-edited version, the Git revision injected by `tools/upload.sh`, and the command-protocol build ID. An image built any other way prints `Revision: UNKNOWN` rather than a blank. See [DECISIONS.md](DECISIONS.md) D-038 and the version policy in [PROJECT.md](PROJECT.md).
 
-Firmware modularization has not started. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. See [DECISIONS.md](DECISIONS.md) D-043 and the extraction plan in [BACKLOG.md](BACKLOG.md).
+Firmware modularization has started. The INA228 driver became its own module on 2026-09-18; it is compiled and host-tested and has **not** yet been validated on hardware. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. See [DECISIONS.md](DECISIONS.md) D-043 and D-047, and the extraction plan in [BACKLOG.md](BACKLOG.md).
 
 `tools/send.sh` waits for the next USB rendezvous by default, because a sleeping board's absent USB device is the ordinary state. `LOGGER SESSION KEEPALIVE` and `LOGGER SESSION RELEASE` are excluded: they address a session that already exists, so they fail immediately instead of acting on a later one. See [DECISIONS.md](DECISIONS.md) D-040.
 

@@ -883,6 +883,59 @@ entered at"), so the next hardware run can size them.
 A defect in the overrun branch was found in the same code and **not** fixed. It
 is recorded in [BACKLOG.md](BACKLOG.md) and as a strict `xfail`.
 
+## D-047: A module exports what code outside it uses, and each stage is audited as a move
+
+Set by the first modularization stage, the INA228 driver, on 2026-09-18.
+Compiled and host-tested; **not validated on hardware**. The rules apply to
+every later stage in [BACKLOG.md](BACKLOG.md).
+
+**The header is the boundary.** A module's header declares only what code
+outside the module uses at the time of the move. Everything else is private:
+helper functions are `static`, and constants stay in the `.cpp`, where a
+namespace-scope `constexpr` already has internal linkage. `ina228.h` exports 12
+functions, `SensorReading`, and the 15 constants the sketch still reads. The
+other 11 functions and 18 constants are private. Nothing new can reach past the
+driver into its register helpers.
+
+**Mechanics move, policy stays.** The driver exposes read, reset, configure and
+shutdown primitives. When they run stays in `solar-logger.ino`: when the
+accumulators are reset, which interval owns their charge, and when a baseline is
+taken (D-020, D-026, D-028). A function that judges a reading for one caller
+stays with that caller, even when every line of it is a register read.
+`validateInaForWake()` is that case. It prints `[AUTO]` verdicts about the
+interval, and the plan puts it in `auto_orchestrator`.
+
+**State goes with its writers.** A variable moves into a module only if that
+module writes it. `inaShutdownActive` stayed in the sketch, although the plan
+put it in `ina228`. The power test sets and clears it, STATUS and the heartbeat
+read it, and the driver does neither. Moving it would have needed an `extern`
+global or a setter, and either one would have put power-test state inside the
+driver.
+
+**What the `.ino` supplied implicitly is written down.** A `.cpp` does not get
+the `#include <Arduino.h>` that Arduino CLI prepends to the sketch, so it
+includes what it uses. A precondition the sketch always happened to meet is
+stated in the header. For the driver, that is starting `Wire` before the first
+register access.
+
+**Each stage is audited as a move, in tokens.** Comments are stripped, so code
+is compared and prose is not:
+
+- The sketch's tokens equal the previous sketch's with runs deleted and
+  `#include` lines inserted, and nothing else.
+- No token of the previous sketch is missing from the new files. Every added
+  token is scaffolding: `#pragma once`, includes, `static`, declarations.
+- Each moved function has an identical body and parameter list. Each moved
+  constant has an identical definition.
+
+The first stage ran this as a scratch script over the tokenizer in
+`tests/firmware_source.py`. No reusable version is in the repository yet.
+
+**A size change is explained, not accepted.** Moving code across a
+translation-unit boundary changes inlining, because this build has no LTO. The
+stage compares per-symbol sizes of the two images and names where the bytes
+went. A change that cannot be explained stops the stage.
+
 ## Project practice
 
 These documents are living engineering records. Record substantive changes, measurements, discovered bugs, mistakes and corrections, architecture decisions, and open questions here as part of the same work. Chat history is not the authoritative project record.

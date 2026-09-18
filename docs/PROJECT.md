@@ -13,6 +13,7 @@ All paths in these documents are relative to the repository root.
 | Area | Path |
 | --- | --- |
 | Firmware | `Arduino/solar-logger/solar-logger.ino` |
+| INA228 driver module | `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp` |
 | Python logger | `app/solar_logger.py` |
 | Current sample telemetry | `data/samples.csv` |
 | Current interval telemetry | `data/intervals.csv` |
@@ -28,6 +29,12 @@ All paths in these documents are relative to the repository root.
 | Editor IntelliSense config | `tools/intellisense.sh`, `tools/intellisense.py` |
 
 `data/` is the current telemetry directory. `logs/` is archive/legacy data and is not the live polling destination.
+
+### Firmware modules
+
+The firmware is being split out of `solar-logger.ino` into real `.h`/`.cpp` modules, one stage at a time. The plan and its order are in [BACKLOG.md](BACKLOG.md), and the boundary rules are [DECISIONS.md](DECISIONS.md) D-047.
+
+One module exists. **The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. It was extracted on 2026-09-18 with no intended behavior change, and it is compiled and host-tested but **not yet validated on hardware**; see [LAB_NOTES.md](LAB_NOTES.md).
 
 ## Development Workflow
 
@@ -138,6 +145,8 @@ Run it after adding an `#include`, and after adding a function that is called ab
 **The script compiles the sketch with the flags it is about to hand the editor, and refuses to write the database if that fails**, leaving the previous configuration in place and printing the compiler's own diagnostics. A configuration nobody compiled is a claim rather than a fact.
 
 The sketch's half of this is a forward-declaration block near the top of `solar-logger.ino`. Arduino CLI synthesizes prototypes into the generated `.ino.cpp` it actually compiles, so a sketch can call a function defined further down and still build — while the file a person edits is not valid C++. Those eighteen declarations are written out now, and the verification step names the next missing one instead of leaving a squiggle to explain.
+
+**The editor entry covers `solar-logger.ino` only.** `ina228.cpp` has no entry of its own: Arduino CLI's entry names the build copy under `build/intellisense/sketch/`. So expect the editor, but not the build, to misreport that file until the script learns to add module entries. Found 2026-09-18 and recorded in [BACKLOG.md](BACKLOG.md). The editor's behavior on it has not been observed.
 
 ### Upload ownership
 
