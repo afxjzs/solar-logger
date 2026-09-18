@@ -21,6 +21,7 @@ All paths in these documents are relative to the repository root.
 | Firmware version and revision | `Arduino/solar-logger/firmware_version.h` |
 | Firmware upload | `tools/upload.sh` |
 | Firmware command sender | `tools/send.sh` |
+| Local validation gate | `tools/check.sh` |
 | CSV archiver | `tools/archive-data.py` |
 | Shared host/device protocol | `app/device_session.py` |
 | Host protocol CLI | `app/device_tool.py` |
@@ -40,22 +41,62 @@ The logger uses pyserial at 115200 baud, discovers `/dev/cu.usbmodem*`, prints a
 
 Use `tools/upload.sh` as the canonical compile/upload mechanism. Compilation runs before serial coordination because it does not need the USB port.
 
+### Validation
+
+The canonical local check. Run it before every commit, and before and after every modularization stage:
+
+```text
+tools/check.sh
+```
+
+| Step | Command |
+| --- | --- |
+| pytest | `uv run pytest`; needs a host C++ compiler as `c++` on `PATH` |
+| pyright | `uvx pyright --pythonpath .venv/bin/python` on every file in `app/`, `tools/`, `tests/`, and `main.py` |
+| py_compile | `uv run python -m py_compile` on the same files |
+| firmware compile | `arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger`; any warning fails the step |
+| shell syntax | `bash -n` on every `tools/*.sh` |
+| whitespace | `git diff HEAD --check`, tracked files only; untracked files are listed as not covered |
+
+Every step runs even after one fails. The summary comes from each step's exit status and the script exits 1 if anything failed. It uploads nothing and opens no serial port. The compiled image is not the one `tools/upload.sh` flashes, because nothing injects a revision into it. See [DECISIONS.md](DECISIONS.md) D-043.
+
+`--clean` makes every compile a full rebuild; one measured on 2026-09-18 took 23 seconds. It is required: a cached object prints no warnings, so without it a warning fails the gate once and then passes on every later run.
+
 ### Tests
 
 ```text
 uv run pytest
 ```
 
-Host-side tests covering the machine command protocol, the session lease, and the autonomous accounting rule. They touch no hardware and open no serial port.
+Host-side tests. They touch no hardware and open no serial port.
 
-`tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source. The wake-cycle math lives inside the `.ino` and cannot be compiled on the host until the modularization in [BACKLOG.md](BACKLOG.md) happens, so that module does not execute firmware code. What remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+| Module | Covers | Kind |
+| --- | --- | --- |
+| `tests/test_command_protocol.py` | `CMD_ACK` / `CMD_RESULT` parsing, RELEASE's expected disconnect, D-040 waiting rules | real host code |
+| `tests/test_session_semantics.py` | `SessionClient` lease state, the machine RESULT deciding over human lines, results without an ACK and stale results (D-045), the logger's RELEASE report, `resolve_wait()` | real host code |
+| `tests/test_autonomous_accounting.py` | the running-total rule, and the wake-cycle source shape for defects 1, 2 and 5 | specification + source |
+| `tests/test_autonomous_schedule.py` | the deadline scheduler: its three pure timing functions for every sleep path, handoffs, long sessions, overruns and rollover; how the scheduler and the handoff call them; one strict `xfail` | firmware code run on the host + source |
+| `tests/test_characterization_protocol.py` | `tools/send.sh` exit status for every wire outcome; the firmware dispatcher's ACK/RESULT contract, command set and identity markers | real host code + source |
+| `tests/test_characterization_policy.py` | refusals before state changes, including HOLD while a sleep is pending; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle | source |
+| `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation | source |
+| `tests/firmware_source.py` | reads every sketch file as C++ tokens for the source tests | helper |
+
+The three `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
+
+A source test proves the code still has the shape a rule needs. It does not execute firmware. The one exception is `test_autonomous_schedule.py`: it takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046). A missing compiler fails the run rather than skipping it. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+
+`tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source.
+
+`test_release_can_report_a_failed_handoff` was a strict `xfail` recording a known RELEASE defect. The defect was fixed on 2026-09-18 (D-044), strict mode turned the fix into an XPASS failure as designed, and the marker was removed in the same change.
+
+The suite has one expected failure: `test_after_an_overrun_the_next_record_covers_what_its_charge_covers`, a strict `xfail` recording that an overrun moves the interval boundary without resetting the accumulators. It is recorded in [BACKLOG.md](BACKLOG.md) and is not fixed. When a fix makes it pass, strict mode fails the suite until the marker comes off (D-043).
 
 ### Firmware version policy
 
 `Arduino/solar-logger/firmware_version.h` is the one place the human version lives. The firmware prints three different facts, and they answer three different questions — see [DECISIONS.md](DECISIONS.md) D-038 for why they are not one string:
 
 ```text
-[FIRMWARE] Version:  0.2.0-dev
+[FIRMWARE] Version:  0.3.0-dev
 [FIRMWARE] Revision: 063e048-dirty
 [FIRMWARE] Build ID: solar-logger-protocol-ack-v3
 ```
@@ -181,11 +222,28 @@ CMD_RESULT,<command>,ERROR    parsed, but did not complete successfully
 
 Two cases are `OK` rather than `ERROR`, because the requested end state holds and nothing failed: arming something already armed, and disarming something already off. `RESET` and `LOGGER STORAGE CLEAR` without their confirmation word are also `OK` — explaining that confirmation is required is what those commands do.
 
-`LOGGER SESSION HOLD` still answers `REFUSED` and `LOGGER SESSION RELEASE` still answers `NOT_HELD`, because those say more than `ERROR` would. The host treats anything other than `OK` as not completed.
+`LOGGER SESSION HOLD` still answers `REFUSED`, `LOGGER SESSION KEEPALIVE` answers `FAILED` when no session is held, and `LOGGER SESSION RELEASE` still answers `NOT_HELD`, because those say more than `ERROR` would. The host treats anything other than `OK` as not completed. The complete vocabulary is those three plus `OK` and `ERROR`, and a test pins it.
+
+The session commands' answers in full, as of 2026-09-18 ([DECISIONS.md](DECISIONS.md) D-044):
+
+```text
+HOLD      OK         lease taken or renewed
+          REFUSED    autonomous mode is off; no lease is needed
+          ERROR      a deferred autonomous sleep is already pending (after
+                     RELEASE or LOGGER AUTONOMOUS ON); claim the next rendezvous
+
+RELEASE   OK         session ended, and if armed: handoff prepared and the
+                     deferred sleep armed. Sleep itself follows the result.
+          ERROR      session ended, but the handoff failed; the board stays
+                     awake for diagnosis and the console names the stage
+          NOT_HELD   no session was held
+```
+
+**A RESULT whose ACK was lost** is accepted as the outcome and always reported as not clean ([DECISIONS.md](DECISIONS.md) D-045). `tools/send.sh` exits by the RESULT and prints `Firmware completed command, but CMD_ACK was NOT observed` rather than `ALL OK`. If the command's ACK arrives after a result was already taken, that result was stale, from an earlier send, and it is discarded with a warning.
 
 The build ID is the way to tell the generations apart: `solar-logger-protocol-ack-v3` reports completion, `-v2` reported recognition. See [DECISIONS.md](DECISIONS.md) D-041.
 
-Running `uv run python app/solar_logger.py` against a sleeping board is now normal: it prints that the board is sleeping, waits for the next autonomous rendezvous, connects, claims a host session, and keeps it alive with a keepalive every 5 seconds against the firmware's 15-second lease. Control-C releases the board and waits for the firmware's acknowledgement. If the connection is already gone, it says so and notes that the firmware lease timeout resumes autonomous sleep anyway.
+Running `uv run python app/solar_logger.py` against a sleeping board is now normal: it prints that the board is sleeping, waits for the next autonomous rendezvous, connects, claims a host session, and keeps it alive with a keepalive every 5 seconds against the firmware's 15-second lease. Control-C releases the board and waits for the firmware's machine RESULT. It prints `Board released: ALL OK` only for a `CMD_RESULT,...,OK` whose ACK was seen. It names `ERROR` and `NOT_HELD` as failures, and reports a port that vanished before any result as outcome UNKNOWN, never as success. If the connection is already gone, it says so and notes that the firmware lease timeout resumes autonomous sleep anyway. See D-045.
 
 ## Archiving Telemetry
 
@@ -245,7 +303,7 @@ Both address a session that already exists. A session is a lease held over one t
 tools/send.sh LOGGER SESSION HOLD
 ```
 
-replaces the old retry loop. Exit status is `0` acknowledged and completed, `1` not, `2` request refused, `130` cancelled.
+replaces the old retry loop. Exit status is `0` completed (`CMD_RESULT,...,OK`; a lost ACK is warned about, D-045), `1` not, `2` request refused, `130` canceled.
 
 The classification lives in `app/device_session.py` as `requires_live_session()`, so all three host tools agree by construction. `tools/upload.sh` passes `--no-wait` explicitly, because it runs inside its own retry loop. See [DECISIONS.md](DECISIONS.md) D-040.
 
@@ -388,6 +446,8 @@ LOGGER SESSION STATUS     state, lease, transports, rendezvous
 ```
 
 `LOGGER SESSION HOLD` is not `LOGGER AUTONOMOUS OFF`. HOLD keeps the board awake while a host is attached and leaves autonomous mode armed; STOP disarms it persistently. `autonomous armed = YES, host session held = YES` is a valid state.
+
+RELEASE and lease expiry start a new autonomous interval at the moment of the handoff, however long the session lasted. The first sleep after them is one cadence minus the time since the handoff: about 250 ms less after RELEASE, a few milliseconds less after lease expiry. Until 2026-09-18 the scheduler counted the awake time twice, which cut that sleep short by the time the board had been awake; see [DECISIONS.md](DECISIONS.md) D-034 and D-046. That fix has not been verified on hardware.
 
 To catch a wake without touching the board:
 

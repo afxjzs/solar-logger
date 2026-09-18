@@ -15,7 +15,11 @@ these tests come in two halves, and the difference between them matters:
 
   `test_source_*`   assertions against the actual firmware source, so the
                     property that makes the defect impossible is checked on the
-                    real artifact rather than on a description of it.
+                    real artifact rather than on a description of it. They read
+                    the whole sketch as tokens through tests/firmware_source.py,
+                    so they survive the modularization moving these functions
+                    into other files, and they are part of the
+                    pre-modularization gate (docs/DECISIONS.md D-043).
 
 Together they say: here is the rule, and here is evidence the shipped source
 still has the shape that rule requires. Full behavioral cover needs the
@@ -36,11 +40,9 @@ the totals from the last stored record, so a reboot preserved the error.
 
 from __future__ import annotations
 
-import re
-
 import pytest
 
-from conftest import FIRMWARE
+import firmware_source
 
 
 # ============================================================================
@@ -166,16 +168,36 @@ def test_rule_energy_follows_the_same_ordering_as_charge():
 
 
 @pytest.fixture(scope="module")
-def firmware_source():
-    assert FIRMWARE.exists(), f"firmware source not found at {FIRMWARE}"
-    return FIRMWARE.read_text(encoding="utf-8")
+def sketch():
+    return firmware_source.load()
 
 
-RTC_TOTALS = ("rtcAutoRunChargeUAh", "rtcAutoRunEnergyUWh")
+# (retained RTC total, provisional local, interval delta local,
+#  record running-total field, record interval field)
+RTC_TOTALS = (
+    pytest.param(
+        "rtcAutoRunChargeUAh",
+        "provisionalRunChargeUAh",
+        "intervalChargeUAh",
+        "running_charge_uAh",
+        "interval_charge_uAh",
+        id="charge",
+    ),
+    pytest.param(
+        "rtcAutoRunEnergyUWh",
+        "provisionalRunEnergyUWh",
+        "intervalEnergyUWh",
+        "running_energy_uWh",
+        "interval_energy_uWh",
+        id="energy",
+    ),
+)
+
+RETAINED_TOTALS = ("rtcAutoRunChargeUAh", "rtcAutoRunEnergyUWh")
 
 
-@pytest.mark.parametrize("name", RTC_TOTALS)
-def test_source_retained_totals_are_never_compound_assigned(firmware_source, name):
+@pytest.mark.parametrize("name", RETAINED_TOTALS)
+def test_source_retained_totals_are_never_compound_assigned(sketch, name):
     """`x += delta` is the exact shape of the defect.
 
     The fix computes a provisional local and assigns it once, after the append
@@ -183,41 +205,59 @@ def test_source_retained_totals_are_never_compound_assigned(firmware_source, nam
     retained total in place again, which is how the double-count returns.
     """
 
-    offenders = re.findall(rf"{name}\s*\+=", firmware_source)
-
-    assert offenders == [], (
+    assert not sketch.code.contains(f"{name} +="), (
         f"{name} is compound-assigned in the firmware. The retained total must "
         "be committed once, after a successful durable append."
     )
 
 
-@pytest.mark.parametrize("name", RTC_TOTALS)
+@pytest.mark.parametrize(
+    ("name", "provisional", "delta", "record_total", "record_delta"), RTC_TOTALS
+)
 def test_source_totals_are_committed_only_after_a_successful_append(
-    firmware_source, name
+    sketch, name, provisional, delta, record_total, record_delta
 ):
-    """Inside the wake cycle, the commit must sit in the `if (appended)` block."""
+    """The characterization barrier for autonomous accounting.
 
-    start = firmware_source.index("bool runAutonomousWakeCycle()")
-    end = firmware_source.index("void autonomousDeepSleepAgain(", start)
-    wake_cycle = firmware_source[start:end]
+    In the wake cycle:
 
-    assignments = [
-        match.start()
-        for match in re.finditer(rf"^\t*{name}\s*=", wake_cycle, re.MULTILINE)
-    ]
+      provisional = retained total + this interval's delta
+      the record carries that provisional total and that same delta
+      the retained total is assigned EXACTLY ONCE, from that same provisional,
+        inside an `if (appended)` block - so a failed append leaves it alone
 
-    assert assignments, f"{name} is never committed in the wake cycle"
+    Across the sketch, the only other writers are the reseed from the log
+    (autoStorageRecover) and the zeroing on LOGGER STORAGE CLEAR YES.
+    """
 
-    guard = wake_cycle.index("if (appended)\n\t{\n\t\t// Committed here")
+    wake = sketch.function("runAutonomousWakeCycle")
 
-    for position in assignments:
-        assert position > guard, (
-            f"{name} is assigned before the append-success guard, so a failed "
-            "append would retain a total the log does not contain."
-        )
+    assert wake.contains(f"const int64_t {provisional} = {name} + {delta};")
+    assert wake.contains(f"record.{record_total} = {provisional};")
+    assert wake.contains(f"record.{record_delta} = {delta};")
+
+    commits = wake.find_all(f"{name} =")
+    assert len(commits) == 1, (
+        f"{name} must advance exactly once per wake; assigned {len(commits)} times"
+    )
+    assert wake.contains(f"{name} = {provisional};"), (
+        "the retained total must be the same value the stored record carries"
+    )
+
+    appended_blocks = wake.blocks_after("if (appended)")
+    assert any(first < commits[0] < last for first, last in appended_blocks), (
+        f"{name} is assigned outside the append-success guard, so a failed "
+        "append would retain a total the log does not contain."
+    )
+
+    assert sketch.functions_containing(f"{name} =") == {
+        "runAutonomousWakeCycle",
+        "autoStorageRecover",
+        "clearStorage",
+    }
 
 
-def test_source_snapshot_failure_writes_sentinels_not_stack_contents(firmware_source):
+def test_source_snapshot_failure_writes_sentinels_not_stack_contents(sketch):
     """The second wake-cycle defect: an uninitialized SensorReading.
 
     readSensor() returns false without writing any field, so the struct must be
@@ -225,7 +265,9 @@ def test_source_snapshot_failure_writes_sentinels_not_stack_contents(firmware_so
     than whatever was on the stack.
     """
 
-    assert "SensorReading reading = {};" in firmware_source, (
+    wake = sketch.function("runAutonomousWakeCycle")
+
+    assert wake.contains("SensorReading reading = {};"), (
         "the wake cycle's SensorReading must be zero-initialized"
     )
 
@@ -235,42 +277,41 @@ def test_source_snapshot_failure_writes_sentinels_not_stack_contents(firmware_so
         "record.avg_power_uW = AUTO_SNAPSHOT_SIGNED_UNREAD;",
         "record.temp_mC = AUTO_SNAPSHOT_SIGNED_UNREAD;",
     ):
-        assert sentinel in firmware_source
+        assert wake.contains(sentinel)
 
 
-def test_source_snapshot_sentinels_are_physically_impossible(firmware_source):
+def test_source_snapshot_sentinels_are_physically_impossible(sketch):
     # UINT32_MAX microvolts is 4294.97 V against an 85 V part; INT32_MIN
     # microamps is -2147 A. Neither can be produced by a real reading, which is
     # what stops a host mistaking one for a measurement.
-    assert (
+    assert sketch.code.contains(
         "constexpr uint32_t AUTO_SNAPSHOT_BUS_UV_UNREAD = UINT32_MAX;"
-        in firmware_source
     )
-    assert (
+    assert sketch.code.contains(
         "constexpr int32_t AUTO_SNAPSHOT_SIGNED_UNREAD = INT32_MIN;"
-        in firmware_source
     )
 
 
-def test_source_record_is_still_seventy_two_bytes(firmware_source):
-    """The on-disk format is frozen; Experiment 3's log depends on it."""
+def test_source_record_is_still_seventy_two_bytes(sketch):
+    """The on-disk format is frozen; Experiment 3's log depends on it.
 
-    assert "static_assert(sizeof(AutoRecord) == 72," in firmware_source
+    This is the compile-time guard, and it stays. The field-by-field layout is
+    pinned separately in test_characterization_record.py.
+    """
+
+    assert sketch.code.contains("static_assert(sizeof(AutoRecord) == 72,")
 
 
-def test_source_experiment_id_is_never_defaulted_on_an_nvs_failure(firmware_source):
+def test_source_experiment_id_is_never_defaulted_on_an_nvs_failure(sketch):
     """D-024: unknown attribution is marked, never replaced with a plausible 0."""
 
-    start = firmware_source.index("bool loadExperimentIdOnly(")
-    end = firmware_source.index("bool saveAutonomousTestArmed(", start)
-    helper = firmware_source[start:end]
+    helper = sketch.function("loadExperimentIdOnly")
+    failure_branch = helper.block_after(
+        "if (!preferences.begin(NVS_NAMESPACE, true))"
+    )
 
-    open_failure = helper.index("if (!preferences.begin(NVS_NAMESPACE, true))")
-    next_branch = helper.index("if (!preferences.isKey(\"schema\"))", open_failure)
-    failure_branch = helper[open_failure:next_branch]
-
-    assert "return false;" in failure_branch, (
+    assert failure_branch.contains("return false;"), (
         "a failed NVS open must report the id as unknown, not return 0 as if it "
         "were a real answer"
     )
-    assert "outExperimentId = 0;" not in failure_branch
+    assert not failure_branch.contains("outExperimentId = 0;")

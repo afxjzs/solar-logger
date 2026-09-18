@@ -321,6 +321,11 @@ If RTC session state is genuinely lost, firmware rebuilds from durable
 storage, starts a new boot/session identity, and explicitly discards the
 unknown-duration interval. It does not claim continuity it cannot verify.
 
+**Amended by D-046 on 2026-09-18:** continuing the clock across a released
+session now counts the session exactly once, and measures it with `millis()`.
+The `micros()` form it used wrapped after 71.6 minutes, inside an ordinary
+logger session.
+
 ## D-034: All autonomous handoffs use the shared deadline scheduler
 
 Unclaimed rendezvous expiry, host `RELEASE`, host lease expiry, cold-boot
@@ -335,6 +340,12 @@ that boundary is therefore intentional; the handoff overhead is before the
 new boundary, not silently added to an existing autonomous interval. An
 unclaimed rendezvous does not establish a new boundary and sleeps only until
 the existing deadline.
+
+**Amended by D-046 on 2026-09-18:** the code did not follow this rule for
+either handoff. The scheduler added the awake time since `setup()` entry to a
+clock the handoff had already advanced past it, so the first sleep after a
+RELEASE or lease expiry was short by the time spent awake. The rule above is
+unchanged, and the code now follows it.
 
 ## D-035: RELEASE acknowledges before autonomous teardown
 
@@ -367,6 +378,9 @@ expiry or measurement scheduling.
 The host requires both machine stages for normal success. A transport loss
 after a successful result is reported separately and is expected for RELEASE;
 bytes-written, parsed, completed, and disconnected are never conflated.
+
+**Amended by D-045 on 2026-09-18:** a RESULT whose ACK was lost is accepted as
+the outcome, but always reported as not a clean exchange.
 
 ## D-037: Firmware build identity is source-controlled
 
@@ -587,6 +601,287 @@ sentinel conventions would be worse than one schema change — so it forces a
 record version bump, and that is a decision to take deliberately rather than
 discover. No stored record can contain these values, so no existing record
 changes meaning.
+
+## D-043: Modularization is gated on a characterization layer that survives the move
+
+Before any code moves out of `solar-logger.ino`, the monolith's current
+behavior is frozen as tests, and every extraction stage must pass them before
+its hardware check. One command runs the whole gate:
+
+```text
+tools/check.sh
+```
+
+It runs pytest, pyright, `py_compile`, a warning-free ESP32 compile, `bash -n`
+on every script, and `git diff --check`, runs every step even after one fails,
+and builds its summary from each step's real exit status.
+
+Four rules came with it:
+
+- **Source-level tests read the whole sketch, as tokens.** The firmware cannot
+  run on the host yet, so policy, dispatch, accounting and record-layout rules
+  are checked by reading the source. `tests/firmware_source.py` reads every file
+  Arduino compiles and compares C++ tokens with comments removed. A test pinned
+  to `solar-logger.ino`, or to whitespace, would fail on the very file move it
+  exists to check. Verified on 2026-09-18 by moving five functions into a `.cpp`
+  and reformatting every brace: the suite stayed green.
+- **They prove shape, not behavior.** A source test shows the refusal comes
+  before any state change; it does not show the board refusing. Hardware
+  acceptance still covers behavior, and each extraction stage keeps its
+  hardware check in [BACKLOG.md](BACKLOG.md).
+- **No helper was extracted to make policy testable.** Extracting a helper is
+  the first step of modularization, which this gate exists to precede.
+  Behavioral tests of compiled firmware logic arrive with the modules.
+- **A defect the gate finds is recorded as a strict `xfail`, never as expected
+  behavior.** The test states the required property without choosing the fix.
+  If a change makes it pass, strict mode fails the suite, so the marker comes
+  off in the commit that fixes it. Freezing the defect as "current behavior"
+  would make a correct fix look like a regression.
+
+The compile uses `--clean`. Without it arduino-cli reuses cached objects for
+unchanged source and prints nothing for them, so a warning fails the gate once
+and then passes silently. Observed while building the script.
+
+**Amended by D-046 on 2026-09-18:** three pure timing functions were extracted
+inside `solar-logger.ino`, because the scheduler stint's brief asked for the
+smallest pure helper that made the defect testable. They are compiled and run
+on the host. No module boundary exists yet, and the "no helper" rule still
+holds for policy code.
+
+## D-044: RELEASE reports completion, and a pending autonomous sleep is exclusive
+
+The characterization gate found that `LOGGER SESSION RELEASE` answered `OK`
+whenever a session had been held, even when the handoff back to autonomous
+sleep failed and the board stayed awake. That broke D-041. It also found that a
+HOLD arriving inside the 250 ms deferred-sleep grace was granted and then slept
+on.
+
+**RELEASE completed** means all of this, and `OK` means nothing else:
+
+1. a session was held, and it has been ended: lease dropped, USB transport
+   released
+2. if autonomous mode is armed, the accounting handoff was **prepared**: the
+   open tethered interval closed, autonomous session state valid (rebuilt from
+   the log if needed), and the next interval's baseline set
+3. and the deferred sleep is **armed**, with its bounded grace (D-035)
+
+Entering deep sleep is **not** part of it. That happens after the result, which
+is the whole reason it is deferred. A host's only evidence that it happened is
+the port disappearing, and a vanished port proves nothing on its own. If the
+wake timer then fails to arm, the result has already been sent; the firmware
+says so on the console, and the port does not disappear.
+
+| Outcome | Answer |
+| --- | --- |
+| no session held | `NOT_HELD` |
+| steps 1-3 done, or step 1 with autonomous mode off | `OK` |
+| step 1 done, handoff not prepared | `ERROR` |
+
+On `ERROR` the session is still over, but the board stays awake for diagnosis
+with autonomous mode armed. The console names the failed stage: "closing the
+open tethered interval" or "rebuilding autonomous state - storage unavailable".
+Lease expiry uses the same handoff and names the stage too; it has no command,
+so it answers nothing.
+
+**A pending deferred sleep is exclusive.** `pendingAutonomousSleep` has three
+writers and no others:
+
+- `armPendingAutonomousSleep()`, used by RELEASE after a prepared handoff and by
+  `LOGGER AUTONOMOUS ON` after arming
+- `cancelPendingAutonomousSleep()`, used by an explicit stop and when
+  autonomous mode turns out to be off
+- `servicePendingAutonomousSleep()`, which enters the sleep once the grace
+  expires
+
+Arming sets `DEEP_SLEEP_PENDING`, so `autonomousOwnsBoard()` holds for the whole
+grace, and tethered accounting, `POWER TEST STOP` and `RESET YES` all stand
+down. RELEASE was already in that state. `LOGGER AUTONOMOUS ON` was not, which
+left a 250 ms window in which a tethered interval could close over accumulators
+the autonomous interval had just reset. It now enters the same state.
+
+**HOLD during the grace is refused with `ERROR`.** `REFUSED` keeps its one
+meaning, autonomous mode is off and no lease is needed, so a host does not
+wrongly conclude the board is unarmed. Canceling the sleep and granting the
+lease was the preferred option and was rejected. By the time the grace starts,
+the RELEASE handoff has closed the tethered interval, reset the accumulators,
+moved the retained session clock to the new autonomous boundary, and possibly
+rebuilt RTC state and consumed a `boot_id`. Taking the board back would need all
+of that undone. It would also run a second handoff in the same boot through the
+scheduler defect recorded in [BACKLOG.md](BACKLOG.md) on 2026-09-18, which
+double-counts awake time. A host that is refused claims the next rendezvous.
+
+**An explicit stop cancels a pending sleep before its NVS write.** Before, the
+grace only ended when the armed flag was clear, so a `LOGGER AUTONOMOUS OFF`
+whose write failed let the board sleep anyway after the operator had asked for
+a stop. That is D-021's failure reached through the deferred path. Arming now
+also resets the tethered interval clock with the accumulators, so a canceled
+arm resumes ordinary accounting from the real reset.
+
+**Identity.** Version 0.3.0-dev: RELEASE now reports differently on a failure,
+and HOLD behaves differently during the grace, which the version policy makes a
+MINOR bump. The build ID stays `solar-logger-protocol-ack-v3`. The vocabulary
+and its meaning are unchanged, since `ERROR` already meant "parsed, not
+completed". No host needs to tell the two images apart to read a result
+correctly, and no v3 image has run on hardware. This is a judgment call on the
+build ID policy's wording, recorded so it is not silent.
+
+## D-045: The machine RESULT is the host's only authority, and a missing ACK is never silent
+
+Three rules for every host path: `tools/send.sh` through `SerialDevice`, and
+`app/solar_logger.py` through `SessionClient`.
+
+**The machine RESULT decides the outcome.** The firmware prints its human
+outcome line (`[SESSION] Released: ALL OK`, `Host session held: ALL OK`, the
+keepalive line) *before* its `CMD_RESULT`. In `SessionClient` that human line
+used to clear the expected outcome, so the machine RESULT arriving after it was
+ignored and the human line decided everything. The logger's shutdown then
+printed `Board released: ALL OK` whenever the session stopped being held: after
+a `NOT_HELD` answer, after a lease-expiry line, or after the human line alone.
+Human lines are now display plus a session-state fallback for a dropped machine
+line. They no longer consume the expectation, and no success is reported from
+them.
+
+The logger's release goes through `release_session()` in
+`app/device_session.py`:
+
+| What arrived | Reported |
+| --- | --- |
+| `CMD_RESULT,...,OK` with its ACK | `Board released: ALL OK` |
+| `CMD_RESULT,...,OK` without its ACK | released, and "CMD_ACK was NOT observed" |
+| `ERROR` | `NOT ALL OK`: session over, board stayed awake, stage in the firmware output |
+| `NOT_HELD` | `NOT ALL OK`: no session was held, nothing released |
+| port lost, or no result before the timeout | `NOT ALL OK`: outcome UNKNOWN |
+
+**A RESULT whose ACK was lost is accepted, provisionally, and always flagged.**
+The firmware emits a RESULT only after parsing and dispatching, so a RESULT
+implies the parse. An ACK can be dropped under HWCDC backpressure (D-036). So:
+
+- `tools/send.sh` exits by the RESULT: 0 for `OK`, 1 otherwise. For `OK` it
+  prints `Firmware completed command, but CMD_ACK was NOT observed` instead of
+  `... ALL OK`, plus a warning. Treating it as a failure was rejected: a retry
+  loop would then re-send a command that had completed, and a completed
+  `RESET YES` sent twice starts two experiments.
+- `SessionClient` accepts it for session state, logs a warning, and counts it
+  in `results_without_ack`.
+
+**An ACK arriving after an accepted result proves that result stale.** The
+firmware writes a command's ACK before its RESULT down one FIFO, so no ACK ever
+follows its own RESULT. If this command's ACK follows a result already taken
+for it, that result was left over from an earlier send of the same command, for
+example one interrupted mid-response. It is discarded with a warning and the
+command's own result is awaited. Before this rule, requiring the ACK first made
+that case safe by construction; the rule keeps it safe while accepting lost
+ACKs.
+
+**Session commands get no stricter rule, deliberately.** The ACK line carries no
+more identity than the RESULT line: both hold the same command text and no
+session identifier, so a missing ACK makes session identity no more ambiguous.
+What protects identity is D-040 (KEEPALIVE and RELEASE never wait for a new
+rendezvous) and the port binding: a `SessionClient` lives on one open port, and
+a port does not survive a sleep. Binding commands to a session id is the
+unbuilt BACKLOG item, not something the ACK could supply.
+
+## D-046: The scheduler adds only the time since the retained clock was exact
+
+Found by reading on 2026-09-18 and fixed the same day. Compiled and tested on
+the host. **Not uploaded, and not verified on hardware.**
+
+**The defect.** Two RTC-retained values carry autonomous time across deep
+sleep. `rtcAutoSessionElapsedMs` is the session time at one known instant.
+`rtcAutoIntervalStartMs` is the session time of the current interval's
+boundary. The scheduler computed "now" as the retained value plus the time
+since `setup()` entry. That is right on a timer wake, because the previous
+sleep set the value for this wake's `setup()` entry. It was wrong after a host
+handoff. `beginAutonomousSleepFromHostSession()` had already moved the value to
+the handoff's own "now", which includes the awake time, and the scheduler then
+added the awake time again.
+
+The consequences below were computed by running the firmware's own arithmetic
+on the host with the defect restored. None was observed on the board, and per
+[LAB_NOTES.md](LAB_NOTES.md) no image containing the 2026-09-16 change that
+routed handoffs through the retained clock has been uploaded.
+
+- A RELEASE 28 s after the wake's `setup()` entry commanded 31,750 ms of sleep
+  instead of 59,750 ms. The next record still claimed 60,150 ms, although only
+  about 32.5 s had passed.
+- The session clock ran ahead of the time that really passed by the session
+  length, for the rest of that `boot_id`.
+- At one cadence or more, the doubled time passed the deadline. The scheduler
+  printed a false overrun warning, moved the boundary, and slept a full cadence.
+- Lease expiry took the same path. So did a handoff on a cold boot, such as a
+  claim in the maintenance window, because `millis()` is itself the time since
+  boot: a release 45 s after `setup()` entry slept 14,750 ms.
+
+**The rule.** Session time now is the retained value plus the local time since
+the instant that value was exact. Nothing else is added.
+
+| Path | The retained value is exact at | Now |
+| --- | --- | --- |
+| `AUTO_SLEEP_TIMER_WAKE` | this wake's `setup()` entry | retained + time since `setup()` entry |
+| `AUTO_SLEEP_HOST_RELEASE` | the handoff | retained + time since the handoff |
+| `COLD_BOOT`, `ARM_COMMAND`, `RTC_LOST` | nothing retained; the session began on this boot | `millis()` |
+
+The handoff records its instant in `hostHandoffAtMs`. That value is plain RAM,
+written only by the handoff, from the same `millis()` reading it used for the
+session time.
+
+**The design is unchanged.** D-034 still holds: RELEASE and lease expiry set a
+new boundary at the handoff and sleep the rest of one cadence from it. After
+RELEASE that is the cadence minus the 250 ms grace, and after lease expiry the
+cadence minus the handoff's own few milliseconds of output. Both go through the
+same handoff and then the scheduler with `AUTO_SLEEP_HOST_RELEASE`, so they
+share the corrected path. An unclaimed wake computes exactly what it did
+before: `rtcAutoSessionElapsedMs + awakeMs`. The overrun branch (D-032) is
+unchanged: a full cadence, never an underflow.
+
+**Two more defects in the same expression, fixed with it.**
+
+- The handoff measured the time since `setup()` entry with `micros()`. That is a
+  32-bit count on this target (`__SIZEOF_LONG__` is 4, checked against the
+  toolchain), so it wraps every 4,294.967 s, about 71.6 minutes. The logger's
+  ordinary workflow holds a session for hours, and each wrap dropped
+  4,294,967 ms from `session_elapsed_ms` for the rest of the boot. The handoff
+  now uses `millis()`, which wraps after 49.7 days.
+- Whether the handoff continues the retained clock was tested after the RTC
+  rebuild had set the magic. On a timer wake whose RTC state was lost, that
+  would have continued a clock the rebuild had just declared invalid, under a
+  new `boot_id`. It is now decided before the rebuild. This was the BACKLOG item
+  "`rtcAutoMagic` is set before the expression that tests it". No reachable case
+  was known.
+
+**Pure helpers, executed on the host.** The timing arithmetic is now three
+pure functions inside `solar-logger.ino`: `autonomousHandoffElapsedMs()`,
+`autonomousElapsedAtSleepMs()` and `planAutonomousSleep()`, with an
+`AutoSleepPlan` result. They use fixed-width types only, because `unsigned long`
+is 64 bits on the host and 32 on the ESP32-C3. `tests/test_autonomous_schedule.py`
+extracts their source from the sketch and compiles it with the host's `c++`
+(`-std=c++20` to match the core, `-Wall -Wextra -Werror`), then runs it. These
+are the first tests in the project that execute firmware code. The composition,
+meaning which clock readings the scheduler and the handoff pass in and what they
+store, is still pinned by source tests. D-043 is amended to record the
+exception.
+
+**Identity.** The version stays `0.3.0-dev`. HEAD records `0.2.0-dev`, and
+`0.3.0-dev` exists only in the uncommitted working tree and has never been
+uploaded, so this change joins it rather than bumping again. The build ID is
+unchanged, because the protocol is untouched.
+
+**Residuals, unchanged and unmeasured.** A record's `interval_ms` is shorter
+than the time that really passed by a few pieces, all of which predate this
+change:
+
+- the bootloader, which session time has never included
+- on the first record after a handoff, the part of `setup()` before the wake
+  cycle starts its clock. On consecutive unclaimed wakes that part cancels.
+- on the first record after a handoff, the work `closeMeasurementInterval()`
+  does after its accumulator reset: a diagnostic read, output and the NVS
+  checkpoint. A handoff that rebuilds RTC state also scans the log first.
+
+The firmware prints the first two ("micros() at setup entry", "Wake cycle
+entered at"), so the next hardware run can size them.
+
+A defect in the overrun branch was found in the same code and **not** fixed. It
+is recorded in [BACKLOG.md](BACKLOG.md) and as a strict `xfail`.
 
 ## Project practice
 

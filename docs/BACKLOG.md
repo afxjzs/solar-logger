@@ -17,13 +17,16 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 ## Firmware modularization — PLAN ONLY, nothing built
 
-`Arduino/solar-logger/solar-logger.ino` is 8,436 lines. The agreed direction is
+`Arduino/solar-logger/solar-logger.ino` is 9,126 lines by `wc -l` after the
+2026-09-18 scheduler fix. It is 8,823 at the committed HEAD, before that day's
+two firmware stints, and was 8,436 when this plan was written. The agreed direction is
 real `.h`/`.cpp` modules, **not** additional Arduino `.ino` tabs: extra tabs are
 concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-Nothing below has been implemented. Runtime behavior is unchanged.
+No module has been extracted and runtime behavior is unchanged. The one part
+below that is built is the gate every stage passes (2026-09-18).
 
 ### What the source actually contains
 
@@ -58,8 +61,8 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `autonomousState` | V | `setAutoState()` only | Single writer, prints every transition. The one piece of state in the file with a clean owner. |
 | `rtcAutoMagic` | R | wake path, arm, host handoff, `stopAutonomousTest()` | Guards the other nine `rtcAuto*` values. Must be set **after** they are all valid, never before. |
 | `rtcAutoBootId` | R | `nextBootId()` callers | One continuous power-on session. Increments on cold boot; a timer wake keeps it. Backed by NVS `boot_id`. |
-| `rtcAutoSessionElapsedMs` | R | wake cycle, deep-sleep scheduler, host handoff, RTC-loss path | **Monotonic within `boot_id`** (D-033). Pre-advanced by the commanded sleep before sleeping, so it is a commanded clock, not a measured one. |
-| `rtcAutoIntervalStartMs` | R | wake cycle (after reset), scheduler overrun branch, host handoff, arm | The autonomous interval boundary. Must move only when the accumulators are reset. |
+| `rtcAutoSessionElapsedMs` | R | deep-sleep scheduler, host handoff, arm, `setup()` (cold-boot resume, RTC-loss rebuild). Corrected 2026-09-18: the wake cycle reads it and never writes it. | **Monotonic within `boot_id`** (D-033). Pre-advanced by the commanded sleep before sleeping, so it is a commanded clock, not a measured one. **Exact at one instant**: the scheduler sets it for the next wake's `setup()` entry, the handoff for the handoff itself, and "now" adds only the time since that instant (D-046). |
+| `rtcAutoIntervalStartMs` | R | wake cycle (after reset), scheduler overrun branch, host handoff, arm, `setup()` (cold-boot resume, RTC-loss rebuild) | The autonomous interval boundary. Must move only when the accumulators are reset. **The overrun branch breaks this**; found 2026-09-18, not fixed, below. |
 | `rtcAutoNextSeq` | R | `autoStorageRecover()`, wake cycle on successful append | Never reused (D-017). Advances only after a durable append. |
 | `rtcAutoSeqHighWater` | R, mirrors N `auto_seq_hw` | `reserveSequenceBlock()`, `autoStorageRecover()` | The floor that makes duplicates impossible. A failed NVS read currently lowers it to 0. |
 | `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Test-local totals, **not** experiment totals. Currently advanced before the append that should gate them. |
@@ -70,7 +73,8 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `hostSessionHeld`, `hostLeaseDeadlineMs`, `hostLeaseRenewedMs`, `hostKeepaliveCount`, `hostSessionStartedMs`, `hostSessionIntervalCloses` | V | `hostSessionHold()`, `hostSessionKeepalive()`, `hostSessionRelease()`, `serviceHostLease()`, `stopAutonomousTest()` | A lease is a property of one awake period, so plain RAM is right. `hostSessionIntervalCloses` is incremented inside `closeMeasurementInterval()` — measurement writing session state. |
 | `hostSessionBaselineEstablished` | V | `hostSessionHold()`, release, lease expiry, `stopAutonomousTest()` | Means "the accumulators were reset at the claim". `setup()` reads it to decide whether to reset again. A cross-function ordering contract with no enforcement. |
 | `hostClaimedRendezvous` | V | `hostSessionHold()`, rendezvous loop, release, expiry, stop | The rendezvous loop's exit condition. Set by the command parser, read by the autonomous orchestrator — the coupling that the `pumpCommands` injection is meant to formalize. |
-| `releaseSleepPending`, `releaseSleepDeadlineMs` | V | `hostSessionRelease()`, `servicePendingReleaseSleep()` | The deferred-RELEASE grace (D-035). Bounded, and must stay bounded. |
+| `pendingAutonomousSleep`, `pendingAutonomousSleepDeadlineMs`, `pendingAutonomousSleepPath` | V | `armPendingAutonomousSleep()`, `cancelPendingAutonomousSleep()`, `servicePendingAutonomousSleep()` | The deferred-sleep grace (D-035, D-044). Bounded, and must stay bounded. Row corrected 2026-09-18: it named `releaseSleepPending` and `servicePendingReleaseSleep()`, which do not exist in the current source. |
+| `hostHandoffAtMs` | V | `beginAutonomousSleepFromHostSession()` only | Added 2026-09-18 (D-046). The `millis()` instant at which the handoff set `rtcAutoSessionElapsedMs`; the scheduler's `AUTO_SLEEP_HOST_RELEASE` path adds only the time since it. |
 | `intervalAccountingBlocked` | V | `resumeIntervalAccounting()` | Deliberately not persisted: `setup()` clears accumulators on every boot, so a reset is the cure (D-012). |
 | `inaShutdownActive` | V | `enterInaShutdownMode()`, `stopAllPowerTests()`, cold-boot resume | While set, nothing may print INA registers as measurements (D-016). |
 | `wifiPowerTest*`, `sleepPowerTest*` | N flags + V runtime | arm/stop/resume paths | One armed flag plus one variant flag makes "both variants armed" unrepresentable (D-013, D-014). |
@@ -198,17 +202,26 @@ stacked.
 `connection` and `nvs_rtc` are the only true leaves — zero outgoing
 cross-module calls each.
 
-### Two upward calls worth fixing while moving, not after
+### Upward calls worth fixing while moving, not after — CORRECTED 2026-09-18
 
-Both are in the `measurement` → `auto_orchestrator` direction and both are
-policy leaking into the measurement path:
+This section used to list two, both in the `measurement` → `auto_orchestrator`
+direction. **Only one is real:**
 
 - `intervalAccountingSuspended()` and `intervalAccountingSuspendReason()` call
   `autonomousOwnsBoard()`. Harmless once that moves to `auto_state`, which is
   below measurement.
-- `validateInaForWake()` calls `autonomousDeepSleepAgain()` — a sensor
-  validation routine with the authority to put the board to sleep. It moves to
-  `auto_orchestrator`, where deciding to sleep belongs.
+
+The second entry said `validateInaForWake()` calls `autonomousDeepSleepAgain()`.
+**It does not.** Re-read on 2026-09-18: its body only reads registers and
+returns, and the scheduler's call sites are exactly `runAutonomousWakeCycle()`,
+`beginAutonomousSleepFromHostSession()`, `servicePendingAutonomousSleep()`, and
+`setup()` twice. `test_characterization_policy.py` now pins that set. Likely
+cause, not verified: the forward declaration
+`void autonomousDeepSleepAgain(AutoSleepPath path);` sits immediately after
+`validateInaForWake()` ends, and a call-graph pass that did not tell a
+declaration from a call would attribute it there. `validateInaForWake()` still
+belongs in `auto_orchestrator`, because only the wake cycle calls it, but it
+carries no sleep authority to remove.
 
 ### The eleven execution paths — added 2026-09-17
 
@@ -246,7 +259,10 @@ Three things the table makes visible:
   design most worth preserving verbatim through stage 10.
 - **`armAutonomousTest()` is a twelfth path that is not in this table**, because
   it sleeps directly rather than through any of the transitions above. That is
-  the defect written up under "MUST FIX BEFORE MODULARIZATION".
+  the defect written up under "MUST FIX BEFORE MODULARIZATION". **Resolved
+  2026-09-17:** it now arms, returns its result, and sleeps from `loop()` after
+  the 250 ms grace, through the same deferred path RELEASE uses. That shared
+  grace window is where the second 2026-09-18 finding below lives.
 
 ### Extraction order, lowest risk first
 
@@ -273,6 +289,63 @@ inverts the command pump, and its hardware check has to include the cold-boot
 maintenance window specifically: that window is the reason the edge exists
 (D-021), and it is the one path that cannot be exercised from an ordinary
 rendezvous.
+
+### The gate every stage passes — BUILT 2026-09-18
+
+Each stage is one commit, and a stage is not done until all of this holds, in
+order:
+
+1. `tools/check.sh` reports `ALL OK` **before** the move, so a failure
+   afterwards belongs to the move.
+2. The move is made. No behavior change rides along with it.
+3. `tools/check.sh` reports `ALL OK` again. The characterization tests are
+   unchanged. A test edited to fit the move is a behavior change and needs a
+   separate reason.
+4. `tools/intellisense.sh` regenerates the editor database, since new files
+   and removed forward declarations make it stale.
+5. `tools/upload.sh`, deliberately, then the smoke test below, then that
+   stage's own hardware check from the table above.
+
+See [DECISIONS.md](DECISIONS.md) D-043.
+
+#### Hardware smoke test after an extraction group
+
+Short enough to run after every upload. Commands are sent one at a time, and
+each must exit 0.
+
+```text
+tools/send.sh VERSION
+tools/send.sh LOGGER STORAGE INFO
+tools/send.sh LOGGER AUTONOMOUS STATUS
+tools/send.sh --wait LOGGER SESSION HOLD
+tools/send.sh LOGGER SESSION KEEPALIVE
+tools/send.sh LOGGER SESSION RELEASE
+```
+
+Waiting rules that matter here (D-040). The first three wait for the next
+rendezvous by default. HOLD may wait; `--wait` is accepted for it and is
+already its default. KEEPALIVE and RELEASE never wait, and an explicit
+`--wait` on either is refused with exit 2. A one-shot HOLD is not renewed by
+anything, so KEEPALIVE has to follow within the firmware's 15-second lease and
+RELEASE after it.
+
+Expected, and none of this has been observed for a modularized image:
+
+- `VERSION` prints the expected version, a real revision hash rather than
+  `UNKNOWN`, and `solar-logger-protocol-ack-v3`.
+- `LOGGER STORAGE INFO` reports at least the record count seen before the
+  upload, with `Tail status: INTACT`. Experiment 3's log must survive every
+  stage.
+- `LOGGER AUTONOMOUS STATUS` reports the same armed state as before the upload.
+- HOLD, KEEPALIVE and RELEASE each show `CMD_ACK` and `CMD_RESULT,...,OK`.
+  RELEASE ends with the capture reporting that the transport disappeared after
+  the successful result.
+
+**Stages 6, 7, 9 and 10 need more than this.** They move autonomous state,
+experiment accounting, the orchestrator and the host session. Run the full
+acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md) 2026-09-17 after each of
+them, including lease expiry (step 7), five consecutive unclaimed records
+(step 8), and the refusals (steps 9 and 10).
 
 ### Arduino-specific concerns
 
@@ -313,12 +386,18 @@ rendezvous.
 that lets `autonomous` pump commands without depending on `command`. Nothing
 else.
 
-## Automated tests — FOUNDATION BUILT 2026-09-17
+## Automated tests — FOUNDATION BUILT 2026-09-17, CHARACTERIZATION GATE BUILT 2026-09-18
 
-**The first automated tests exist.** 57 tests in `tests/`, run with:
+**The pre-modularization characterization gate exists.** As of 2026-09-18,
+`uv run pytest` reported 78 passed and 1 xfailed when the gate was built. After
+the RELEASE/HOLD correctness fixes the same day it reported 101 passed and 0
+xfailed: the xfail became a passing test (D-044). After the scheduler fix, also
+the same day, it reports **153 passed, 1 xfailed**. The new xfail records the
+overrun defect found in that stint, below. The full local gate, including the
+warning-free ESP32 compile, is:
 
 ```text
-uv run pytest
+tools/check.sh
 ```
 
 `pytest` is a dev dependency in `pyproject.toml`. The plan below is preserved
@@ -329,8 +408,22 @@ plan.
 | --- | --- | --- |
 | `tests/test_command_protocol.py` | `CMD_ACK` / `CMD_RESULT` semantics, RELEASE's expected disconnect, missing ACK, missing RESULT, mismatched framing, D-040 waiting rules | real host code |
 | `tests/test_session_semantics.py` | `SessionClient` lease state, refused HOLD, failed KEEPALIVE, lease expiry, dropped-ACK recovery, `resolve_wait()` | real host code |
-| `tests/test_autonomous_accounting.py` | the running-total rule, and firmware source shape for defects 1, 2 and 5 | specification + source assertions |
+| `tests/test_autonomous_accounting.py` | the running-total rule, and firmware source shape for defects 1, 2 and 5; since 2026-09-18 also "advances exactly once" and the complete writer set | specification + source assertions |
+| `tests/test_autonomous_schedule.py` | added 2026-09-18 (D-046): the three pure timing functions compiled from the sketch and run for every sleep path, handoffs, sessions past one cadence and past `micros()`'s wrap, overruns and rollover; the scheduler's and handoff's composition; the timing-state writer sets; one strict `xfail` | firmware code run on the host + source |
+| `tests/test_characterization_protocol.py` | `tools/send.sh` exit status and report for 17 wire transcripts (11 at first; 6 added 2026-09-18 for D-044 and D-045); ACK-once and RESULT-once in the dispatcher; RELEASE's completion rule; every handler's result reaching `CMD_RESULT`; the frozen command set and status vocabulary; firmware identity | real host code + source |
+| `tests/test_characterization_policy.py` | the defect 4 and defect 6 refusals, and HOLD's refusal while a sleep is pending, all happening before any state change; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle (one arm, one cancel, stop cancels first) | source |
+| `tests/test_characterization_record.py` | `AutoRecord` field order, width, signedness and packing; CRC coverage; CRC computed last; validation rule; record constants | source |
+| `tests/firmware_source.py` | reads every sketch file as C++ tokens, so source tests survive file moves and reformatting | helper |
 | `tests/fake_serial.py` | a scripted stand-in for a pyserial port | helper |
+
+**The source tests were mutation-checked on 2026-09-18.** Applied one at a time
+to a scratch copy, 34 regressions each failed the intended test: all six
+original defects reintroduced, two same-width record fields swapped, a signed
+field made unsigned, packing removed, the CRC range widened, a field written
+after the CRC, a disarm on lease expiry, and the rest. Three behavior-preserving
+edits left the suite green: every brace reformatted K&R with tabs expanded,
+five functions moved into a `.cpp`, and braces placed inside comments and
+messages. Details in [LAB_NOTES.md](LAB_NOTES.md).
 
 **What the accounting module does and does not prove** is stated in its own
 docstring and is worth repeating here: the wake-cycle math lives in the `.ino`,
@@ -340,10 +433,14 @@ firmware source. It is not a test of compiled firmware behavior. Each of its
 regression assertions was verified to FAIL against the pre-fix source before the
 fix was applied.
 
-Still unbuilt from the original plan: record/CRC round-trip and byte offsets,
-sequence allocation over the D-023 cases, and sleep-deadline arithmetic. All
-three need the firmware logic reachable from a host compile, which is a
-modularization deliverable rather than a test-suite one.
+Sleep-deadline arithmetic was built on 2026-09-18, ahead of modularization,
+because the scheduler double-count needed it (D-046). Three pure functions stay
+inside `solar-logger.ino`, and the test compiles their source on the host
+straight out of the sketch. The same technique would reach any other pure
+function. Still unbuilt from the original plan: a record/CRC round-trip that
+executes the code, and sequence allocation over the D-023 cases. Both touch
+functions that are not pure today. Byte offsets and CRC coverage are pinned at
+source level, which guards the move but does not execute anything.
 
 ### The original plan, for the parts not yet built
 
@@ -413,7 +510,8 @@ found by reading, or protects a rule the modularization is most likely to break:
    the two intervals rather than the first counted twice. This is the
    double-count defect above; it is the test that should be written *with* the
    fix.
-4. **Sleep-deadline arithmetic.** Given interval start, cadence, and awake time,
+4. **Sleep-deadline arithmetic. BUILT 2026-09-18** as
+   `tests/test_autonomous_schedule.py` (D-046). Given interval start, cadence, and awake time,
    assert the commanded sleep. Cover the overrun branch and the `uint32_t`
    rollover that the `(int32_t)(target - now) > 0` idiom exists to handle.
    Encodes D-032 and D-034, which are pure arithmetic and currently verifiable
@@ -439,11 +537,13 @@ Recently completed and moved out of this file:
 # Known bugs and issues
 
 Everything in this section was **confirmed by reading the current source** during
-the 2026-09-17 architecture review. No hardware was touched, so no entry here
-claims a runtime observation. Line references are to the source as of that
-review.
+the 2026-09-17 architecture review, except the groups dated 2026-09-18, which
+that day's stints found the same way. The scheduler stint also ran the
+firmware's timing functions on the host. No hardware was touched, so no entry
+here claims a runtime observation. Line references are to the source as of the
+stint that recorded them.
 
-The three groups below are ordered by when the fix should happen, not by a
+The groups below are ordered by when the fix should happen, not by a
 severity score. The first group exists because moving this code into modules
 would freeze the bad ownership boundary in place rather than expose it.
 
@@ -689,6 +789,311 @@ left untouched.
 
 ---
 
+## FOUND 2026-09-18 BY THE CHARACTERIZATION STINT - ALL FOUR RESOLVED 2026-09-18
+
+Confirmed by reading the source while writing the characterization tests. The
+characterization stint reported them and fixed nothing. A correctness stint
+the same day fixed all four; each finding stays below as written, with its
+resolution appended. **Compiled and host-tested only. Not uploaded and not
+verified on hardware.** See [DECISIONS.md](DECISIONS.md) D-044 and D-045.
+
+### RELEASE answers `OK` after a failed handoff
+
+`processCommand()`,
+[solar-logger.ino:4276](../Arduino/solar-logger/solar-logger.ino#L4276).
+
+The RELEASE branch emits `wasHeld ? "OK" : "NOT_HELD"`, keyed only on whether a
+session was held on entry. `hostSessionRelease()` can then fail:
+`beginAutonomousSleepFromHostSession()` returns false when
+`closeMeasurementInterval()` fails (an I2C read or accumulator reset failure)
+or when storage cannot be mounted to rebuild RTC state. On that path the
+firmware prints `NOT ALL OK`, refuses to sleep, never prints
+`[SESSION] Released: ALL OK`, and stays awake in `IDLE` with autonomous mode
+still armed in NVS. The host is still told `CMD_RESULT,LOGGER SESSION RELEASE,OK`.
+
+The consequence is the D-041 failure again, on a failure path: `tools/send.sh`
+prints `ALL OK` and exits 0, and `app/solar_logger.py` prints
+`[SESSION] Board released: ALL OK`, for a board that is awake at roughly 28 mA
+and will stay awake until reset. The 2026-09-17 review listed RELEASE among the
+three commands that already reported a real outcome. It reports whether a
+session existed, not whether the release completed.
+
+Cover: `test_release_can_report_a_failed_handoff`, a strict `xfail` that
+requires the branch to have some status word other than `OK` and `NOT_HELD`,
+without choosing which (D-043).
+
+**Recommended deadline: before stage 10 (`host_session`)**, since that stage
+moves this exact code, and ideally before modularization starts. The shape that
+fits D-041 is for `hostSessionRelease()` to return `bool` like the other
+fallible handlers. Whether that changes the build ID is a question for the fix:
+the wire vocabulary would gain a use of `ERROR`, not a new word.
+
+**RESOLVED 2026-09-18**, as directed. `hostSessionRelease()` returns `bool`, true
+only when the release completed. The handoff returns a `HandoffResult` that
+names its failed stage, and the dispatcher answers
+`wasHeld ? (released ? "OK" : "ERROR") : "NOT_HELD"`. "Completed" is defined in
+D-044. The strict xfail became a passing test. The build ID stays v3 and the
+version moves to 0.3.0-dev, for the reasons in D-044.
+
+### HOLD inside the 250 ms deferred-sleep grace is granted, then slept on
+
+`hostSessionHold()`,
+[solar-logger.ino:7031](../Arduino/solar-logger/solar-logger.ino#L7031), and
+`servicePendingAutonomousSleep()`,
+[:6677](../Arduino/solar-logger/solar-logger.ino#L6677).
+
+RELEASE and `LOGGER AUTONOMOUS ON` both set `pendingAutonomousSleep` and return,
+and `loop()` sleeps when the grace expires. `servicePendingAutonomousSleep()`
+cancels only when autonomous mode is off. `hostSessionHold()` checks only
+`autonomousTestArmed`. So a HOLD parsed inside that window is granted: it
+answers `OK`, resets the accumulators, opens a tethered interval, and claims
+USB. Then the pending sleep fires on top of it. The new interval is discarded
+unclosed and the lease vanishes without a RELEASE or an expiry, which is the
+defect-6 consequence reached by a different route.
+
+Reachability: the HOLD has to arrive within 250 ms of the RELEASE or arm result.
+None of the host tools does that. After a result, `tools/send.sh` keeps
+capturing until the port has been quiet for 600 ms or has vanished, which
+outlasts the grace, and `app/solar_logger.py` sends HOLD only on connect. A
+person typing into a serial terminal, or a future client, could.
+
+**Recommended deadline: stage 10**, with the RELEASE fix above. Either HOLD
+refuses while a sleep is pending, or the pending sleep cancels itself when a
+session is held. Choosing between them is the fix's decision.
+
+**RESOLVED 2026-09-18 with the refusal.** HOLD answers `ERROR` while any
+deferred sleep is pending. Cancel-and-grant was rejected because the RELEASE
+handoff has already closed the interval and moved the retained clock (D-044).
+The audit of every writer of the pending sleep found two more gaps, both fixed
+in the same change. `LOGGER AUTONOMOUS ON` did not enter `DEEP_SLEEP_PENDING`
+during its grace, so autonomous did not own the board for those 250 ms. And an
+`AUTONOMOUS OFF` whose NVS write failed still let the grace expire into sleep.
+Arm and cancel now each have one function.
+
+### Host: the logger reports `Board released: ALL OK` for any RELEASE outcome
+
+`app/solar_logger.py`,
+[solar_logger.py:1894](../app/solar_logger.py#L1894), with
+`SessionClient.note_line()`,
+[device_session.py:648](../app/device_session.py#L648).
+
+`SessionClient` sets `held = False` for every RELEASE result word, and the
+logger's shutdown path prints `[SESSION] Board released: ALL OK` whenever
+`held` became false, including after a lease-expiry line. A `NOT_HELD` answer
+means the firmware had no session left to release, which is not what that line
+claims. The preceding `[SESSION] Firmware completed LOGGER SESSION RELEASE:
+NOT_HELD` line is accurate; the summary after it is not. Combined with the
+firmware defect above, the logger also reports success for a board that stayed
+awake.
+
+**Recommended deadline: any time; it is host-only.** The summary line should
+come from the result word, not from `held`.
+
+**RESOLVED 2026-09-18.** The logger's release now goes through
+`release_session()` in `app/device_session.py`, which reports from the machine
+RESULT only (D-045). Fixing it exposed a deeper cause: `SessionClient` never
+saw the machine RESULT in the firmware's real line order. The human outcome
+line arrives first and cleared the expectation, so the RESULT after it was
+ignored for HOLD, KEEPALIVE and RELEASE alike. Human lines no longer consume
+the expectation, and a machine `KEEPALIVE ... FAILED` now ends the session by
+itself.
+
+### DECISION NEEDED: should SessionClient say when it accepted a RESULT whose ACK was lost?
+
+The 2026-09-18 stint brief stated the invariant "RESULT without a valid ACK:
+host must NOT silently treat this as a normal successful exchange". The two
+host paths differ:
+
+- `SerialDevice` (the `tools/send.sh` path) refuses: no ACK means exit 1, and
+  the `CMD_RESULT` line it saw is printed, not hidden. Pinned by
+  `test_send_exit_status_follows_the_command_contract[result-without-ack-is-failure]`.
+- `SessionClient` (the logger's session path) accepts it, deliberately. That
+  was a fix recorded in [LAB_NOTES.md](LAB_NOTES.md) on 2026-09-17: under
+  `setTxTimeoutMs(0)` an ACK can be dropped while the RESULT arrives (D-036),
+  and discarding a granted lease was the worse failure. It logs
+  `Firmware completed ...: OK`, the same line as a normal exchange, and nothing
+  anywhere records that the ACK was missing.
+
+Accepting it is defensible. Accepting it without a word is the silent-deviation
+case. Nothing was changed. The cheap option is one warning line when an outcome
+arrives for a command still awaiting its ACK, which changes no session state.
+Pinned as-is by `test_a_dropped_ack_does_not_discard_the_outcome_that_follows`.
+
+**DECIDED 2026-09-18 as D-045.** One rule for both paths: a RESULT whose ACK was
+lost is accepted as the outcome and always flagged. `tools/send.sh` now exits by
+the RESULT, so 0 for `OK`, and prints a distinct line and a warning rather
+than `ALL OK`. This reverses its previous exit 1, because a retry after a
+completed `RESET YES` would start a second experiment. `SessionClient` logs and
+counts it. An ACK that follows an accepted result proves the result stale, by
+FIFO order, and it is discarded. Session commands get no stricter rule,
+because the ACK carries no more identity than the RESULT.
+
+---
+
+## FOUND 2026-09-18 IN THE RELEASE/HOLD CORRECTNESS STINT - ONE RESOLVED, ONE OPEN
+
+Confirmed by reading only. Not fixed in that stint, because each is outside its
+three fixes and the first sits in cadence code the stint was told not to
+disturb. Neither has been observed on hardware. The scheduler double-count was
+fixed later the same day (D-046); arming while tethered is still open.
+
+### After a host handoff, the scheduler counts the awake time twice
+
+`beginAutonomousSleepFromHostSession()`,
+[solar-logger.ino:6707](../Arduino/solar-logger/solar-logger.ino#L6707), and
+`autonomousDeepSleepAgain()`,
+[:6364](../Arduino/solar-logger/solar-logger.ino#L6364).
+
+The handoff sets `rtcAutoSessionElapsedMs` to "now" in session time, which
+already includes the awake time since `setup()` began. On a timer-wake boot that
+is the retained value plus `(micros() - setupEntryMicros) / 1000`; on a cold
+boot it is `millis()`. The scheduler then treats `AUTO_SLEEP_HOST_RELEASE` as
+continuing the RTC session and computes
+`rtcAutoSessionElapsedMs + awakeMs`, where `awakeMs` is again the whole time
+since `setup()` began. The awake time `A` is counted twice.
+
+Arithmetic from the code, not a measurement. With `A` below one cadence:
+
+- the commanded sleep is `cadence - A - grace` instead of `cadence - grace`
+- the next record's `interval_ms` still reads about one cadence, although only
+  about `cadence - A` elapsed. It is CRC-valid, plausible and wrong, and any
+  average current derived from it reads low.
+- `session_elapsed_ms` stays inflated by `A` for the rest of that boot
+
+Example: a timer wake is claimed during its rendezvous and released 28 s after
+`setup()` began. The sleep is commanded for about 31.75 s, and the next record
+claims about 60000 ms.
+
+With `A` at or above one cadence, the overrun branch fires instead. It prints a
+spurious "overran the interval deadline" warning and sleeps a full cadence; the
+next `interval_ms` is right, but the session clock is still inflated by `A`.
+
+Lease expiry takes the same path with no grace.
+
+History: the 2026-09-16 selector change made `AUTO_SLEEP_HOST_RELEASE` continue
+the RTC session. Before it, the timer-wake case was wrong and the cold-boot case
+was right; now both double-count. Per [LAB_NOTES.md](LAB_NOTES.md), no image
+containing that change has been uploaded, so the data recorded so far should
+not show this. That is inferred from the notes, not verified on the board.
+
+Consequence for the pending hardware acceptance: the 2026-09-16 check that
+RELEASE's sleep diagnostic "reports a remainder near 60000 ms" is predicted to
+fail, showing roughly 60000 minus the session length.
+
+**Recommended deadline: before the next upload.** Every RELEASE or lease expiry
+on hardware would otherwise write one wrong record into Experiment 3's log.
+Direction, for its own stint: measure the handoff's elapsed time from the
+handoff itself, so the scheduler adds only the time since then.
+
+**RESOLVED 2026-09-18**, as directed (D-046). The handoff records the `millis()`
+instant at which it set the retained clock, in `hostHandoffAtMs`, and the
+scheduler's `AUTO_SLEEP_HOST_RELEASE` path adds only the time since then. The
+arithmetic above was confirmed by running the firmware's own timing functions
+on the host with the defect restored: the 28 s RELEASE commanded 31,750 ms, and
+the fix commands 59,750 ms. The cold-boot case double-counted as the entry
+says: a release 45 s after `setup()` entry slept 14,750 ms, because `millis()`
+is itself the time since boot and the scheduler added the awake time to it.
+Two more defects in the same expression were fixed with
+it: the handoff's `micros()` wrap after 71.6 minutes, and the rebuild-ordering
+item under "SHOULD FIX DURING MODULARIZATION". Cover:
+`tests/test_autonomous_schedule.py`. Not verified on hardware.
+
+### Arming while tethered discards the open tethered interval without closing it
+
+`armAutonomousTest()`,
+[solar-logger.ino:7577](../Arduino/solar-logger/solar-logger.ino#L7577).
+
+On a tethered board with no session held, `LOGGER AUTONOMOUS ON` resets the
+accumulators to start the first autonomous interval. It does not close the
+tethered interval that was open. The charge since the last `CSV_DATA` row is
+discarded, with no row and no statement that it was. The session case was
+defect 6 and is refused; this is the no-session case.
+
+**Recommended deadline: any time, low impact.** It loses at most one interval,
+once, at arming. Closing the interval first, as the D-026 handoff does, or at
+least stating the gap, would fit the existing design.
+
+**Still open after the 2026-09-18 scheduler stint.** That fix does not touch
+`armAutonomousTest()`. Arming sets its clock on `millis()` and sleeps through
+`AUTO_SLEEP_ARM_COMMAND`, which never had the double count. The two defects
+share no code, so this one was left for its own stint rather than folded in.
+
+---
+
+## FOUND 2026-09-18 IN THE SCHEDULER STINT - NOT FIXED
+
+Found while fixing the scheduler double-count (D-046). Confirmed by reading; the
+first was also run on the host through the firmware's own timing functions. None
+has been observed on hardware.
+
+### An overrun moves the interval boundary without resetting the accumulators
+
+`planAutonomousSleep()` and its caller `autonomousDeepSleepAgain()`.
+
+When awake work reaches or passes the deadline, D-032 says to warn, start the
+next interval now, and sleep one full cadence. The code moves
+`rtcAutoIntervalStartMs` to now, but nothing resets the INA228 accumulators at
+that moment. The wake cycle last reset them, before the rendezvous. So the next
+record's charge runs from that earlier reset, while its `interval_ms` runs only
+from the moved boundary. An average current or power derived from the record
+reads high. The record is CRC-valid, and its `interval_ms` is within 20% of the
+cadence, so `INTERVAL_ODD` stays clear. D-018 says a record stores its actual
+measured interval; this one does not.
+
+Reachability: every unclaimed wake at `LOGGER INTERVAL 10`, the minimum. The
+rendezvous alone lasts 10 s (`AUTONOMOUS_USB_RENDEZVOUS_MS`) and starts after
+the reset, so the deadline has always passed by the time the board sleeps. With
+the host tests' numbers, the record claims 10,150 ms for about 20,370 ms of
+charge. At the 60-second default, an unclaimed wake would have to stay awake
+more than 60 s after its reset, and its rendezvous ends at 10 s. A handoff
+cannot reach it after D-046, because the handoff itself is the boundary.
+
+Cover: `test_after_an_overrun_the_next_record_covers_what_its_charge_covers`, a
+strict `xfail` that states the property without choosing the fix (D-043).
+`test_an_overdue_deadline_sleeps_one_full_cadence` deliberately does not pin
+where the boundary goes.
+
+**Decision needed.** Two directions:
+
+- Keep the boundary where the accumulators were reset, so `interval_ms` reports
+  the long interval truthfully and `INTERVAL_ODD` flags it. Every record stays
+  honest at any cadence.
+- Refuse cadences shorter than one unclaimed wake, which today means raising
+  the minimum above the rendezvous. The overrun becomes unreachable in normal
+  operation, but the branch stays wrong.
+
+**Recommended deadline: before `LOGGER INTERVAL 10` is used for data anyone
+keeps.** Not blocking at 60 s.
+
+### The host-session timing line still uses `micros()`
+
+`autonomousDeepSleepAgain()`, the `AUTO_SLEEP_HOST_RELEASE` case of the timing
+printout. `[TIMING] Host-session duration (setup entry -> sleep)` prints
+`awakeUs`, which is `micros() - setupEntryMicros`. After 71.6 minutes it
+prints the true duration minus 4,294,967 ms per wrap. It is diagnostic text
+only: since D-046 nothing on that path computes with it. Direction: print
+`millis() - setupEntryMicros / 1000UL` on that path.
+
+**Recommended deadline: any time, low impact.**
+
+### After a handoff, the new boundary is taken after the interval close, not at its reset
+
+`beginAutonomousSleepFromHostSession()`. `closeMeasurementInterval()` resets
+the accumulators, then does a diagnostic I2C read, prints the interval, and
+writes the NVS checkpoint. A handoff that has to rebuild RTC state then mounts
+storage and scans the log. Only after all of that does the handoff take the new
+boundary. The charge accumulated in between goes into the first autonomous
+record, and that record's `interval_ms` does not count the time. None of it has
+been measured, and the scan is the only part that grows with the log. It
+predates D-046, which did not change where the boundary is taken.
+
+Direction: take the boundary at the reset itself. `closeMeasurementInterval()`
+already records that instant as `intervalStartMs`.
+
+**Recommended deadline: any time, low impact.**
+
+---
+
 ## SHOULD FIX DURING MODULARIZATION
 
 ### One corrupt record discards every valid record after it
@@ -794,6 +1199,14 @@ with a timer wake cause and an invalid magic.
 magic, and have the rebuild set the session clock explicitly the way the
 `setup()` RTC-loss path does. A latent ordering dependency is the worst kind of
 thing to carry across a file split.
+
+**RESOLVED 2026-09-18** with the scheduler fix (D-046), as directed. The fix
+rewrote this expression anyway, so the ordering was corrected there rather than
+carried forward. `continuesRetainedClock` is captured before the rebuild. A
+rebuilt handoff then sets the session clock to this boot's `millis()`, the same
+clock the RTC-loss path uses. `test_source_handoff_sets_the_clock_and_the_instant_together`
+pins the order, and the rebuilt case runs in
+`test_a_session_this_boot_began_runs_on_this_boots_clock`.
 
 ### Return values ignored on paths that disarm or persist state
 

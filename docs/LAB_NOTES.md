@@ -6,6 +6,346 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-18: Scheduler double-count stint - no hardware touched
+
+**No hardware was touched.** Experiment 3 was not reset, storage was not
+cleared, and nothing was uploaded or committed. Every result below is a host
+test, a source read, or a compile. No firmware behavior is claimed as observed.
+
+Fixed the scheduler double-count that the RELEASE/HOLD stint recorded earlier
+the same day. The finding and its resolution are in [BACKLOG.md](BACKLOG.md),
+and the rule is [DECISIONS.md](DECISIONS.md) D-046.
+
+- The scheduler's `AUTO_SLEEP_HOST_RELEASE` path adds only the time since the
+  handoff, which the handoff now records in `hostHandoffAtMs`. RELEASE and lease
+  expiry share that path.
+- The handoff measures with `millis()`. Its `micros()` form wrapped after 71.6
+  minutes and dropped 4,294,967 ms from the session clock per wrap.
+- The handoff decides whether it continues the retained clock before the RTC
+  rebuild can set the magic.
+- The timing arithmetic is three pure functions, compiled and run on the host by
+  `tests/test_autonomous_schedule.py`. These are the project's first tests that
+  execute firmware code.
+
+### Firmware identity unchanged
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+`0.3.0-dev` has never been committed or uploaded, so this change joins it. The
+reasoning is in D-046.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` | 153 passed, 1 xfailed (was 101 passed, 0 xfailed); the xfail is the overrun finding below |
+| `uvx pyright --pythonpath .venv/bin/python` on `app/`, `tools/*.py`, `tests/`, `main.py` | 0 errors, 0 warnings, 0 informations |
+| `arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` | passed, no warnings; 1,102,133 bytes (84%, +118), globals 36,332 bytes (11%, +8) |
+| host compile of the three timing functions | Apple clang 21.0.0, `-std=c++20 -Wall -Wextra -Werror`: passed |
+| `tools/intellisense.sh` | the raw `.ino` compiles standalone with the editor's flags: ALL OK |
+| `git diff HEAD --check` | clean; the untracked test and tool files were checked separately for trailing whitespace and have none |
+| `tools/check.sh` | `ALL OK`, all six steps PASS |
+
+### The regression tests were verified to fail
+
+- **Against the saved pre-fix firmware**, the four source tests failed by
+  assertion. The executed tests could not build their harness, because the
+  helper functions do not exist there, so they errored rather than passed.
+- **With the defect restored inside the helper**, the executed tests failed by
+  assertion with the pre-fix arithmetic: 31,750 ms of sleep for a RELEASE 28 s
+  after `setup()` entry, 31,996 ms for the same lease expiry, and an overrun for
+  a 75 s session. A cold-boot release 45 s after `setup()` entry computed
+  14,750 ms.
+- **17 cases in a scratch copy**: the pre-fix firmware, 14 single-point
+  mutations of the fix and the timing functions, and 2 behavior-preserving
+  edits. All 15 regressions failed
+  the intended test, 14 by assertion. The fifteenth, a new sleep path with no
+  clock chosen, failed the host compile on `-Wswitch`, which is its intended
+  failure. Reformatting every brace, and moving the helpers, the scheduler and
+  the handoff into a `.cpp`, both left the suite green.
+
+### Found, not fixed
+
+Recorded in [BACKLOG.md](BACKLOG.md) under "FOUND 2026-09-18 IN THE SCHEDULER
+STINT". Confirmed by reading, the first also by running the timing functions.
+
+- **An overrun moves the interval boundary without resetting the
+  accumulators.** At `LOGGER INTERVAL 10` every unclaimed wake overruns, and
+  each record then claims about 10 s for about 20 s of charge. A strict `xfail`
+  records it. It is not reachable at 60 s.
+- **The host-session timing line still uses `micros()`** and misreports
+  sessions over 71.6 minutes. Diagnostic text only.
+- **After a handoff, the new boundary is taken after the interval close**, not
+  at its accumulator reset. Small, unmeasured, and older than this change.
+
+The secondary finding from the RELEASE/HOLD stint, arming while tethered, is
+still open. This fix shares no code with it.
+
+### Hardware acceptance still required - PENDING, nothing below has been run
+
+This satisfies the precondition of the RELEASE/HOLD entry below, "after the
+scheduler defect is fixed". After a deliberate `tools/upload.sh`, run that
+entry's list, and add:
+
+1. **The first sleep after RELEASE.** On a claimed timer wake, HOLD, send a few
+   KEEPALIVEs, and RELEASE about 30 s after the claim. PREDICTED:
+   `[AUTO] Sleeping until interval deadline; remaining:` just under 59,750 ms.
+   That is 60,000 minus the 250 ms grace, minus the output between the handoff
+   and arming the grace. The pre-fix image would print about 60,000 minus the
+   whole time awake. This is the 2026-09-16 check 3 below, with the number
+   predicted.
+2. **The record after it.** PREDICTED: `interval_ms` near 60,000, like an
+   unclaimed record. Compare the `session_elapsed_ms` difference between the
+   last record before the session and the first after it against the host
+   clock between those two wakes. PREDICTED: they differ only by oscillator
+   drift over the sleeps and a bootloader time per wake. Neither has been
+   measured, and D-019 forbids assuming a drift figure. Pre-fix, the record
+   clock would also run ahead by the whole session length, tens of seconds or
+   more, which is the difference this check can see.
+3. **Lease expiry.** Hold a session and stop the keepalives. PREDICTED:
+   `remaining:` a few milliseconds under 60,000, then the same record checks as
+   in 2.
+4. **A session past 71.6 minutes**, optional because it is slow. Hold with
+   `app/solar_logger.py` for over 72 minutes, then press Control-C. PREDICTED:
+   the check in 2 still agrees. Pre-fix, the record clock would be 4,294,967 ms
+   short per wrap, and the double count would add the session length on top.
+5. **Unclaimed wakes unchanged.** The 2026-09-17 step 8 below:
+   `interval_ms` near 60,000, and `remaining:` near 50,000 after a 10-second
+   rendezvous.
+
+## 2026-09-18: RELEASE/HOLD correctness stint - no hardware touched
+
+**No hardware was touched.** Experiment 3 was not reset, storage was not
+cleared, and nothing was uploaded. Every result below is a host test, a source
+read, or a compile. No firmware behavior is claimed as observed.
+
+Fixed the four findings the characterization gate recorded earlier the same
+day. The findings and resolutions are in [BACKLOG.md](BACKLOG.md); the rules
+are [DECISIONS.md](DECISIONS.md) D-044 (firmware) and D-045 (host).
+
+- **RELEASE** answers `OK` only when it completed: session ended, and if armed,
+  handoff prepared and deferred sleep armed. A failed handoff answers `ERROR`
+  and the console names the stage.
+- **HOLD during the deferred-sleep grace** is refused with `ERROR`. The pending
+  sleep has one arm and one cancel. `LOGGER AUTONOMOUS ON` now enters
+  `DEEP_SLEEP_PENDING` for its grace, and an explicit stop cancels a pending
+  sleep before its NVS write.
+- **The logger** reports RELEASE from the machine RESULT only.
+  `SessionClient` had been ignoring the machine RESULT for HOLD, KEEPALIVE and
+  RELEASE, because the human line printed before it cleared the expectation.
+- **A RESULT whose ACK was lost** is accepted and always flagged. A late ACK
+  proves an earlier result stale. `tools/send.sh` now exits 0 for such an
+  `OK`, with a distinct line and a warning, where it used to exit 1.
+
+### Firmware identity changed
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3   (unchanged)
+```
+
+MINOR under the version policy, because RELEASE and HOLD changed what they do
+or report. The build ID is unchanged, a judgment call recorded in D-044. Step 1
+of the pending 2026-09-17 acceptance sequence below now expects `0.3.0-dev`.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` | 101 passed, 0 xfailed (was 78 passed, 1 xfailed) |
+| `uvx pyright --pythonpath .venv/bin/python` on `app/`, `tools/*.py`, `tests/`, `main.py` | 0 errors, 0 warnings, 0 informations |
+| `arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` | passed, no warnings; 1,102,015 bytes (84%, +1,042), globals 36,324 bytes (11%, unchanged) |
+| `tools/intellisense.sh` | the raw `.ino` compiles standalone with the editor's flags: ALL OK |
+| `tools/check.sh` | `ALL OK`, including `git diff HEAD --check` |
+
+The former strict xfail, `test_release_can_report_a_failed_handoff`, turned
+into an XPASS failure as soon as the fix went in, which is what strict mode is
+for. The marker came off in the same change.
+
+### The new tests were verified to fail
+
+In a scratch copy, 21 reverts of individual pieces of the fixes each failed the
+intended test. They covered the firmware result mapping, each handoff return,
+the HOLD refusal and its status word, each pending-sleep writer, the stop
+ordering, the arm-time interval clock, each host rule in `SessionClient`,
+`SerialDevice` and `send.sh`, and the logger delegation. Reformatting every
+brace and moving the five changed functions into a `.cpp` left the suite green.
+
+### Found, not fixed
+
+Recorded in [BACKLOG.md](BACKLOG.md) under "FOUND 2026-09-18 IN THE
+RELEASE/HOLD CORRECTNESS STINT". Confirmed by reading only.
+
+- **After a host handoff, the scheduler counts the awake time twice.** The
+  handoff already puts the awake time into the retained session clock, and the
+  scheduler adds it again. Predicted from the code: the first sleep after a
+  RELEASE or lease expiry is short by about the time spent awake, while the
+  next record's `interval_ms` still claims a full cadence. **This blocks the
+  next upload**: the 2026-09-16 acceptance check expecting a remainder "near
+  60000 ms" after RELEASE is predicted to fail.
+- **Arming while tethered discards the open tethered interval** without closing
+  it or saying so. Low impact.
+
+### Hardware acceptance still required - PENDING, nothing below has been run
+
+After the scheduler defect is fixed and `tools/upload.sh` is run deliberately:
+
+1. The 2026-09-17 sequence below, with step 1 expecting `0.3.0-dev`. On an
+   armed board its step 4 (`LOGGER INTERVAL 60`) answers `ERROR`, because the
+   interval is refused while armed; that is correct, not a regression.
+2. **RELEASE completes.** `tools/send.sh --wait LOGGER SESSION HOLD`, then
+   `tools/send.sh LOGGER SESSION KEEPALIVE`, then
+   `tools/send.sh LOGGER SESSION RELEASE`. Expect `CMD_RESULT,...,OK`, exit 0,
+   `[AUTO] Deferred autonomous sleep ARMED`, the capture ending with the
+   transport disappearing, and a record at the next timer wake.
+3. **HOLD inside the grace is refused.** Hold a session, then put RELEASE and
+   HOLD into one serial write, so the HOLD is parsed well inside 250 ms. No
+   host tool can do this, by design; a direct pyserial write while nothing else
+   owns the port does. Expect `CMD_RESULT,LOGGER SESSION RELEASE,OK`, then
+   `CMD_RESULT,LOGGER SESSION HOLD,ERROR` with
+   `HOLD not granted: autonomous sleep is pending`, then the board sleeping.
+   Before this fix the source granted that HOLD with `OK` and then slept
+   anyway; that was read, never observed.
+4. **Stop inside the arm grace.** On an unarmed tethered board, one write of
+   `LOGGER AUTONOMOUS ON` and `LOGGER AUTONOMOUS OFF`. Expect both `OK`,
+   `Pending autonomous sleep CANCELED: LOGGER AUTONOMOUS OFF requested`, and
+   the board staying awake and logging.
+5. **The logger's release report.** With `app/solar_logger.py` holding an armed
+   board, Control-C. Expect
+   `[SESSION] Board released: ALL OK (firmware answered RELEASE with OK).`
+6. **Lease expiry unchanged.** Hold, send nothing, and expect expiry near 15 s
+   and a return to autonomous sleep.
+
+RELEASE's `ERROR` path and the storage-unavailable path need an I2C or storage
+fault to trigger, so the source tests remain their only cover.
+
+## 2026-09-18: Pre-modularization characterization gate - no hardware touched
+
+**No hardware was touched.** Experiment 3 was not reset, storage was not
+cleared, nothing was uploaded, and **no firmware source changed**. Every result
+below is a host test, a source read, or a compile. No firmware behavior is
+claimed as observed.
+
+The stint added a small characterization layer, so the monolith's current
+behavior is the reference each extraction stage is checked against. The
+decision and its rules are [DECISIONS.md](DECISIONS.md) D-043; the per-stage
+procedure and hardware smoke test are in [BACKLOG.md](BACKLOG.md).
+
+### What was added
+
+- Ten test functions, 21 passing cases, across
+  `tests/test_characterization_protocol.py`, `test_characterization_policy.py`
+  and `test_characterization_record.py`.
+- One strict `xfail` that records a new defect instead of freezing it.
+- `test_source_totals_are_committed_only_after_a_successful_append` extended
+  rather than duplicated. It now pins "advances exactly once", "the record and
+  RTC get the same value", "provisional = previous + delta", and the complete
+  set of writers.
+- `tests/firmware_source.py`, which reads every sketch file as C++ tokens. The
+  accounting module's existing source tests moved onto it, because they read
+  only `solar-logger.ino` and matched exact tabs, and would have broken on the
+  first file move.
+- `tools/check.sh`, the combined local gate.
+
+No policy helper was extracted. Everything that needed firmware logic was
+characterizable from source, and extraction is the modularization itself.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `uv run pytest` | 78 passed, 1 xfailed (was 57 passed) |
+| `uvx pyright --pythonpath .venv/bin/python` on `app/`, `tools/*.py`, `tests/`, `main.py` | 0 errors, 0 warnings, 0 informations |
+| `python -m py_compile` on the same files | passed |
+| `arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger` | passed, no warnings; 1,100,973 bytes (83%), globals 36,324 bytes (11%), identical to 2026-09-17 as expected with no firmware change |
+| `bash -n` on all five `tools/*.sh` | passed |
+| `git diff HEAD --check` | clean; the new untracked files were checked separately for trailing whitespace and have none |
+| `tools/check.sh` | `ALL OK` |
+
+### The tests were verified to fail
+
+Each source test was run against deliberately broken copies of the repository,
+one change at a time. 34 of 34 regressions failed the intended test, each by an
+assertion and none by a reader error:
+
+```text
+the six 2026-09-17 defects, reintroduced (numbered as in the entry below):
+  1 totals committed before the append     1 totals compound-assigned
+  2 snapshot left uninitialized            3 AUTONOMOUS OFF result ignored
+  4 POWER TEST STOP changes state first    4 broad suspension predicate restored
+  5 NVS failure becomes exp 0              6 AUTONOMOUS ON refusal removed
+and:
+  unknown command answers OK               HOLD emits two results
+  ACK moved after dispatch                 sleep-test variants swapped
+  canonical command renamed                KEEPALIVE status word changed
+  build ID changed                         identity not printed on timer wakes
+  host treats any RESULT as success        send.sh exits 0 without completion
+  host accepts a RESULT in place of ACK    energy committed twice
+  record carries the old total             a fourth writer of the total
+  idempotent success before the refusal    host session counted as ownership
+  RELEASE sleeps before its result         lease expiry disarms instead
+  handoff sleeps before closing interval   same-width record fields swapped
+  signed field made unsigned               packing removed
+  CRC covers the CRC field                 field written after the CRC
+  validity no longer checks version        flag bit value changed
+```
+
+Three behavior-preserving edits left the whole suite green: every Allman brace
+reformatted K&R with tabs expanded, five functions moved into a `.cpp` (including
+`processCommand()` and `runAutonomousWakeCycle()`), and braces placed inside a
+guard's comments and message.
+
+### The gate's own failure path was verified
+
+In a scratch copy with a failing test and an unused-variable warning injected,
+`tools/check.sh` reported `FAIL` for pytest and for the firmware compile, with
+the warning printed, `PASS` for the other four, `NOT ALL OK`, and exit 1. Two
+consecutive runs gave the same result.
+
+### Tooling finding: a cached build hides warnings
+
+The first version of `tools/check.sh` compiled without `--clean`. Run a second
+time on the same scratch copy with the same injected warning, the compile step
+**passed and printed no warning**. That was observed. The cause is inferred and
+not verified in arduino-cli's source: it reused the object from the first run
+and never re-invoked the compiler for that file. `--clean` fixes it, and
+`--help` documents it as "do not use any cached build".
+
+So a `--warnings all` compile of unchanged source at a path that was built
+before proves nothing about warnings. This stint's own first compile was that
+kind, and the `--clean` compile above supersedes it. The clean compile shows
+the current source has no warnings, so the earlier "no warnings" records for
+this source stand.
+
+### Found, not fixed
+
+Recorded in [BACKLOG.md](BACKLOG.md) under "FOUND 2026-09-18". All confirmed by
+reading; none observed on hardware.
+
+- **RELEASE answers `OK` after a failed handoff.** The result is keyed on
+  whether a session was held, not on whether the release completed. On the
+  interval-close or storage failure path the board stays awake while the host is
+  told `OK`. This is a D-041 violation, and the strict `xfail` records it.
+- **A HOLD inside the 250 ms deferred-sleep grace is granted and then slept
+  on.** None of the host tools can land a HOLD that fast.
+- **The logger prints `Board released: ALL OK` for any RELEASE outcome**,
+  including `NOT_HELD`.
+- **Decision needed:** `SessionClient` accepts a `CMD_RESULT` whose `CMD_ACK`
+  was lost (a deliberate 2026-09-17 fix) without logging that the ACK was
+  missing.
+
+One documentation correction: the modularization plan said
+`validateInaForWake()` calls `autonomousDeepSleepAgain()`. It does not.
+
+### Still pending on hardware
+
+Everything in the entries below, unchanged. In particular the 2026-09-17
+acceptance sequence has not been run, and the board still runs an image that
+predates the revision field.
+
 ## 2026-09-17: Correctness stint - six MUST-FIX defects resolved, first tests added
 
 **No hardware was touched.** Experiment 3 was not reset, storage was not

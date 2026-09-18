@@ -28,7 +28,9 @@ resolve_wait() explains why in full.
 
 Exit status is meaningful in every mode:
 
-    0   the firmware acknowledged and completed the command
+    0   the firmware completed the command: CMD_RESULT,<command>,OK
+        (a RESULT whose CMD_ACK was lost still counts, and the missing ACK is
+        reported as a warning - D-045)
     1   it did not, or the board was absent and waiting was not allowed
     2   the request itself was refused before anything was sent
     130 cancelled with Control-C
@@ -285,7 +287,7 @@ def cmd_send(args) -> int:
         err("[COMMAND] Cancelled by user.")
         return 130
 
-    if not result.acknowledged:
+    if not result.acknowledged and not result.result_seen:
         err("[COMMAND] NOT ALL OK - firmware parsed-command ACK NOT observed.")
         err("[COMMAND] Bytes were written, but parsing was not confirmed.")
         err("[COMMAND] An armed autonomous board only parses commands while awake:")
@@ -301,7 +303,18 @@ def cmd_send(args) -> int:
 
         return 1
 
-    out(f"[COMMAND] Firmware parsed command: ALL OK ({result.ack_line})")
+    if result.acknowledged:
+        out(f"[COMMAND] Firmware parsed command: ALL OK ({result.ack_line})")
+    else:
+        # D-045. Taken as the outcome, never passed off as a clean exchange.
+        err("[COMMAND] WARNING: firmware CMD_ACK was NOT observed for this command.")
+        err("[COMMAND] Its CMD_RESULT did arrive. The firmware emits a result only")
+        err("[COMMAND] after parsing and dispatching, so that result is taken as")
+        err("[COMMAND] the outcome. The ACK was most likely lost under HWCDC")
+        err("[COMMAND] backpressure (D-036). This was NOT a clean exchange.")
+
+    for stale in result.stale_result_lines:
+        err(f"[COMMAND] WARNING: discarded a stale result that preceded this command's ACK: {stale}")
 
     if not result.completed:
         # Two different failures, and telling them apart is the point. The
@@ -325,7 +338,13 @@ def cmd_send(args) -> int:
 
         return 1
 
-    out(f"[COMMAND] Firmware completed command: ALL OK ({result.result_line})")
+    if result.acknowledged:
+        out(f"[COMMAND] Firmware completed command: ALL OK ({result.result_line})")
+    else:
+        out(
+            "[COMMAND] Firmware completed command, but CMD_ACK was NOT observed "
+            f"({result.result_line})"
+        )
     out(
         f"[COMMAND] Capturing response: quiet for {args.idle_seconds * 1000:.0f}ms "
         f"ends it, {capture:.0f}s hard cap."

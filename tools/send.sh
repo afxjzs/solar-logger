@@ -14,8 +14,9 @@
 # WHAT IS PRESERVED FROM THE PURE-SHELL VERSION
 #
 #   - Writing bytes is NOT acknowledgement. Success requires the firmware's
-#     machine CMD_ACK and CMD_RESULT lines; human diagnostics are not protocol
-#     state.
+#     machine CMD_RESULT,<command>,OK; human diagnostics are not protocol
+#     state. A RESULT whose CMD_ACK was lost still counts, and the missing ACK
+#     is printed as a warning rather than passed off as clean (D-045).
 #   - The response is printed, ending on a quiet period or a hard cap, with the
 #     stop reason always stated and truncation warned about.
 #   - LOGGER STORAGE DUMP gets the longer capture window.

@@ -12,7 +12,10 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = PROJECT_ROOT / "app"
-FIRMWARE = PROJECT_ROOT / "Arduino" / "solar-logger" / "solar-logger.ino"
+
+# Firmware source is read through tests/firmware_source.py, which reads every
+# file in the sketch directory. Do not add a path to solar-logger.ino alone
+# here: a test pinned to one file breaks when modularization moves code out.
 
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))

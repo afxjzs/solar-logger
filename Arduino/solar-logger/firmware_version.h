@@ -41,7 +41,11 @@
 // command reports and to the host protocol, so the policy in PROJECT.md
 // makes it a MINOR bump. -dev stays until an image has been confirmed on
 // hardware.
-#define FIRMWARE_VERSION "0.2.0-dev"
+// 0.3.0: RELEASE answers ERROR when its handoff fails instead of OK, and HOLD
+// is refused with ERROR while a deferred autonomous sleep is pending (D-044).
+// Both change what a command does or reports, so the policy makes it MINOR.
+// 0.2.0 was never confirmed on hardware.
+#define FIRMWARE_VERSION "0.3.0-dev"
 
 // ----------------------------------------------------------------------------
 // SOURCE REVISION - injected by the canonical build.

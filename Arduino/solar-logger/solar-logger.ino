@@ -730,6 +730,41 @@ enum AutoSleepPath : uint8_t
 	AUTO_SLEEP_HOST_RELEASE, // a host session ended and handed the board back
 };
 
+// How the host-session -> autonomous handoff ended. Each failure names the
+// stage that failed, so RELEASE and lease expiry can say which one (D-044).
+enum HandoffResult : uint8_t
+{
+	HANDOFF_PREPARED,						 // interval closed, autonomous state valid, baseline set
+	HANDOFF_INTERVAL_NOT_CLOSED, // closeMeasurementInterval() failed
+	HANDOFF_STORAGE_UNAVAILABLE, // RTC state needed rebuilding; storage would not mount
+};
+
+// How LOGGER SESSION HOLD ended. Two different refusals, because a host has to
+// act differently on them (D-044):
+//
+//   HOLD_NOT_ARMED      autonomous mode is off; the board stays awake anyway
+//                       and no lease is needed. Answered REFUSED.
+//   HOLD_SLEEP_PENDING  the board is already committed to a deferred autonomous
+//                       sleep; claim it at the next rendezvous. Answered ERROR.
+enum HoldResult : uint8_t
+{
+	HOLD_GRANTED,
+	HOLD_NOT_ARMED,
+	HOLD_SLEEP_PENDING,
+};
+
+// What the deadline scheduler decided (D-032), from planAutonomousSleep().
+// Declared up here because the Arduino preprocessor puts generated prototypes
+// ahead of the first function definition, and one of them returns this.
+struct AutoSleepPlan
+{
+	uint32_t sleepMs;					// the commanded deep sleep
+	uint32_t intervalStartMs; // the boundary to keep; moves only on an overrun
+	uint32_t wakeElapsedMs;		// the retained session clock for the next wake
+	uint32_t overrunMs;				// how far past the deadline, when overran
+	bool overran;
+};
+
 // The durable record. Field order and offsets are exactly as specified in
 // docs/STORAGE_SYNC_DESIGN.md Section 5: every 4-byte field is 4-aligned and
 // both 64-bit fields are 8-aligned, so the packed layout needs no padding.
@@ -916,6 +951,12 @@ esp_sleep_wakeup_cause_t bootWakeupCause = ESP_SLEEP_WAKEUP_UNDEFINED;
 // begins, and that offset is printed alongside the total rather than hidden.
 uint32_t setupEntryMicros = 0;
 
+// millis() at the moment the host handoff set rtcAutoSessionElapsedMs to the
+// session time of that moment. The scheduler adds only the time since then on
+// the AUTO_SLEEP_HOST_RELEASE path (D-046). Only the handoff writes it, and it
+// is meaningful only on the boot that wrote it, so plain RAM is right.
+uint32_t hostHandoffAtMs = 0;
+
 // ============================================================================
 // WHICH POWER TEST IS ARMED
 // ============================================================================
@@ -1003,9 +1044,9 @@ const char *autoStateName(AutoState state);
 bool autonomousUsbRendezvous(bool cycleOk);
 bool clearStorage();
 bool dumpStorage();
-void hostSessionHold();
+HoldResult hostSessionHold();
 void hostSessionKeepalive();
-void hostSessionRelease();
+bool hostSessionRelease();
 void printActiveTransports();
 void printAutonomousStatus();
 void printDeprecatedCommand(const char *oldName, const char *newName);
@@ -4252,8 +4293,14 @@ void processCommand(String command)
 	else if (command == "LOGGER SESSION HOLD")
 	{
 
-		hostSessionHold();
-		emitCommandResult(command, hostSessionHeld ? "OK" : "REFUSED");
+		// REFUSED: autonomous mode is off, so no lease is needed. ERROR: the board
+		// is already committed to a deferred autonomous sleep (D-044).
+		const HoldResult hold = hostSessionHold();
+		emitCommandResult(
+				command,
+				hold == HOLD_GRANTED
+						? "OK"
+						: (hold == HOLD_NOT_ARMED ? "REFUSED" : "ERROR"));
 		resultEmitted = true;
 	}
 	else if (command == "LOGGER SESSION KEEPALIVE")
@@ -4269,11 +4316,15 @@ void processCommand(String command)
 	else if (command == "LOGGER SESSION RELEASE")
 	{
 
+		// OK only when the release COMPLETED (D-044): the session ended and, with
+		// autonomous mode armed, the handoff was prepared and the deferred sleep
+		// armed. It used to be keyed on wasHeld alone, so a handoff that failed and
+		// left the board awake still answered OK.
 		Serial.println("[SESSION] RELEASE parsed");
 		const bool wasHeld = hostSessionHeld;
-		hostSessionRelease();
-		const bool resultQueued =
-				emitCommandResult(command, wasHeld ? "OK" : "NOT_HELD");
+		const bool released = hostSessionRelease();
+		const bool resultQueued = emitCommandResult(
+				command, wasHeld ? (released ? "OK" : "ERROR") : "NOT_HELD");
 		Serial.println(
 				resultQueued ? "[SESSION] RELEASE result queued"
 										 : "[SESSION] ERROR: RELEASE result not fully queued");
@@ -6316,6 +6367,120 @@ bool runAutonomousWakeCycle()
 	return false;
 }
 
+// ============================================================================
+// AUTONOMOUS TIMING (D-032, D-033, D-034, D-046)
+// ============================================================================
+//
+// Two RTC-retained values carry autonomous time across deep sleep:
+//
+//   rtcAutoSessionElapsedMs   the session time at one known instant
+//   rtcAutoIntervalStartMs    the session time of the current interval's
+//                             boundary, where its accumulators were reset
+//
+// Session time NOW is the retained value plus the local time since the instant
+// it was exact, and nothing else. That instant depends on who set it last:
+//
+//   timer wake      the previous sleep set it for this wake's setup() entry:
+//                   add the time since setup() entry
+//   host handoff    RELEASE or lease expiry set it to the handoff's own now:
+//                   add the time since the handoff, hostHandoffAtMs
+//   cold boot, arm, RTC loss
+//                   the session began on this boot: now is millis()
+//
+// Until D-046 the handoff path added the time since setup() entry to a value
+// the handoff had already advanced to its own now, so the whole awake period
+// was counted twice. The first sleep after a RELEASE or lease expiry was short
+// by that much, and the next record still claimed a full cadence.
+//
+// The three functions below are pure: no Arduino calls, no globals, and only
+// fixed-width types, because unsigned long is 64 bits on a desktop and 32 here.
+// tests/test_autonomous_schedule.py compiles them on the host from this source
+// and runs them, so they must stay that way.
+// ============================================================================
+
+// Session time at a host handoff. A timer wake continues the retained clock,
+// which is exact at setup() entry. A session established on this boot, by a
+// cold boot or by the rebuild in the handoff itself, runs on millis().
+//
+// Both arguments come from millis(), which wraps after 49.7 days. micros()
+// wraps after 71.6 minutes, which is shorter than an ordinary logger session.
+uint32_t autonomousHandoffElapsedMs(bool continuesRetainedClock,
+																		uint32_t retainedElapsedMs,
+																		uint32_t sinceSetupEntryMs,
+																		uint32_t bootMillisMs)
+{
+	if (continuesRetainedClock)
+	{
+		return retainedElapsedMs + sinceSetupEntryMs;
+	}
+
+	return bootMillisMs;
+}
+
+// Session time at the moment of sleeping, for the path that is sleeping.
+uint32_t autonomousElapsedAtSleepMs(AutoSleepPath path,
+																		uint32_t retainedElapsedMs,
+																		uint32_t awakeMs,
+																		uint32_t sinceHandoffMs,
+																		uint32_t bootMillisMs)
+{
+	switch (path)
+	{
+	case AUTO_SLEEP_TIMER_WAKE:
+		// Exact at this wake's setup() entry.
+		return retainedElapsedMs + awakeMs;
+
+	case AUTO_SLEEP_HOST_RELEASE:
+		// Exact at the handoff. The awake time before the handoff is already
+		// inside it; only the time since the handoff is new.
+		return retainedElapsedMs + sinceHandoffMs;
+
+	case AUTO_SLEEP_COLD_BOOT:
+	case AUTO_SLEEP_ARM_COMMAND:
+	case AUTO_SLEEP_RTC_LOST:
+		// The session began on this boot, so its clock is this boot's.
+		return bootMillisMs;
+	}
+
+	// Not reachable with a valid path: every enumerator is handled above, and
+	// -Wswitch fails the build when one is added without choosing its clock.
+	return bootMillisMs;
+}
+
+// D-032: sleep only until the interval deadline. If awake work has reached or
+// passed it, start the next interval now and sleep one full cadence, rather
+// than wake immediately or underflow into a sleep of about 49 days.
+AutoSleepPlan planAutonomousSleep(uint32_t intervalStartMs,
+																	uint32_t nowElapsedMs,
+																	uint32_t nominalMs)
+{
+	AutoSleepPlan plan = {};
+	const uint32_t targetElapsedMs = intervalStartMs + nominalMs;
+
+	if ((int32_t)(targetElapsedMs - nowElapsedMs) > 0)
+	{
+		plan.intervalStartMs = intervalStartMs;
+		plan.sleepMs = targetElapsedMs - nowElapsedMs;
+	}
+	else
+	{
+		// KNOWN DEFECT, not fixed: the boundary moves here but nothing resets the
+		// accumulators, so the next record's interval_ms is shorter than the span
+		// its charge covers. Every unclaimed wake at LOGGER INTERVAL 10 reaches
+		// this. See docs/BACKLOG.md; the strict xfail in
+		// tests/test_autonomous_schedule.py states the required property.
+		plan.overran = true;
+		plan.overrunMs = nowElapsedMs - targetElapsedMs;
+		plan.intervalStartMs = nowElapsedMs;
+		plan.sleepMs = nominalMs;
+	}
+
+	// Advanced by the COMMANDED sleep, so the next wake reads a commanded clock,
+	// not a measured one.
+	plan.wakeElapsedMs = nowElapsedMs + plan.sleepMs;
+	return plan;
+}
+
 void autonomousDeepSleepAgain(AutoSleepPath path)
 {
 	// Measured from the first line of setup(), so this covers the entire awake
@@ -6324,22 +6489,17 @@ void autonomousDeepSleepAgain(AutoSleepPath path)
 	// reported "Total wake duration: 0.014 ms" for a multi-second boot.
 	const uint32_t awakeUs = micros() - setupEntryMicros;
 	const uint32_t awakeMs = awakeUs / 1000UL;
-	const bool continuesRtcSession =
-			path == AUTO_SLEEP_TIMER_WAKE || path == AUTO_SLEEP_HOST_RELEASE;
-	const uint32_t currentElapsedMs =
-			(continuesRtcSession)
-					? rtcAutoSessionElapsedMs + awakeMs
-					: millis();
+	const uint32_t nowMs = millis();
+	const uint32_t currentElapsedMs = autonomousElapsedAtSleepMs(
+			path, rtcAutoSessionElapsedMs, awakeMs, nowMs - hostHandoffAtMs, nowMs);
 	const uint32_t nominalMs = autonomousIntervalSeconds * 1000UL;
-	const uint32_t targetElapsedMs = rtcAutoIntervalStartMs + nominalMs;
+	const AutoSleepPlan plan =
+			planAutonomousSleep(rtcAutoIntervalStartMs, currentElapsedMs, nominalMs);
 
-	uint32_t sleepMs = nominalMs;
-
-	if ((int32_t)(targetElapsedMs - currentElapsedMs) > 0)
+	if (!plan.overran)
 	{
-		sleepMs = targetElapsedMs - currentElapsedMs;
 		Serial.print("[AUTO] Sleeping until interval deadline; remaining: ");
-		Serial.print(sleepMs);
+		Serial.print(plan.sleepMs);
 		Serial.println(" ms.");
 	}
 	else
@@ -6347,15 +6507,17 @@ void autonomousDeepSleepAgain(AutoSleepPath path)
 		// The wake work consumed the entire cadence. Start the next interval now
 		// rather than scheduling an immediate wake loop or silently drifting.
 		Serial.print("[AUTO] WARNING: Awake work overran the interval deadline by ");
-		Serial.print(currentElapsedMs - targetElapsedMs);
+		Serial.print(plan.overrunMs);
 		Serial.println(" ms.");
 		Serial.println(
 				"[AUTO] Starting the next interval now and sleeping one full cadence.");
-		rtcAutoIntervalStartMs = currentElapsedMs;
 	}
 
+	const uint32_t sleepMs = plan.sleepMs;
+
+	rtcAutoIntervalStartMs = plan.intervalStartMs;
 	rtcAutoCommandedSleepMs = sleepMs;
-	rtcAutoSessionElapsedMs = currentElapsedMs + sleepMs;
+	rtcAutoSessionElapsedMs = plan.wakeElapsedMs;
 
 	const uint64_t sleepUs = static_cast<uint64_t>(sleepMs) * 1000ULL;
 
@@ -6562,9 +6724,10 @@ bool autonomousUsbRendezvous(bool cycleOk)
 // HOST SESSION -> AUTONOMOUS SLEEP
 // ============================================================================
 //
-// The accounting-sensitive transition. Returns false when it refused to
-// prepare the handoff. When sleepNow is false, it returns after the clean
-// baseline and state transition so a command acknowledgement can be delivered.
+// The accounting-sensitive transition. Returns which stage failed when it
+// refused to prepare the handoff. When sleepNow is false, it returns
+// HANDOFF_PREPARED after the clean baseline and state transition so a command
+// acknowledgement can be delivered.
 //
 // The hazard is the tethered interval that is open when the host lets go. Left
 // open, whatever charge it holds would roll into the FIRST autonomous record,
@@ -6574,7 +6737,23 @@ bool autonomousUsbRendezvous(bool cycleOk)
 // and exactly the clean baseline the next autonomous interval needs.
 // ============================================================================
 
-bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow)
+const char *handoffStageName(HandoffResult result)
+{
+	switch (result)
+	{
+	case HANDOFF_PREPARED:
+		return "none - handoff prepared";
+	case HANDOFF_INTERVAL_NOT_CLOSED:
+		return "closing the open tethered interval";
+	case HANDOFF_STORAGE_UNAVAILABLE:
+		return "rebuilding autonomous state - storage unavailable";
+	}
+
+	return "UNKNOWN";
+}
+
+HandoffResult beginAutonomousSleepFromHostSession(const char *reason,
+																									bool sleepNow)
 {
 	Serial.println();
 	Serial.println("============================================================");
@@ -6615,8 +6794,17 @@ bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow)
 		hostClaimedRendezvous = false;
 
 		setAutoState(AUTO_STATE_IDLE, "interval close FAILED; refusing to sleep");
-		return false;
+		return HANDOFF_INTERVAL_NOT_CLOSED;
 	}
+
+	// Decided BEFORE the rebuild below, which sets the magic. Only a timer wake
+	// that arrived with valid retained state continues that state's clock. A
+	// rebuild starts a new boot_id, so its clock is this boot's millis(); testing
+	// the magic after the rebuild would have continued a clock the rebuild had
+	// just declared invalid.
+	const bool continuesRetainedClock =
+			bootWakeupCause == ESP_SLEEP_WAKEUP_TIMER &&
+			rtcAutoMagic == AUTO_RTC_MAGIC;
 
 	// A host session can be claimed outside a rendezvous, so the autonomous
 	// session state may never have been established. Rebuild it from the durable
@@ -6634,7 +6822,7 @@ bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow)
 					"because the next wake would have nowhere to write.");
 
 			setAutoState(AUTO_STATE_IDLE, "storage unavailable; refusing to sleep");
-			return false;
+			return HANDOFF_STORAGE_UNAVAILABLE;
 		}
 
 		rtcAutoMagic = AUTO_RTC_MAGIC;
@@ -6648,14 +6836,19 @@ bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow)
 	// closeMeasurementInterval() just established. A timer wake already has a
 	// session elapsed value retained across sleep; rebasing it to millis() here
 	// would make session_elapsed_ms move backward while boot_id stays the same.
-	const uint32_t sessionElapsedNow =
-			(bootWakeupCause == ESP_SLEEP_WAKEUP_TIMER &&
-			 rtcAutoMagic == AUTO_RTC_MAGIC)
-					? rtcAutoSessionElapsedMs +
-								(micros() - setupEntryMicros) / 1000UL
-					: millis();
+	//
+	// The retained clock is set to the session time of THIS instant, and
+	// hostHandoffAtMs records the instant, so the scheduler adds only the time
+	// since the handoff and never the awake time again (D-046). Both readings are
+	// millis(): the micros() form used here before wrapped after 71.6 minutes
+	// and dropped 4,294,967 ms from the session clock for each wrap.
+	const uint32_t handoffAtMs = millis();
+	const uint32_t sessionElapsedNow = autonomousHandoffElapsedMs(
+			continuesRetainedClock, rtcAutoSessionElapsedMs,
+			handoffAtMs - setupEntryMicros / 1000UL, handoffAtMs);
 	rtcAutoSessionElapsedMs = sessionElapsedNow;
 	rtcAutoIntervalStartMs = sessionElapsedNow;
+	hostHandoffAtMs = handoffAtMs;
 
 	autonomousTestRunning = true;
 
@@ -6671,7 +6864,58 @@ bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow)
 
 	// When sleepNow is false, the caller owns the bounded acknowledgement grace
 	// period and will enter deep sleep from the main loop after it expires.
-	return true;
+	return HANDOFF_PREPARED;
+}
+
+// ----------------------------------------------------------------------------
+// Deferred autonomous sleep (D-035, D-044)
+// ----------------------------------------------------------------------------
+//
+// Three functions write pendingAutonomousSleep, and nothing else may:
+//
+//   armPendingAutonomousSleep()      RELEASE after a prepared handoff, and
+//                                    LOGGER AUTONOMOUS ON after arming
+//   cancelPendingAutonomousSleep()   an explicit stop, or autonomous mode off
+//   servicePendingAutonomousSleep()  the deadline passed: enter the sleep
+//
+// While a sleep is pending the board is committed to it. hostSessionHold()
+// refuses, because a lease granted in the grace would be slept on when the
+// grace expires, and the RELEASE handoff has already closed the tethered
+// interval and moved the retained session clock to the new autonomous
+// boundary.
+// ----------------------------------------------------------------------------
+
+// DEEP_SLEEP_PENDING is part of arming, not decoration. autonomousOwnsBoard()
+// then answers true for the whole grace, so tethered accounting stays suspended
+// and POWER TEST STOP and RESET YES are refused while the accumulators already
+// belong to the next autonomous interval. The RELEASE handoff was already in
+// that state; LOGGER AUTONOMOUS ON was not, and now is.
+void armPendingAutonomousSleep(AutoSleepPath path, const char *reason)
+{
+	pendingAutonomousSleep = true;
+	pendingAutonomousSleepPath = path;
+	pendingAutonomousSleepDeadlineMs = millis() + SESSION_RELEASE_ACK_GRACE_MS;
+
+	setAutoState(AUTO_STATE_DEEP_SLEEP_PENDING, reason);
+
+	Serial.print("[AUTO] Deferred autonomous sleep ARMED; entering it in ");
+	Serial.print(SESSION_RELEASE_ACK_GRACE_MS);
+	Serial.println(" ms, after the command result has been delivered.");
+}
+
+void cancelPendingAutonomousSleep(const char *reason)
+{
+	if (!pendingAutonomousSleep)
+	{
+		return;
+	}
+
+	pendingAutonomousSleep = false;
+	setAutoState(AUTO_STATE_IDLE, reason);
+
+	Serial.print("[AUTO] Pending autonomous sleep CANCELED: ");
+	Serial.println(reason);
+	Serial.println("[AUTO] The board stays awake.");
 }
 
 void servicePendingAutonomousSleep()
@@ -6683,11 +6927,7 @@ void servicePendingAutonomousSleep()
 
 	if (!autonomousTestArmed)
 	{
-		pendingAutonomousSleep = false;
-		setAutoState(AUTO_STATE_IDLE, "pending autonomous sleep canceled");
-		Serial.println(
-				"[AUTO] Pending autonomous sleep canceled because autonomous mode is "
-				"OFF.");
+		cancelPendingAutonomousSleep("autonomous mode is OFF");
 		return;
 	}
 
@@ -7028,7 +7268,7 @@ bool autonomousColdBootMaintenanceWindow()
 // autonomous operation the moment the host lets go.
 // ============================================================================
 
-void hostSessionHold()
+HoldResult hostSessionHold()
 {
 	if (!autonomousTestArmed)
 	{
@@ -7038,7 +7278,32 @@ void hostSessionHold()
 		Serial.println(
 				"[SESSION] The board is already staying awake. No lease was taken.");
 		Serial.println("[SESSION] NOT ALL OK - HOLD refused.");
-		return;
+		return HOLD_NOT_ARMED;
+	}
+
+	// REFUSE while a deferred autonomous sleep is pending (D-044).
+	//
+	// RELEASE and LOGGER AUTONOMOUS ON both end in a bounded grace, after which
+	// loop() enters deep sleep. Granting a lease here used to answer OK and then
+	// sleep on top of it when the grace expired, discarding the new tethered
+	// interval and the lease with no RELEASE and no expiry notice.
+	//
+	// Canceling the pending sleep instead was considered and rejected. The
+	// RELEASE handoff has already closed the tethered interval, reset the
+	// accumulators, and moved the retained session clock to the new autonomous
+	// boundary; taking a session back would need all of that undone. A host that
+	// meets this refusal claims the board at the next rendezvous.
+	if (pendingAutonomousSleep)
+	{
+		Serial.println(
+				"[SESSION] ERROR: The board is already committed to autonomous sleep "
+				"and enters it within the acknowledgement grace.");
+		Serial.println(
+				"[SESSION] No lease was taken. Claim the board at the next USB "
+				"rendezvous.");
+		Serial.println(
+				"[SESSION] NOT ALL OK - HOLD not granted: autonomous sleep is pending.");
+		return HOLD_SLEEP_PENDING;
 	}
 
 	const bool renewing = hostSessionHeld;
@@ -7132,6 +7397,7 @@ void hostSessionHold()
 	// ordinary tethered telemetry resumes for the duration of the session.
 	autonomousTestRunning = false;
 	setAutoState(AUTO_STATE_HOST_SESSION, "LOGGER SESSION HOLD");
+	return HOLD_GRANTED;
 }
 
 void hostSessionKeepalive()
@@ -7163,13 +7429,27 @@ void hostSessionKeepalive()
 	Serial.println(" ms: ALL OK");
 }
 
-// Forward declaration: release hands the board back to the autonomous cycle,
-// which is defined further down.
-bool beginAutonomousSleepFromHostSession(const char *reason, bool sleepNow);
-
 void servicePendingAutonomousSleep();
 
-void hostSessionRelease()
+// RELEASE COMPLETED - the only case that returns true, and the only case the
+// dispatcher answers OK (D-041, D-044):
+//
+//   1. a session was held, and it has been ended: lease dropped, USB
+//      transport released
+//   2. if autonomous mode is armed:
+//        the accounting handoff was PREPARED - the tethered interval closed,
+//        autonomous session state valid, the next interval's baseline set
+//      and the deferred sleep is ARMED with its bounded grace
+//
+// Entering deep sleep is deliberately NOT part of it. That happens after
+// CMD_RESULT has been emitted, which is the whole reason it is deferred (D-035).
+// A host's evidence that it happened is the transport disappearing, and a
+// vanished port proves nothing on its own.
+//
+// Not held: returns false, answered NOT_HELD. Held but the handoff failed:
+// the session is still over, the board stays awake for diagnosis, returns
+// false, answered ERROR.
+bool hostSessionRelease()
 {
 	if (!hostSessionHeld)
 	{
@@ -7183,7 +7463,7 @@ void hostSessionRelease()
 					"operating autonomously or is about to.");
 		}
 
-		return;
+		return false;
 	}
 
 	Serial.println();
@@ -7205,7 +7485,7 @@ void hostSessionRelease()
 				"keeps logging normally.");
 		Serial.println("[SESSION] Released: ALL OK");
 		setAutoState(AUTO_STATE_IDLE, "released, autonomous not armed");
-		return;
+		return true;
 	}
 
 	Serial.println(
@@ -7213,20 +7493,26 @@ void hostSessionRelease()
 			"sleep cycle.");
 	setAutoState(AUTO_STATE_HOST_SESSION_RELEASED, "LOGGER SESSION RELEASE");
 
-	if (!beginAutonomousSleepFromHostSession("host released the session", false))
+	const HandoffResult handoff =
+			beginAutonomousSleepFromHostSession("host released the session", false);
+
+	if (handoff != HANDOFF_PREPARED)
 	{
-		return;
+		Serial.print("[SESSION] NOT ALL OK - RELEASE did not complete. Failed stage: ");
+		Serial.println(handoffStageName(handoff));
+		Serial.println(
+				"[SESSION] The session is over and its lease is gone, but the board did "
+				"NOT hand back to autonomous sleep. It stays awake for diagnosis.");
+		Serial.println(
+				"[SESSION] Autonomous mode is still ARMED in NVS and resumes after a "
+				"reset.");
+		return false;
 	}
 
 	Serial.println("[SESSION] RELEASE accounting complete");
+	armPendingAutonomousSleep(AUTO_SLEEP_HOST_RELEASE, "LOGGER SESSION RELEASE");
 	Serial.println("[SESSION] Released: ALL OK");
-	Serial.print("[SESSION] Release acknowledged; delaying autonomous sleep for ");
-	Serial.print(SESSION_RELEASE_ACK_GRACE_MS);
-	Serial.println(" ms.");
-
-	pendingAutonomousSleep = true;
-	pendingAutonomousSleepPath = AUTO_SLEEP_HOST_RELEASE;
-	pendingAutonomousSleepDeadlineMs = millis() + SESSION_RELEASE_ACK_GRACE_MS;
+	return true;
 }
 
 void printHostSessionStatus()
@@ -7461,6 +7747,12 @@ bool armAutonomousTest()
 
 	rtcAutoIntervalStartMs = millis();
 
+	// The tethered interval clock follows the reset too, so that if a stop
+	// cancels the pending sleep below, ordinary accounting resumes from the
+	// moment the accumulators were actually cleared rather than from an older
+	// start that no longer matches them (D-044).
+	intervalStartMs = millis();
+
 	// Deferred, not immediate.
 	//
 	// This used to call autonomousDeepSleepAgain() directly, which does not
@@ -7471,13 +7763,7 @@ bool armAutonomousTest()
 	// Arming destroys the USB transport exactly the way RELEASE does, so it uses
 	// the same bounded grace and the same mechanism (D-035). The sleep happens
 	// from loop(), after processCommand() has emitted the result.
-	pendingAutonomousSleep = true;
-	pendingAutonomousSleepPath = AUTO_SLEEP_ARM_COMMAND;
-	pendingAutonomousSleepDeadlineMs = millis() + SESSION_RELEASE_ACK_GRACE_MS;
-
-	Serial.print("[AUTO] Armed; delaying the first autonomous sleep for ");
-	Serial.print(SESSION_RELEASE_ACK_GRACE_MS);
-	Serial.println(" ms so the acknowledgement can be delivered.");
+	armPendingAutonomousSleep(AUTO_SLEEP_ARM_COMMAND, "LOGGER AUTONOMOUS ON");
 
 	return true;
 }
@@ -7488,6 +7774,13 @@ bool stopAutonomousTest()
 
 	autonomousStopRequested = true;
 	autonomousTestRunning = false;
+
+	// A stop request supersedes a pending deferred sleep at once - before the
+	// NVS write below, not after it. servicePendingAutonomousSleep() cancels only
+	// once the armed flag is clear, so a failed write used to let the grace
+	// expire into deep sleep after the operator had explicitly asked for a stop:
+	// the D-021 failure, reached through the deferred path.
+	cancelPendingAutonomousSleep("LOGGER AUTONOMOUS OFF requested");
 
 	if (autonomousTestArmed)
 	{
@@ -8716,8 +9009,18 @@ void serviceHostLease()
 	{
 		Serial.println("[AUTO] Returning to autonomous sleep.");
 
-		// Does not return when it succeeds.
-		beginAutonomousSleepFromHostSession("host lease expired", true);
+		// Does not return when it succeeds. There is no command to answer here, so
+		// a failed handoff is reported to the console only.
+		const HandoffResult handoff =
+				beginAutonomousSleepFromHostSession("host lease expired", true);
+
+		if (handoff != HANDOFF_PREPARED)
+		{
+			Serial.print(
+					"[SESSION] NOT ALL OK - lease expiry could not hand back to "
+					"autonomous sleep. Failed stage: ");
+			Serial.println(handoffStageName(handoff));
+		}
 	}
 	else
 	{

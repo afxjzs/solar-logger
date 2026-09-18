@@ -21,10 +21,13 @@ All paths below are relative to the repository root.
 - Firmware identity: `Arduino/solar-logger/firmware_version.h`
 - Canonical upload tool: `tools/upload.sh`
 - Serial command tool: `tools/send.sh`
+- Local validation gate: `tools/check.sh` (tests, type check, warning-free compile; never uploads)
 - CSV archiver: `tools/archive-data.py` (host files only; never touches the device)
 - Editor IntelliSense config: `tools/intellisense.sh` (`--check` reports staleness)
 
 The firmware reports its own identity at boot, on every autonomous wake, in `STATUS`, and on the `VERSION` command: a hand-edited version, the Git revision injected by `tools/upload.sh`, and the command-protocol build ID. An image built any other way prints `Revision: UNKNOWN` rather than a blank. See [DECISIONS.md](DECISIONS.md) D-038 and the version policy in [PROJECT.md](PROJECT.md).
+
+Firmware modularization has not started. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. See [DECISIONS.md](DECISIONS.md) D-043 and the extraction plan in [BACKLOG.md](BACKLOG.md).
 
 `tools/send.sh` waits for the next USB rendezvous by default, because a sleeping board's absent USB device is the ordinary state. `LOGGER SESSION KEEPALIVE` and `LOGGER SESSION RELEASE` are excluded: they address a session that already exists, so they fail immediately instead of acting on a later one. See [DECISIONS.md](DECISIONS.md) D-040.
 

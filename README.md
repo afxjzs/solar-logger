@@ -52,6 +52,9 @@ tools/upload.sh
 
 # Send a command to the board
 tools/send.sh STATUS
+
+# Run every local check: tests, type check, warning-free firmware compile
+tools/check.sh
 ```
 
 `tools/upload.sh` and `tools/send.sh` are the supported paths, not conveniences. Three processes want the same USB device, and these coordinate ownership through two small file protocols so the logger, the uploader, and the command sender can never race for the port. Uploading with `arduino-cli` directly while the logger is running will fight it for the device.
@@ -78,7 +81,8 @@ The power tests persist their armed state to NVS, so you can arm one over USB, u
 Arduino/solar-logger/    current firmware
 Arduino/*/               earlier bench sketches, kept as a development record
 app/solar_logger.py      host logger and live plot
-tools/                   upload and serial-command scripts
+tools/                   upload, serial-command, and check scripts
+tests/                   host tests and the firmware characterization gate
 docs/                    the engineering record — start at docs/INDEX.md
 data/                    live telemetry (gitignored)
 logs/                    archived early telemetry

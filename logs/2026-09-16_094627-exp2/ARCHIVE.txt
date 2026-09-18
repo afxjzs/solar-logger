@@ -1,0 +1,28 @@
+BMW Solar Logger CSV archive
+
+Archived at:       2026-09-16T09:46:27.372651
+Experiment number: 2 (all files agree)
+
+The device was not touched when this archive was made. No serial
+port was opened, no command was sent, and no NVS state changed.
+The experiment continued uninterrupted into the new data/ files.
+
+Contents:
+
+  samples.csv
+    data rows:  41074
+    experiment: 2
+    first row:  2026-09-09T13:28:57.252989-07:00
+    last row:   2026-09-16T09:44:56.611441-07:00
+
+  intervals.csv
+    data rows:  678
+    experiment: 2
+    first row:  2026-09-09T13:29:10.223403-07:00
+    last row:   2026-09-16T09:44:02.684535-07:00
+
+  events.csv
+    data rows:  45
+    experiment: 2
+    first row:  2026-09-09T14:14:53.324331-07:00
+    last row:   2026-09-16T09:40:02.633220-07:00

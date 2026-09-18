@@ -303,6 +303,10 @@ class CommandResult:
     CMD_RESULT,<cmd>,ERROR - a command that ran and failed. That is a real
     answer and capture should end on it, which is why termination keys on
     `result_seen` while success keys on `completed`.
+
+    `acknowledged` and `result_seen` can also differ: a RESULT whose ACK was
+    lost. That outcome is accepted and flagged, never passed off as a clean
+    exchange (D-045). See `ack_missing`.
     """
 
     command: str
@@ -314,11 +318,21 @@ class CommandResult:
     stop_reason: str = ""
     truncated: bool = False
 
+    # Results that arrived before this command's own ACK and were therefore
+    # proven stale by it (D-045).
+    stale_result_lines: list = field(default_factory=list)
+
     @property
     def result_seen(self) -> bool:
         """True once the firmware has reported any outcome for this command."""
 
         return bool(self.result_line)
+
+    @property
+    def ack_missing(self) -> bool:
+        """An outcome arrived but this command's CMD_ACK never did."""
+
+        return self.result_seen and not self.acknowledged
 
     @property
     def ack_line(self) -> str:
@@ -409,7 +423,13 @@ class SerialDevice:
         except (serial.SerialException, OSError) as error:
             raise DeviceError(f"Could not write to {self.port}: {error}") from error
 
-        # --- wait for the machine ACK ------------------------------------
+        # --- wait for the machine ACK, or a RESULT whose ACK was lost -----
+        #
+        # The firmware writes CMD_ACK and then CMD_RESULT down one FIFO, so a
+        # RESULT arriving first means the ACK was lost (D-036) - or that the
+        # RESULT is left over from an earlier send of the same command. It is
+        # taken PROVISIONALLY (D-045). If this command's ACK still arrives, the
+        # ordering proves that RESULT stale, and the capture below discards it.
         deadline = time.monotonic() + ack_timeout
         pre_ack_lines = []
 
@@ -425,10 +445,20 @@ class SerialDevice:
 
             pre_ack_lines.append(line)
 
-        if not result.acknowledged:
+            if line.startswith(expected_result_prefix):
+                result.completed = line == f"{expected_result_prefix}OK"
+                result.result_line = line
+                break
+
+        if not result.acknowledged and not result.result_seen:
             result.lines = pre_ack_lines
             result.stop_reason = "no acknowledgement"
             return result
+
+        if not result.acknowledged:
+            # With the ACK lost, what the firmware printed before its RESULT is
+            # the response, so it is kept rather than discarded as pre-ACK noise.
+            result.lines = pre_ack_lines
 
         # --- capture the response ----------------------------------------
         capture_deadline = time.monotonic() + capture_seconds
@@ -456,6 +486,16 @@ class SerialDevice:
 
             result.lines.append(line)
             last_data_at = time.monotonic()
+
+            if line.strip() == expected and not result.acknowledged:
+                # This command's own ACK, after a RESULT was already taken for it.
+                # An ACK never follows its own RESULT down one FIFO, so that RESULT
+                # belonged to an earlier send: discard it and wait for ours.
+                result.stale_result_lines.append(result.result_line)
+                result.result_line = ""
+                result.completed = False
+                result.acknowledged = True
+                continue
 
             if line.startswith(expected_result_prefix):
                 result.completed = line == f"{expected_result_prefix}OK"
@@ -547,9 +587,26 @@ class SessionClient:
         # a hold, which is how a non-autonomous board announces itself.
         self.autonomous_armed: Optional[bool] = None
 
+        # D-045. Outcomes accepted although their CMD_ACK never arrived, and
+        # outcomes later proven stale by an ACK that followed them. Counted so
+        # that neither is silent, and each is also logged when it happens.
+        self.results_without_ack = 0
+        self.stale_results_discarded = 0
+        self._provisional: Optional[tuple] = None
+
+        # The machine outcome of the most recent RELEASE this client sent, and
+        # whether its ACK was seen. None until that RESULT arrives. The human
+        # "[SESSION] Released: ALL OK" line never sets it (D-045).
+        self.release_result: Optional[str] = None
+        self.release_ack_observed = False
+
     # -- outgoing ---------------------------------------------------------
 
     def _send(self, command: str) -> None:
+        # A new command ends the window in which an earlier outcome could still
+        # be proven stale: its ACK would now match this command instead.
+        self._provisional = None
+
         if self._pending is not None:
             pending_command, _ = self._pending
 
@@ -575,6 +632,8 @@ class SessionClient:
 
     def request_release(self) -> None:
         self.log("[SESSION] Releasing the board with LOGGER SESSION RELEASE...")
+        self.release_result = None
+        self.release_ack_observed = False
         self._send(CMD_SESSION_RELEASE)
 
     # -- incoming ---------------------------------------------------------
@@ -598,6 +657,36 @@ class SessionClient:
         text = line.strip()
         consumed = False
 
+        # --- an ACK that proves an earlier outcome stale (D-045) ----------
+        #
+        # The firmware writes a command's ACK before its RESULT down one FIFO,
+        # so an ACK can never follow its own RESULT. An outcome accepted without
+        # its ACK, followed by that command's ACK, was therefore the outcome of
+        # an earlier send of the same command. Discard it and wait for ours.
+        if self._provisional is not None:
+            command, provisional_status = self._provisional
+
+            if text == ack_line_for(command):
+                self._provisional = None
+                self._awaiting_outcome = command
+                self.stale_results_discarded += 1
+
+                if command == CMD_SESSION_KEEPALIVE and provisional_status == "OK":
+                    self.keepalives_acked -= 1
+
+                if command == CMD_SESSION_RELEASE:
+                    self.release_result = None
+                    self.release_ack_observed = False
+
+                self.log(
+                    f"[SESSION] WARNING: the CMD_ACK for {command} arrived after "
+                    f"an outcome ({provisional_status}) had been accepted for it. "
+                    "An ACK never follows its own RESULT, so that outcome was "
+                    "stale and is discarded. Waiting for this command's own "
+                    "result."
+                )
+                return True
+
         # --- machine ACK: the command was parsed -------------------------
         if self._pending is not None:
             command, _sent_at = self._pending
@@ -608,7 +697,7 @@ class SessionClient:
                 self._awaiting_outcome = command
                 consumed = True
 
-        # --- machine RESULT: the command completed -----------------------
+        # --- machine RESULT: the AUTHORITATIVE outcome --------------------
         #
         # The outcome is accepted for a command still awaiting its ACK as well as
         # for one whose ACK arrived. D-036 is explicit that the ACK can be lost:
@@ -619,12 +708,18 @@ class SessionClient:
         # keepalive would then be refused by a board this client thought it had
         # never claimed.
         #
+        # Accepted, but never silently (D-045): a missing ACK is logged and
+        # counted, and the outcome stays provisional until another command is
+        # sent, so a late ACK can still prove it stale.
+        #
         # Matching on the result line's own command text is what makes this safe:
         # it still cannot be confused with another command's outcome.
         expecting = self._awaiting_outcome
+        ack_missing = False
 
         if expecting is None and self._pending is not None:
             expecting = self._pending[0]
+            ack_missing = True
 
         if expecting is not None:
             command = expecting
@@ -644,21 +739,51 @@ class SessionClient:
                     if status == "OK":
                         self.keepalives_acked += 1
                         self._last_keepalive_at = time.monotonic()
+                    else:
+                        # FAILED means the firmware holds no session. Keying this
+                        # on the human line alone left a session "held" here
+                        # whenever that line was the one that got dropped.
+                        self.held = False
 
                 elif command == CMD_SESSION_RELEASE:
+                    # Over in every case: OK released it, ERROR ended it without
+                    # the handoff, NOT_HELD means there was none.
                     self.held = False
+                    self.release_result = status
+                    self.release_ack_observed = not ack_missing
 
-                self.log(
-                    f"[SESSION] Firmware completed {command}: {status}"
-                )
+                if status == "OK":
+                    self.log(f"[SESSION] Firmware completed {command}: OK")
+                else:
+                    self.log(
+                        f"[SESSION] Firmware did NOT complete {command}: {status}"
+                    )
+
+                if ack_missing:
+                    self.results_without_ack += 1
+                    self._provisional = (command, status)
+                    self.log(
+                        f"[SESSION] WARNING: {command} answered {status}, but its "
+                        "CMD_ACK was NOT observed. The result is accepted as the "
+                        "outcome (D-045); the ACK was most likely lost under HWCDC "
+                        "backpressure (D-036). This was not a clean exchange."
+                    )
+                else:
+                    self._provisional = None
+
                 return True
 
-        # --- outcome: what actually happened -----------------------------
+        # --- human outcome lines: display and fallback only ---------------
+        #
+        # The firmware prints these BEFORE its machine RESULT. They used to clear
+        # the expected outcome, so the machine RESULT that followed was ignored and
+        # the human line decided everything. They still update session state, as
+        # a fallback for a machine line that gets dropped, but they no longer
+        # consume the expectation, and no success is ever reported from them.
         if text == RESULT_HOLD_OK:
             self.held = True
             self.held_since = time.monotonic()
             self.autonomous_armed = True
-            self._awaiting_outcome = None
             self.log(
                 f"[SESSION] Host session acquired over {self.transport.name}: "
                 "ALL OK"
@@ -671,7 +796,6 @@ class SessionClient:
 
         if text == RESULT_HOLD_REFUSED:
             self.held = False
-            self._awaiting_outcome = None
             self.autonomous_armed = False
             self.log(
                 "[SESSION] Firmware REFUSED the hold: autonomous mode is not "
@@ -684,16 +808,13 @@ class SessionClient:
             return True
 
         if RESULT_KEEPALIVE_OK in text:
-            self.keepalives_acked += 1
-            self._awaiting_outcome = None
-
-            # A renewed lease is also proof the session is alive, so it resets
+            # Counted from the machine RESULT only, so a renewal is not counted
+            # twice. A renewed lease still proves the session alive, so it resets
             # the schedule baseline even if this client never saw the echo.
             self._last_keepalive_at = time.monotonic()
             return True
 
         if text == RESULT_KEEPALIVE_FAILED:
-            self._awaiting_outcome = None
             self.held = False
             self.log(
                 "[SESSION] ERROR: The firmware says no host session is held, "
@@ -707,8 +828,10 @@ class SessionClient:
 
         if text == RESULT_RELEASED_OK:
             self.held = False
-            self._awaiting_outcome = None
-            self.log("[SESSION] Release acknowledged by firmware: ALL OK")
+            self.log(
+                "[SESSION] Firmware printed its release line. Whether RELEASE "
+                "completed is decided by its machine RESULT, not by this line."
+            )
             return True
 
         if text.startswith(RESULT_LEASE_EXPIRED):
@@ -801,3 +924,136 @@ class SessionClient:
         self.held_since = None
         self._pending = None
         self._last_keepalive_at = None
+
+
+# ============================================================================
+# RELEASING A SESSION AND SAYING WHAT HAPPENED
+# ============================================================================
+
+
+@dataclass
+class ReleaseReport:
+    """What the host can truthfully say about one RELEASE it sent (D-045).
+
+    `released` is True only when the firmware's machine RESULT said OK. The
+    port disappearing is never evidence: RELEASE tears down its own transport
+    when it succeeds, and a board that crashed or slept for any other reason
+    looks exactly the same from here.
+    """
+
+    sent: bool
+    result: Optional[str] = None
+    ack_observed: bool = False
+    transport_lost: bool = False
+
+    @property
+    def released(self) -> bool:
+        return self.result == "OK"
+
+
+LEASE_FALLBACK = (
+    "[SESSION] If the firmware still holds the lease, it expires on its own "
+    "within 15 s and the board resumes autonomous sleep."
+)
+
+
+def release_session(
+    session: SessionClient,
+    read_line: Callable[[], Optional[str]],
+    echo: Callable[[str], None] = print,
+    timeout: float = ACK_TIMEOUT_SECONDS,
+) -> ReleaseReport:
+    """Send RELEASE through `session`, read until its outcome, and report it.
+
+    `read_line` returns one decoded firmware line, None on a read timeout, or
+    raises when the transport fails. Every line read goes to `echo` and to the
+    session, so nothing the firmware says is hidden.
+
+    The machine RESULT is the only authority. OK is reported as released; any
+    other word as the failure it names; no RESULT at all as UNKNOWN, whether
+    the port vanished or the wait ran out.
+    """
+
+    log = session.log
+
+    try:
+        session.request_release()
+
+    except (serial.SerialException, OSError) as error:
+        log(f"[SESSION] NOT ALL OK - RELEASE could not be sent: {error}")
+        log(LEASE_FALLBACK)
+        return ReleaseReport(sent=False)
+
+    report = ReleaseReport(sent=True)
+    deadline = time.monotonic() + timeout
+
+    while session.release_result is None and time.monotonic() < deadline:
+        try:
+            line = read_line()
+
+        except (serial.SerialException, OSError, DeviceError) as error:
+            report.transport_lost = True
+            log(f"[SESSION] The connection closed while waiting: {error}")
+            break
+
+        if line:
+            echo(line)
+            session.note_line(line)
+
+    report.result = session.release_result
+    report.ack_observed = session.release_ack_observed
+
+    if report.result == "OK" and report.ack_observed:
+        log("[SESSION] Board released: ALL OK (firmware answered RELEASE with OK).")
+
+    elif report.result == "OK":
+        log(
+            "[SESSION] Board released: the firmware answered RELEASE with OK, but "
+            "its CMD_ACK was NOT observed (D-045). This was not a clean exchange."
+        )
+
+    elif report.result == "ERROR":
+        log(
+            "[SESSION] NOT ALL OK - the firmware answered RELEASE with ERROR. The "
+            "session is over, but the board did NOT hand back to autonomous sleep."
+        )
+        log(
+            "[SESSION] It stays awake for diagnosis, with autonomous mode still "
+            "armed. The firmware output above names the stage that failed."
+        )
+
+    elif report.result == "NOT_HELD":
+        log(
+            "[SESSION] NOT ALL OK - the firmware answered RELEASE with NOT_HELD: "
+            "it held no session, so nothing was released."
+        )
+        log(
+            "[SESSION] The lease had most likely already expired, in which case "
+            "the board is already returning to autonomous sleep."
+        )
+
+    elif report.result is not None:
+        log(
+            f"[SESSION] NOT ALL OK - the firmware answered RELEASE with "
+            f"{report.result}, which is not a completed release."
+        )
+
+    else:
+        if report.transport_lost:
+            log(
+                "[SESSION] NOT ALL OK - the connection closed before the firmware "
+                "reported a RELEASE outcome. The outcome is UNKNOWN."
+            )
+            log(
+                "[SESSION] A vanished port is not evidence of success: RELEASE "
+                "tears down its own transport only after reporting its result."
+            )
+        else:
+            log(
+                f"[SESSION] NOT ALL OK - no RELEASE outcome within {timeout:.0f}s. "
+                "The outcome is UNKNOWN."
+            )
+
+        log(LEASE_FALLBACK)
+
+    return report

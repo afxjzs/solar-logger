@@ -1871,45 +1871,22 @@ def main():
         # sent, the firmware's lease expires on its own and autonomous sleep
         # resumes without any help from here. Saying so matters: an operator
         # who sees a failed release should know the board still recovers.
+        #
+        # What gets reported is decided in app/device_session.py from the
+        # firmware's machine RESULT alone. This used to print "Board released:
+        # ALL OK" whenever the session stopped being held, which a NOT_HELD
+        # answer, a lease-expiry line, or the human release line all caused.
         if session is not None and session.held and ser is not None:
-            try:
-                session.request_release()
 
-                # Wait briefly for the firmware's own acknowledgement rather
-                # than assuming the write was enough.
-                release_deadline = time.monotonic() + ds.ACK_TIMEOUT_SECONDS
+            def read_release_reply(handle=ser):
+                raw = handle.readline()
 
-                while time.monotonic() < release_deadline and session.held:
-                    raw = ser.readline()
+                if not raw:
+                    return None
 
-                    if not raw:
-                        continue
+                return raw.decode("utf-8", errors="replace").strip()
 
-                    text = raw.decode("utf-8", errors="replace").strip()
-
-                    if text:
-                        print(text)
-                        session.note_line(text)
-
-                if session.held:
-                    print(
-                        "[SESSION] WARNING: RELEASE was not acknowledged "
-                        f"within {ds.ACK_TIMEOUT_SECONDS:.0f}s."
-                    )
-                    print(
-                        "[SESSION] The firmware lease expires on its own, so "
-                        "autonomous sleep still resumes."
-                    )
-                else:
-                    print("[SESSION] Board released: ALL OK")
-
-            except (serial.SerialException, OSError) as error:
-                print(f"[SESSION] ERROR: Could not send RELEASE: {error}")
-                print(
-                    "[SESSION] The connection is already gone. The firmware "
-                    "lease timeout is the fallback and will resume autonomous "
-                    "sleep on its own."
-                )
+            ds.release_session(session, read_release_reply)
 
         elif session is not None and session.held:
             print(
