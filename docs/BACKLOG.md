@@ -1,11 +1,11 @@
 # Backlog
 
-Work and ideas that are not part of the current implementation. Items here are not decisions; they become entries in [DECISIONS.md](DECISIONS.md) when they are settled and implemented.
+Open work, proposed directions, and resolved findings retained with their status. Accepted architecture decisions live in [DECISIONS.md](DECISIONS.md). Older source line links are discovery-time references and may have moved during extraction; use the named function and the module locations below for current source.
 
 ## How this file is organized
 
 - **Current and near-term work** — committed, expected to happen next.
-- **Known bugs and issues** — real defects, diagnosed, not yet fixed.
+- **Known bugs and issues** — diagnosed defects, with resolved items explicitly marked and retained as history.
 - **Experiments to run** — bench measurements that are defined but not yet taken.
 - **Longer-term ideas** — promising concepts that are **not** committed work and must not be read as planned.
 
@@ -15,10 +15,11 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
-## Firmware modularization — THREE STAGES BUILT, LATEST 2026-09-23
+## Firmware modularization — FOUR STAGES BUILT, LATEST 2026-09-23
 
-`Arduino/solar-logger/solar-logger.ino` is 7,201 lines by `wc -l` after the NVS
-extraction on 2026-09-23. It was 7,836 after the connection extraction on
+`Arduino/solar-logger/solar-logger.ino` is 7,059 lines by `wc -l` after the
+telemetry extraction on 2026-09-23. It was 7,201 after the NVS extraction
+earlier the same day, 7,836 after the connection extraction on
 2026-09-18, 7,949 after the INA228 extraction the same day, 9,126 before that,
 and 8,436 when this plan was written. The
 agreed direction is
@@ -27,24 +28,36 @@ concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-**Three modules exist**, each extracted with no intended behavior change:
+**Four modules exist**, each extracted with no intended behavior change:
 
 - **The INA228 driver**, `ina228.h` and `ina228.cpp`, 2026-09-18. A hardware
   smoke test of that image was reported later the same day; it is recorded, as
   reported, in [LAB_NOTES.md](LAB_NOTES.md). The boundary rules it set are
   [DECISIONS.md](DECISIONS.md) D-047.
 - **Connection bookkeeping**, `connection.h` and `connection.cpp`, 2026-09-18:
-  which transport a host has claimed. Compiled and host-tested; it has **not**
-  run on hardware. Its boundary is D-049.
+  which transport a host has claimed. Compiled and host-tested; the supplied
+  `8776ba0` hardware transcript confirms claim/status/keepalive/release. Its
+  boundary is D-049.
 - **NVS persistence**, `nvs_persistence.h` and `nvs_persistence.cpp`,
   2026-09-23: the `Preferences` object, the namespace, every key, and the typed
-  reads and writes. Compiled and host-tested; it has **not** run on hardware.
-  Its boundary is D-050. This is the `nvs_rtc` row of the module table below,
+  reads and writes. Compiled and host-tested; restore and checkpoint-write
+  smoke tests passed on hardware revision `d017f7d`, preserving Experiment 3.
+  See the 2026-09-23 LAB_NOTES addendum for limits. Its boundary is D-050. This is the `nvs_rtc` row of the module table below,
   **NVS only** — the RTC-retained state that row also names did not move and
   belongs to `auto_state`.
 
+- **Telemetry**, `telemetry.h` and `telemetry.cpp`, 2026-09-23: how each
+  machine-readable CSV line is spelled, and nothing about when one is emitted.
+  Compiled and host-tested; it has **not** run on hardware. Its boundary is
+  D-051. This is the `telemetry` row of the module table below, built as that
+  row describes.
+
+Telemetry was the fourth stage chronologically and is numbered 5 in the
+original table below, because that table split the INA228 work into two rows.
+Those plan numbers are not the chronological stage numbers.
+
 The audits and hardware checks are in [LAB_NOTES.md](LAB_NOTES.md). The gate
-every stage passes was built earlier the same day, and since the connection
+every stage passes was built on 2026-09-18, and since the connection
 stage it also regenerates the editor database, so a new module needs no editor
 configuration (D-048).
 
@@ -85,7 +98,7 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `rtcAutoIntervalStartMs` | R | wake cycle (after reset), scheduler overrun branch, host handoff, arm, `setup()` (cold-boot resume, RTC-loss rebuild) | The autonomous interval boundary. Must move only when the accumulators are reset. **The overrun branch breaks this**; found 2026-09-18, not fixed, below. |
 | `rtcAutoNextSeq` | R | `autoStorageRecover()`, wake cycle on successful append | Never reused (D-017). Advances only after a durable append. |
 | `rtcAutoSeqHighWater` | R, mirrors N `auto_seq_hw` | `reserveSequenceBlock()`, `autoStorageRecover()` | The floor that makes duplicates impossible. A failed NVS read currently lowers it to 0. |
-| `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Test-local totals, **not** experiment totals. Currently advanced before the append that should gate them. |
+| `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Autonomous-local totals, **not** experiment totals. Since the 2026-09-17 fix, advanced only after a successful durable append. |
 | `rtcAutoCycleCount` | R | wake cycle, arm, cold-boot resume, RTC-loss path | Zero means "first record of this session", which is what sets `FIRST_AFTER_BOOT`. |
 | `rtcAutoCommandedSleepMs` | R | `autonomousDeepSleepAgain()` | **Written, never read.** No invariant, because nothing depends on it. |
 | `rtcSleepTestMagic`, `rtcSleepTestCycle` | R | `armSleepPowerTest()`, `enterSleepPowerTestDeepSleep()`, `stopAllPowerTests()`, cold-boot resume | Belong to `power_test`, not `auto_state`. Guarded by their own magic (D-011). |
@@ -109,8 +122,9 @@ Three ownership problems fall straight out of the table and are written up under
   accumulator reset it is supposed to timestamp.
 - **The `armed` flag exists twice** — NVS and a RAM mirror — with no single
   function responsible for keeping them equal.
-- **`rtcAutoRunChargeUAh` is advanced by the measurement path before the storage
-  path has committed the record** that justifies the advance.
+- **Resolved 2026-09-17:** `rtcAutoRunChargeUAh` previously advanced before
+  storage committed its record. Both retained totals now advance only after a
+  successful append; the source characterization tests pin that ordering.
 
 ### Proposed modules
 
@@ -127,7 +141,7 @@ forced them.
 | `auto_state` | `AutoState`, the ten `rtcAuto*` RTC globals, `setAutoState()`, `autonomousOwnsBoard()`, LittleFS mount, 72-byte record encode/CRC/append, tail scan, sequence reservation | `nvs_rtc` |
 | `ina228_regs` | **Merged into `ina228`, built 2026-09-18.** I2C register read/write, sign extension | Arduino, `Wire` |
 | `ina228` | **BUILT 2026-09-18** as `ina228.h` / `ina228.cpp`: the register layer, identity, configuration, shutdown, `readSensor`, accumulator read/reset. `inaShutdownActive` stayed in the sketch (D-047) | Arduino, `Wire` |
-| `telemetry` | `CSV_SAMPLE` / `CSV_DATA` / `CSV_EVENT` formatting | Arduino |
+| `telemetry` | **BUILT 2026-09-23** as `telemetry.h` / `telemetry.cpp`: `CSV_HEADER` / `CSV_SAMPLE` / `CSV_DATA` / `CSV_EVENT` formatting. `CSV_HEADER` was not in this row and moved with `CSV_DATA`, which it describes. No state, and no dependency beyond Arduino, which is why the row structs repeat the measurement fields rather than taking a `SensorReading` (D-051) | Arduino |
 | `experiment` | `experimentId`, `completedInterval`, running totals, `intervalStartMs`, checkpoint save/load, interval close, accounting-suspension predicate | `ina228`, `nvs_rtc`, `telemetry`, `auto_state` |
 | `power_test` | Wi-Fi test, both deep-sleep variants, arm/stop/status | `ina228`, `nvs_rtc`, `experiment` |
 | `auto_orchestrator` | wake cycle, USB rendezvous, deadline scheduler, cold-boot window, host handoff, arm/stop/status, storage commands, `validateInaForWake()` | `auto_state`, `connection`, `experiment`, `ina228`, `nvs_rtc` |
@@ -297,11 +311,11 @@ calls. Each stage compiles and uploads on its own. **Do not batch them.**
 
 | Stage | Move | Why it is safe | Hardware check afterwards |
 | ---: | --- | --- | --- |
-| 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls. **BUILT 2026-09-23** as `nvs_persistence`, NVS only | reboot; `experiment_id` and interval number survive. **PENDING** |
-| 2 | `connection` | the other true leaf; 1 global, 5 functions. **BUILT 2026-09-18**, as planned: exactly that global and those five functions | `LOGGER SESSION STATUS` reports the same transports. **PENDING** |
+| 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls. **BUILT 2026-09-23** as `nvs_persistence`, NVS only | reboot; `experiment_id` and interval number survive. **OBSERVED on d017f7d** |
+| 2 | `connection` | the other true leaf; 1 global, 5 functions. **BUILT 2026-09-18**, as planned: exactly that global and those five functions | `LOGGER SESSION STATUS` reports the same transports. **OBSERVED on 8776ba0** |
 | 3 | `ina228_regs` | leaf but for the bus; no globals | `STATUS` reports live V/I/P/temperature |
 | 4 | `ina228` | above stage 3; no globals, since `inaShutdownActive` stayed in the sketch (D-047) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
-| 5 | `telemetry` | formatting only, no state | one `CSV_SAMPLE` and one `CSV_DATA` row reach the logger unchanged |
+| 5 | `telemetry` | formatting only, no state. **BUILT 2026-09-23**, as planned: no state moved, and globals are unchanged at 36,332 bytes | one `CSV_SAMPLE` and one `CSV_DATA` row reach the logger unchanged. **PENDING** |
 
 **Stages 3 and 4 are BUILT, 2026-09-18, as one module, `ina228`, ahead of
 stages 1 and 2.** A hardware smoke test covering their checks was reported
@@ -316,11 +330,11 @@ direction of that stint's brief and recorded here so neither is silent:
   The hardware check afterwards is both rows' checks together. The full list is
   in [LAB_NOTES.md](LAB_NOTES.md), under the 2026-09-18 INA228 entry.
 
-**Stage 2 is BUILT, 2026-09-18, and its hardware check is PENDING.** It moved
+**Plan stage 2 is BUILT, 2026-09-18, and its hardware smoke is recorded in the 2026-09-23 addendum.** It moved
 exactly what the row above says. One departure from the module table is
 recorded in D-049: `printUsbPresence()` stayed in the sketch.
 
-**Stage 1 is BUILT, 2026-09-23, and its hardware check is PENDING.** One
+**Plan stage 1 is BUILT, 2026-09-23, and its NVS restore/write smoke passed on `d017f7d`.** One
 departure from the module table, recorded in D-050: the row's RTC half did not
 move, so the module is `nvs_persistence` rather than `nvs_rtc`. Two functions
 were split instead of moved whole, `loadAutonomousSettings()` and
@@ -329,13 +343,26 @@ decision the caller owns. Its hardware check is the sharpest of the three so
 far: the board must come back as Experiment 3 with the same interval number and
 running totals.
 
-The remaining order is unchanged: 5, 6, 7, 8, 9, 10, 11.
+**Plan stage 5 is BUILT, 2026-09-23, and its hardware check is PENDING.** It
+moved exactly what the row above says, with one addition recorded in D-051:
+`CSV_HEADER` moved with `CSV_DATA` because it names that row's fields. One
+function was split rather than moved whole, `printLiveSample()`, because it
+mixed measurement policy and acquisition with the row construction; only the
+construction moved. Four of the five moved bodies are token-identical to
+`HEAD`, and the fifth differs only where loose parameters and three sketch
+globals became one explicit struct.
+
+The remaining original plan is below; these later stages have not been
+executed.
+
+| Stage | Move | Why / boundary | Hardware check afterwards |
+| ---: | --- | --- | --- |
 | 6 | `auto_state` | **the split. Read-only first, append last.** Carries the ten `rtcAuto*` RTC globals | `LOGGER STORAGE INFO` and `LOGGER STORAGE DUMP` decode the existing log with the same record count and an intact tail |
 | 7 | `experiment` | 8 globals; everything it calls has moved | a full 60-second interval closes with the same running totals |
 | 8 | `power_test` | self-contained; nothing else calls into it | arm and stop each variant; confirm the refusal to arm two |
 | 9 | `auto_orchestrator` | the other split, plus the `pumpCommands` injection | five consecutive unclaimed records at the configured cadence; then `LOGGER AUTONOMOUS OFF` inside the cold-boot window, which is the edge being inverted |
 | 10 | `host_session` | the lease; carries D-026, D-028, D-035 | HOLD, three KEEPALIVEs, RELEASE; then lease expiry with no keepalives |
-| 11 | `command` | last, because everything it dispatches to has moved | every command in `HELP`, each returning `CMD_RESULT,...,OK` |
+| 11 | `command` | last, because everything it dispatches to has moved | representative commands in `HELP`; assert each expected result, including refusals/errors, without resetting Experiment 3 or clearing storage |
 
 **Stages 6 and 9 are the two that carry real risk.** Stage 6 moves the RTC
 globals, where a header-defined copy silently resets the session clock. Stage 9
@@ -384,7 +411,9 @@ already its default. KEEPALIVE and RELEASE never wait, and an explicit
 anything, so KEEPALIVE has to follow within the firmware's 15-second lease and
 RELEASE after it.
 
-Expected, and none of this has been observed for a modularized image:
+Expected after each future extraction. These outcomes have been observed on
+modularized images, including `8776ba0` and `d017f7d`; see the latest LAB_NOTES
+addendum. A past pass does not validate the next image:
 
 - `VERSION` prints the expected version, a real revision hash rather than
   `UNKNOWN`, and `solar-logger-protocol-ack-v3`.
@@ -1023,8 +1052,9 @@ because the ACK carries no more identity than the RESULT.
 
 Confirmed by reading only. Not fixed in that stint, because each is outside its
 three fixes and the first sits in cadence code the stint was told not to
-disturb. Neither has been observed on hardware. The scheduler double-count was
-fixed later the same day (D-046); arming while tethered is still open.
+disturb. The original defects were source findings. The scheduler double-count
+was fixed later the same day (D-046), and its corrected RELEASE remainder was
+subsequently observed on hardware; arming while tethered is still open.
 
 ### After a host handoff, the scheduler counts the awake time twice
 
@@ -1085,7 +1115,9 @@ is itself the time since boot and the scheduler added the awake time to it.
 Two more defects in the same expression were fixed with
 it: the handoff's `micros()` wrap after 71.6 minutes, and the rebuild-ordering
 item under "SHOULD FIX DURING MODULARIZATION". Cover:
-`tests/test_autonomous_schedule.py`. Not verified on hardware.
+`tests/test_autonomous_schedule.py`. RELEASE subsequently reported 59,750 ms
+remaining on hardware, including clean `d017f7d`; explicit lease-expiry timing
+remains unverified by the supplied transcripts.
 
 ### Arming while tethered discards the open tethered interval without closing it
 
@@ -1185,6 +1217,20 @@ already records that instant as `intervalStartMs`.
 
 ## SHOULD FIX DURING MODULARIZATION
 
+### DIAG_ALRT read order may lose charge-overflow evidence — source question, 2026-09-23
+
+`runAutonomousWakeCycle()` reads CHARGE and ENERGY before `DIAG_ALRT`.
+Its comment and STORAGE_SYNC_DESIGN say `CHARGEOF` clears when CHARGE is read.
+If that stated clear-on-read behavior is correct, reading the flag afterwards,
+even in the same wake, cannot establish that no charge overflow occurred.
+This audit confirms the ordering contradiction only; it has not verified the
+silicon behavior against the datasheet or induced an overflow on hardware.
+
+**Open question:** should DIAG_ALRT be captured before the accumulator reads?
+Verify the datasheet's clear conditions and exercise an overflow before changing
+runtime order. Until then, do not treat same-wake sampling as validated overflow
+protection. This is separate from the existing scheduler-overrun `xfail`.
+
 ### One corrupt record discards every valid record after it
 
 `autoStorageScan()`
@@ -1273,7 +1319,7 @@ read". A failed high-water read must not be allowed to lower the floor; keeping
 the previous RTC value or refusing to allocate a sequence are both better than
 returning 0.
 
-**STILL OPEN after the NVS extraction of 2026-09-23.** Both functions now live
+**STILL OPEN after the NVS extraction of 2026-09-23.** Both NVS read operations now live
 in `Arduino/solar-logger/nvs_persistence.cpp`; the line references above are to
 the pre-extraction sketch. `loadAutonomousSettings()`'s read half is
 `loadAutonomousConfig()` there, and `loadSequenceHighWater()` kept its name and
@@ -1349,25 +1395,33 @@ a failed write leaves both alone and says so.
 consults free space. `LittleFS.totalBytes()` and `usedBytes()` are read only by
 `printStorageInfo()`, a human-facing command.
 
-When the partition fills, the append short-writes, the wake cycle reports
-"durable append failed", and the accumulators are not reset. The log stops
-growing and nothing on the device notices that it has stopped recording.
+Source-only failure analysis: when an append fails or short-writes, the firmware
+prints storage errors, leaves the accumulators unreset, and does not advance
+retained totals. There is no persistent storage-full state or automatic
+reclamation; an unattended board has no host to retain those diagnostics. A
+full-partition hardware test has not been recorded.
 
 **Updated 2026-09-17.** This entry used to end "and the running-total
 double-count above then fires on every subsequent wake, permanently". That part
 is fixed: the retained totals are now committed only after a successful append,
 so a full partition no longer corrupts the running totals as well as stopping
-the log. The remaining defect is the silence, which is the harder half.
+the log. The remaining gap is persistent full-state reporting and recovery,
+not the absence of a serial error message.
 
-STORAGE_SYNC_DESIGN.md Section 9 specifies the policy this replaces: reclaim
+STORAGE_SYNC_DESIGN.md Section 9 proposes a policy that is not yet accepted: reclaim
 acked records first, then overwrite the oldest unacked and count it in a
 persistent `dropped_unacked_count`, with the event printed loudly. None of
 `INFO`, `SYNC FROM`, `ACK`, `last_acked_seq`, reclamation or
-`dropped_unacked_count` exists in the firmware; `grep` for them returns nothing.
+`dropped_unacked_count` exists as a storage-sync API/state in the firmware.
+`LOGGER STORAGE INFO` and command-protocol `CMD_ACK` do exist; neither is a
+storage-sync acknowledgement.
 
 This has a date attached rather than being hypothetical. Section 6 computes
 about 18,000 records on the current partition, which is roughly 12.5 days at the
-60-second cadence, and Experiment 3 is running continuously.
+60-second cadence. The 2026-09-23 hardware snapshot of Experiment 3 was **not
+full**: 1,196,032 bytes free, 3,272 valid records, intact tail. The displayed
+16,611-record / 11-day remainder is a free-space estimate at that moment, not a
+measured exhaustion date or a fresh reading.
 
 **Direction:** this is the store-and-forward milestone, and it is now the
 limiting factor on how long the logger can be left alone. Until it is built, a
@@ -1640,19 +1694,19 @@ It also costs a board change, and it loses the property that shutdown is a rever
 
 ## Store-and-forward telemetry logger — DESIGN DONE, storage confirmed on hardware
 
-A bench-only prototype of one sleep/read/store cycle is implemented as `LOGGER TEST AUTONOMOUS`. Its first hardware run on 2026-09-11 produced eight durable 72-byte records with an intact tail, confirming the storage path. Sync, ACK, pruning, and the production ring buffer are all still unbuilt; see [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) Section 12a for what exists and Section 13 for what comes next.
+Autonomous sleep/read/store is implemented as `LOGGER AUTONOMOUS ON/OFF/STATUS`; `LOGGER TEST ...` names are deprecated aliases (D-031). Its first hardware run on 2026-09-11 produced eight durable 72-byte records. The latest supplied 2026-09-23 storage snapshot has 3,272 valid records and an intact tail. Sync, ACK, pruning, and the production ring buffer are all still unbuilt; see [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) Section 12a for what exists and Section 13 for what comes next.
 
 The design pass is done. See [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) for the partition audit, record format, capacity and wear arithmetic, wake ordering, timestamp strategy, sync protocol, and recovery design. Accepted decisions from it are D-017 through D-020 in [DECISIONS.md](DECISIONS.md).
 
 The background below is preserved because it is what motivated the design.
 
-### Current system
+### Historical motivation — before autonomous storage
 
 - Detailed sample and interval history exists only when the host Python logger is connected and writing CSV.
 - The ESP32 persists experiment and accounting state to NVS, but not full telemetry history.
 - Serial output produced while the host is absent is lost.
 
-This is visible today in two places already recorded elsewhere. `CSV_EVENT` messages emitted during `setup()` are normally lost, because the host has not finished rediscovering the re-enumerated USB device yet; that affects `EXPERIMENT_RESUME` and, during the deep-sleep power test, `SLEEP_TEST_WAKE`. And the deep-sleep power test itself produces no durable telemetry at all while it runs, which is exactly the condition the board will be in for any real unattended deployment.
+The remaining serial-history gap is visible in two places already recorded elsewhere. `CSV_EVENT` messages emitted during `setup()` are normally lost, because the host has not finished rediscovering the re-enumerated USB device yet; that affects `EXPERIMENT_RESUME` and, during the deep-sleep power test, `SLEEP_TEST_WAKE`. And the deep-sleep power test itself produces no durable telemetry at all while it runs, which is separate from the autonomous mode that now stores intervals locally.
 
 ### Future direction
 
@@ -1663,7 +1717,9 @@ This is visible today in two places already recorded elsewhere. `CSV_EVENT` mess
 - NVS is likely appropriate for state and checkpoints, not for a full long-term time series.
 - Investigate LittleFS or another flash-backed append-only format.
 
-Not scheduled. Nothing in this section is implemented.
+Status update: LittleFS local records and sequence recovery are implemented.
+The sync/ACK/reclamation portions remain unbuilt; the background above is the
+original motivation, not a claim that autonomous storage is still absent.
 
 ## Explicit maintenance mode for an autonomously armed device
 

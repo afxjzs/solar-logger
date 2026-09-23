@@ -1,18 +1,20 @@
 # Autonomous Storage and Sync — Design
 
-Design for the next milestone: the ESP32 keeps a durable local telemetry log while nothing is attached, and a host later syncs it.
+Design and implementation record for autonomous local logging and later host synchronization.
 
-**Status: design only. Nothing here is implemented.** Sections marked CONFIRMED were verified against the installed toolchain, the current source, or the TI datasheet. Sections marked PROPOSED are recommendations that have not been accepted as decisions. Accepted decisions live in [DECISIONS.md](DECISIONS.md).
+**Status as of the 2026-09-23 audit of `d017f7d`: local logging is implemented and hardware smoke-tested; sync is not.** LittleFS append, 72-byte records, recovery, NVS sequence reservations, configurable cadence and USB rendezvous/session handling exist. `SYNC FROM`, storage `ACK`, acknowledged-sequence state, `SET_TIME`, reclamation, ring storage and a storage-full policy do not. Command `CMD_ACK` acknowledges command parsing, not durable receipt of stored telemetry.
+
+Sections below retain the original design rationale. CONFIRMED denotes the stated evidence, not universal hardware validation; PROPOSED denotes remaining design or an original proposal with an implementation note. Section 12a and its implementation differences describe what exists. Accepted decisions live in [DECISIONS.md](DECISIONS.md).
 
 ## The problem
 
-The current system is host-tethered:
+The original system was host-tethered:
 
 ```text
 INA228 -> ESP32 -> Serial -> Python logger -> data/*.csv
 ```
 
-If the Python logger is absent, `CSV_SAMPLE` and `CSV_DATA` history is lost. The ESP32 persists experiment accounting state in NVS but keeps no telemetry backlog.
+If the Python logger is absent, serial `CSV_SAMPLE`, `CSV_DATA`, and event history is still lost. The original system kept only the NVS experiment checkpoint; current autonomous mode also keeps an interval backlog in LittleFS. It does not preserve one-second samples or replay serial events.
 
 The target:
 
@@ -48,18 +50,18 @@ The active table is `tools/partitions/default.csv`:
 | Name | Type | SubType | Offset | Size (hex) | Size (bytes) | Used today |
 | --- | --- | --- | --- | --- | ---: | --- |
 | *(bootloader + partition table)* | | | `0x000000` | `0x9000` | 36,864 | yes |
-| `nvs` | data | nvs | `0x009000` | `0x5000` | 20,480 | yes — experiment state, power-test flags |
+| `nvs` | data | nvs | `0x009000` | `0x5000` | 20,480 | yes — experiment state, power-test flags, autonomous settings, sequence floor, boot id |
 | `otadata` | data | ota | `0x00E000` | `0x2000` | 8,192 | no |
 | `app0` | app | ota_0 | `0x010000` | `0x140000` | 1,310,720 | yes — the firmware |
 | `app1` | app | ota_1 | `0x150000` | `0x140000` | 1,310,720 | **no — never used, no OTA** |
-| `spiffs` | data | spiffs | `0x290000` | `0x160000` | 1,441,792 | **no — entirely free** |
+| `spiffs` | data | spiffs | `0x290000` | `0x160000` | 1,441,792 | **yes — LittleFS `/auto.bin`** |
 | `coredump` | data | coredump | `0x3F0000` | `0x10000` | 65,536 | no |
 
 Total: 4,194,304 bytes, exactly 4 MiB, fully allocated with no gaps.
 
-**Where "Maximum is 1310720 bytes" comes from.** That figure in every compile is not a generic ESP32 limit and not the flash size. It is the `app0` partition size, `0x140000`. The current firmware uses 1,004,945 bytes of it, 76%.
+**Where "Maximum is 1310720 bytes" comes from.** That figure in every compile is not a generic ESP32 limit and not the flash size. It is the `app0` partition size, `0x140000`. The supplied `d017f7d` validation transcript reports 1,102,337 bytes (84%) for the uninjected check build and 1,102,281 bytes for the revision-injected upload build; globals are 36,332 bytes in both. These are dated build results, not fixed sizes.
 
-**Filesystem type.** No filesystem is mounted today. The core provides LittleFS at `libraries/LittleFS`, and its default partition label is `spiffs`:
+**Filesystem type.** Current autonomous storage mounts LittleFS with `LittleFS.begin(false)`; a mount failure never auto-formats. The core provides LittleFS at `libraries/LittleFS`, and its default partition label is `spiffs`:
 
 ```cpp
 bool begin(bool formatOnFail = false, const char *basePath = "/littlefs",
@@ -72,15 +74,15 @@ That matters for risk: leaving the table alone means `nvs` never moves, so exper
 
 ### Capacity available
 
-- **Today, no changes: 1,441,792 bytes.**
-- **Switching to the stock `no_ota` scheme: 1,966,080 bytes** (`app0` grows to 2 MB, `app1` disappears). `nvs` stays at `0x9000`/`0x5000` and `app0` stays at `0x10000`, so experiment state survives the change.
+- **Current partition capacity: 1,441,792 bytes.** The supplied 2026-09-23 snapshot reports 245,760 used and 1,196,032 free; partition capacity is not remaining space.
+- **Proposed stock `no_ota` scheme: 1,966,080 bytes** (`app0` grows to 2 MB, `app1` disappears). NVS and `app0` offsets stay fixed, but the existing LittleFS partition moves; this is not a preservation-safe change for the live autonomous log without a separate migration/backup plan. No partition change has been made.
 - **A custom single-app table could reach ~2,752,512 bytes** by giving everything from `0x150000` to `0x3F0000` to data. This needs a project-local partition CSV.
 
 `app1` is 1.25 MB of flash that this project has never used and has no plan to use. It is the obvious place to find room if room is needed.
 
 ---
 
-## 2. Storage mechanism — PROPOSED
+## 2. Storage mechanism — LittleFS IMPLEMENTED, alternatives PROPOSED
 
 | | LittleFS | NVS | Raw partition ring buffer |
 | --- | --- | --- | --- |
@@ -93,15 +95,15 @@ That matters for risk: leaving the table alone means `nvs` never moves, so exper
 | Reclaim old records | truncate/rotate files | delete keys | advance tail pointer |
 | Mount cost per wake | scans metadata on mount — **unmeasured** | negligible | none |
 
-**Recommendation for the first bench implementation: LittleFS.** It is in the core, needs no partition change, is power-loss resilient by design, and produces a file a host can pull and inspect. Simplicity wins for a first cut.
+**Implemented first choice: LittleFS.** It is in the core, needs no partition change, is power-loss resilient by design, and produces a file a host can pull and inspect. Simplicity wins for a first cut.
 
-**Keep NVS for small state and checkpoints.** Experiment id, interval number, running totals, sequence high-water mark, last-acked sequence, and `autonomous_interval_seconds` all belong in NVS. Nothing about this design changes that.
+**Keep NVS for small state and checkpoints.** Experiment id, interval number, running totals, sequence high-water mark, and `autonomous_interval_seconds` belong in NVS; a last-acked sequence is proposed but not implemented. Nothing about this design changes that.
 
 **Likely long-term optimization: a raw partition ring buffer.** Not for capacity, for time. Section 7 shows that awake time dominates the power budget, and LittleFS mount plus metadata commit adds to awake time on every single wake. If that cost turns out to be large, a ring buffer with fixed 64- or 72-byte slots removes it entirely. **This needs measuring before it can be decided** — see Section 12.
 
 ---
 
-## 3. Wake and storage cadence — PROPOSED
+## 3. Wake and storage cadence — IMPLEMENTED, with known overrun limitation
 
 **60 seconds is the development default, not an architectural commitment.**
 
@@ -114,9 +116,9 @@ autonomous_interval_seconds     default 60
 Rules that follow from having one setting:
 
 - No other 60-second constant may exist in the autonomous path. The existing `MEASUREMENT_INTERVAL_MS` belongs to the host-tethered logger and must not be reused as the autonomous cadence.
-- Every record stores the **actual measured** interval duration, not the configured one. A log containing a cadence change, a late wake, or a reboot mid-interval stays correct and self-describing.
+- Records store commanded sleep plus measured awake time rather than simply the configured cadence. This inherits RTC drift. The open overrun defect can move the boundary without resetting the accumulators, understating the duration the charge covers; see BACKLOG and the strict schedule-test `xfail`.
 - The setting persists in NVS so it survives power loss.
-- The architecture must permit a future `LOGGER INTERVAL <seconds>` command. Not implemented in this stint.
+- `LOGGER INTERVAL <seconds>` is implemented, accepts 10–3600 while disarmed, and persists the setting. The 10-second cadence reaches the known overrun defect on every unclaimed wake; supported syntax is not proof of correct accounting at that cadence.
 
 ### ESP cadence is not INA cadence
 
@@ -141,19 +143,13 @@ Longer intervals cost temporal resolution, not energy accounting. Whether that m
 
 ---
 
-## 4. INA228 wake sequence — CONFIRMED HAZARD
+## 4. INA228 wake sequence — original hazard and implemented ordering
 
-This is the most important finding in this audit.
+### Original finding and current source
 
-### What the current firmware does
+The original pre-autonomous boot path reset accumulators without reading them. Reusing it for timer wakes would have discarded every sleep interval. The normal armed timer wake now branches early in `setup()` to `runAutonomousWakeCycle()`, before cold-boot initialization: read accumulators, build and durably append a record, then reset. Cold-boot and explicit RTC-loss recovery remain separate paths; the latter diagnoses and discards an unknown-duration interval.
 
-Verified by reading the source. The accumulators are read in exactly two places, [solar-logger.ino:3611](../Arduino/solar-logger/solar-logger.ino#L3611) and [:3625](../Arduino/solar-logger/solar-logger.ino#L3625), both inside `closeMeasurementInterval()`.
-
-`setup()` never reads them. It calls `resetInaAccumulators()` at [solar-logger.ino:4100](../Arduino/solar-logger/solar-logger.ino#L4100).
-
-**Therefore: every boot — including every deep-sleep timer wake — destroys the accumulated CHARGE and ENERGY without ever reading them.**
-
-Today this loses nothing, because both deep-sleep power-test variants explicitly suspend interval accounting. In autonomous mode it would silently discard the entire sleep period's charge on every single wake, and every record would report near-zero charge. Nothing in the current code would say so.
+The cold-boot configuration/reset path still exists, so future extraction must preserve the early branch. Hardware storage observations confirm accumulated charge surviving normal deep sleep; they do not validate every failure/recovery path.
 
 ### What is safe, and what is not
 
@@ -173,7 +169,7 @@ Verified against INA228 datasheet SLYS021A, Table 7-5 (CONFIG, address `0h`):
 
 `SHUNT_CAL` scales the CHARGE register's interpretation. Writing the same value 819 is harmless; changing it mid-accumulation would make already-accumulated counts ambiguous. Do not change it without resetting.
 
-### Correct autonomous wake ordering — PROPOSED
+### Autonomous wake ordering — IMPLEMENTED shape, overflow qualification pending
 
 ```text
 1.  capture esp_sleep_get_wakeup_cause()
@@ -191,7 +187,7 @@ Verified against INA228 datasheet SLYS021A, Table 7-5 (CONFIG, address `0h`):
 
 Reads come before writes. Nothing touches ADC_CONFIG on a normal wake at all — the INA228 is already configured and already converting, so reconfiguring it would only discard an in-flight conversion.
 
-Step 5 is not optional. `ENERGYOF` and `CHARGEOF` tell us the accumulator rolled over during a long sleep, which at long cadences is a real possibility. `CHARGEOF` clears when CHARGE is read, so it must be read in the same wake. An overflow that is not recorded is silent data corruption.
+Step 5 reflects the current source order, not validated overflow handling. The code and earlier design say `CHARGEOF` clears when CHARGE is read, yet read `DIAG_ALRT` afterwards. Being in the same wake alone does not resolve that ordering contradiction. Datasheet/read-order verification and an overflow test remain required before claiming reliable charge-overflow detection; see BACKLOG. No runtime change was made by this audit.
 
 Step 3 must not become step 3-and-reconfigure. Validating identity is a read; reconfiguring is not.
 
@@ -207,7 +203,7 @@ The autonomous implementation should print the CONFIG readback after a reset so 
 
 ---
 
-## 5. Record format — PROPOSED
+## 5. Record format — IMPLEMENTED layout, semantics qualified below
 
 Fixed-width, little-endian, versioned, CRC-protected. Binary, not CSV — the host converts.
 
@@ -217,16 +213,16 @@ Fixed-width, little-endian, versioned, CRC-protected. Binary, not CSV — the ho
 | 2 | `version` | uint8 | 1 | record schema version, starts at 1 |
 | 3 | `flags` | uint8 | 1 | see below |
 | 4 | `seq` | uint32 | 4 | global monotonic sequence |
-| 8 | `running_charge_uAh` | int64 | 8 | experiment cumulative, µAh |
-| 16 | `running_energy_uWh` | int64 | 8 | experiment cumulative, µWh |
+| 8 | `running_charge_uAh` | int64 | 8 | autonomous-local cumulative, µAh; not NVS experiment totals |
+| 16 | `running_energy_uWh` | int64 | 8 | autonomous-local cumulative, µWh; not NVS experiment totals |
 | 24 | `experiment_id` | uint32 | 4 | |
 | 28 | `boot_id` | uint32 | 4 | power-on session identifier |
 | 32 | `session_elapsed_ms` | uint32 | 4 | ms since this session's cold boot |
 | 36 | `epoch_s` | uint32 | 4 | Unix seconds, 0 when unknown |
-| 40 | `interval_ms` | uint32 | 4 | **actual measured** interval duration |
+| 40 | `interval_ms` | uint32 | 4 | commanded sleep + measured awake duration; drift/overrun limits in Section 3 |
 | 44 | `bus_uV` | uint32 | 4 | microvolts |
-| 48 | `avg_current_uA` | int32 | 4 | microamps, signed |
-| 52 | `avg_power_uW` | int32 | 4 | microwatts, signed |
+| 48 | `avg_current_uA` | int32 | 4 | instantaneous snapshot microamps, signed; name is historical |
+| 52 | `avg_power_uW` | int32 | 4 | instantaneous snapshot microwatts, signed; name is historical |
 | 56 | `temp_mC` | int32 | 4 | millidegrees C |
 | 60 | `interval_charge_uAh` | int32 | 4 | microamp-hours, signed |
 | 64 | `interval_energy_uWh` | int32 | 4 | microwatt-hours, signed |
@@ -238,7 +234,7 @@ Every 4-byte field sits on a 4-byte boundary and both int64 fields sit on 8-byte
 
 Range checks against the hardware: `bus_uV` covers the INA228's 85 V maximum in 85,000,000 counts; `avg_current_uA` covers ±2,147 A; `interval_charge_uAh` covers ±2,147 Ah per interval against roughly 1,500 µAh observed per minute; the int64 running totals cannot realistically overflow.
 
-`flags` bits, IMPLEMENTED. These are the definitions the firmware actually writes:
+`flags` bit layout is implemented. Current code writes only time quality `UNKNOWN`; `SYNCHRONIZED` and `HOLDOVER` are reserved for the unimplemented time-sync behavior:
 
 ```text
 1-0  TIME_QUALITY       two-bit field, see Section 8
@@ -260,6 +256,8 @@ Every value observed in the first hardware runs decodes from this table. `flags=
 `LOGGER STORAGE DUMP` now prints the decoded names alongside the hex, so a dump no longer needs this table to read.
 
 **Bit 7 changed meaning.** It was proposed as `SEQ_GAP`, was never implemented, and was never set in any stored record. A sequence gap is already directly visible by comparing consecutive `seq` values in the log, so the bit carried nothing that could not be recovered another way. Whether a record's experiment attribution is trustworthy cannot be recovered any other way, so bit 7 now carries that. No stored record has bit 7 set, so no existing record changes meaning.
+
+A failed snapshot stores `UINT32_MAX` in `bus_uV` and `INT32_MIN` in current, power and temperature. The dump labels these `SNAPSHOT_UNREAD` (D-042); zero is not the failure marker. Interval averages must be derived from charge/energy and a trustworthy interval duration, not the misleading `avg_*` snapshot field names.
 
 When `EXPERIMENT_UNKNOWN` is set, `experiment_id` holds `0xFFFFFFFF` rather than a plausible number. The flag is authoritative; the sentinel exists so a record that slips past a host's flag check still cannot be silently counted into experiment 0.
 
@@ -308,9 +306,7 @@ At 1 record/minute:
 ÷ 352 blocks (default)   = 26 erases per block per year
 ```
 
-Against a typical 100,000-cycle NOR flash endurance that is roughly **3,800 years**. Even allowing an order of magnitude for metadata write amplification it stays far beyond the hardware's life.
-
-**Flash wear is not a constraint at any cadence under consideration.** It should not shape the design.
+Assuming 100,000 erase cycles and ideal distribution gives roughly **3,800 years**. This is a payload-only planning calculation, not a verified endurance rating for the installed flash or a measured LittleFS erase/write-amplification result. It suggests payload volume alone is unlikely to dominate; it does not establish device lifetime or eliminate the need to account for metadata wear.
 
 The one place wear concentrates is the file's LittleFS metadata pair, which commits on every append. The core already mitigates this: `CONFIG_LITTLEFS_BLOCK_CYCLES=512` makes LittleFS relocate metadata pairs after 512 erase cycles.
 
@@ -325,9 +321,9 @@ Options considered, and what each loses on sudden power loss:
 
 ### Awake time is the real power constraint
 
-Using the measured figures — 28.4 mA awake, 1.07 mA in deep sleep with the INA228 converting:
+Using the measured figures — 28.4 mA awake, 1.07 mA in deep sleep with the INA228 converting — the following is planning arithmetic, not a measured current average. It excludes the current 10-second USB rendezvous and does not describe today's complete wake cycle:
 
-| Cadence | Average current, 3.5 s wake (current boot path) | Average current, 0.3 s wake (optimized) |
+| Cadence | Model: 3.5 s wake (old boot delays) | Model: 0.3 s wake (assumed optimization) |
 | --- | ---: | ---: |
 | 60 s | **2.66 mA** | 1.21 mA |
 | 300 s | 1.39 mA | 1.10 mA |
@@ -395,7 +391,7 @@ Every record carries a two-bit `TIME_QUALITY` field:
 | `SYNCHRONIZED` | clock set this session, recently enough to trust | real |
 | `HOLDOVER` | clock was set this session, but long enough ago that drift is no longer bounded | real, degrading |
 
-The device tracks the session-elapsed time at which the clock was last set and promotes `SYNCHRONIZED` to `HOLDOVER` after a configurable threshold. That threshold is a guess until drift is measured, so it should be a named setting, not a literal.
+The proposed time-sync implementation would track when the clock was last set and promote `SYNCHRONIZED` to `HOLDOVER` after a configurable threshold; current firmware does neither. That threshold is a guess until drift is measured, so it should be a named setting, not a literal.
 
 `epoch_s` and the quality field always travel together. A host must never read `epoch_s` without reading the quality alongside it.
 
@@ -492,9 +488,11 @@ This is a policy choice that should be confirmed rather than assumed.
 
 ---
 
-## 10. Global sequence number — PROPOSED
+## 10. Global sequence number — original proposal, superseded by D-023
 
 Requirements: monotonic across reboot and power loss, no NVS write per record, and **duplicates are worse than gaps.**
+
+The mechanism below is the original proposal, not current allocation behavior. Current code reserves blocks of 64 through NVS key `auto_seq_hw`, scans and validates the log, and lets a provably intact tail override the reserved floor. Otherwise the NVS floor applies. See D-023 and Section 12a; pruning will require revisiting that authority rule.
 
 Two mechanisms together:
 
@@ -507,11 +505,13 @@ Cost: one NVS write per 256 records. At 60-second cadence that is one write per 
 
 ---
 
-## 11. Crash and partial-write recovery — PROPOSED
+## 11. Crash and partial-write recovery — original proposal and current limits
 
 Every record is fixed-length with a magic, a version, and a trailing CRC32, which is what makes the tail recoverable.
 
-Boot recovery:
+The reverse walk below is the original proposal. Current `autoStorageRecover()` scans forward, stops at the first invalid/out-of-order record, and truncates the remainder; valid records beyond corruption are therefore lost (open BACKLOG issue). The no-auto-format rule and reported truncation are implemented.
+
+Proposed boot recovery:
 
 ```text
 1. mount; if mount fails, say so loudly and do not silently format
@@ -551,11 +551,11 @@ These are the things this design could not settle by reading, and each one could
 
 ## 12a. Bench prototype — IMPLEMENTED, storage CONFIRMED on hardware
 
-A bench-only prototype of one sleep/read/store cycle exists in the firmware and has now run on hardware.
+Local sleep/read/store exists and has run on hardware. It graduated to persistent `LOGGER AUTONOMOUS` mode on 2026-09-11 (D-031); deployment in the car remains unvalidated. INA228, connection and NVS are now separate modules; timer-wake policy, RTC state, sessions and LittleFS remain in the sketch at audited revision `d017f7d`.
 
 **Storage is confirmed.** The first run on 2026-09-11 produced eight 72-byte records, a 576-byte log, sequences 1 through 8, and an intact tail on a later cold boot. Read-before-reset ordering, durable append, CRC and tail validation, experiment/storage isolation, and the refusal to auto-format all held.
 
-**Timings are still unmeasured.** The instrumentation was measuring the wrong span and reported a 0.014 ms total for a multi-second cold boot. It is fixed but has not been re-run, so every figure Section 12 waits on is still open.
+**Latest supplied storage observation, 2026-09-23:** `d017f7d`, Experiment 3, 3,272 valid records (235,584 log bytes), sequences 1412–4683, zero trailing bytes, intact tail. This is a dated snapshot. The original 0.014 ms cold-boot timing was invalid; newer claimed-wake transcripts report measurement-work spans (42.376 ms on the NVS smoke), but do not establish the full unattended wake budget or individual storage costs. Section 12 measurements remain open unless separately recorded.
 
 It is a bench test, not production behavior. No Bluetooth, no Wi-Fi, no sync, no ACK, no pruning, no ring buffer.
 
@@ -585,7 +585,7 @@ A stop that is requested but cannot be persisted also prevents deep sleep. Resum
 
 This is a development recovery mechanism, not the final answer. An explicit maintenance button or a BLE management mode remains in [BACKLOG.md](BACKLOG.md).
 
-### Autonomous lifecycle with USB rendezvous - IMPLEMENTED, rendezvous UNPROVEN
+### Autonomous lifecycle with USB rendezvous — IMPLEMENTED, rendezvous hardware-confirmed
 
 ```text
         cold boot (armed)
@@ -615,7 +615,7 @@ This is a development recovery mechanism, not the final answer. An explicit main
         DEEP SLEEP  <-------------------- close open tethered interval
 ```
 
-The timer wake, the durable storage, and the USB rendezvous are all **confirmed on hardware** as of 2026-09-11: a timer wake exposed USB with no physical intervention, a host claimed it, and release returned the board to sleep. Lease expiry and host-session interval accounting were broken in that first run and are fixed but not yet re-tested; see [LAB_NOTES.md](LAB_NOTES.md).
+The timer wake, the durable storage, and the USB rendezvous are all **confirmed on hardware** as of 2026-09-11: a timer wake exposed USB with no physical intervention, a host claimed it, and release returned the board to sleep. Lease expiry and host-session interval accounting were broken in that first run and were fixed. Test B (keepalive/accounting) passed later that day; recent clean-image RELEASE traces also report a 59,750 ms remainder after D-046. No explicit lease-expiry trace was found in this audit; see [LAB_NOTES.md](LAB_NOTES.md).
 
 Sleep policy asks `anyHostConnected()` against a transport bitmask, never USB directly, so Wi-Fi and BLE can hold the board awake later without the state machine changing. Electrical presence never counts as a claim; only the explicit lease does. See [DECISIONS.md](DECISIONS.md) D-025 and D-026.
 
@@ -633,7 +633,7 @@ Once pruning exists this stops holding, because a pruned log no longer carries t
 
 The running charge and energy totals in these records are **test-local**. They live in RTC memory, are recovered from the durable log on cold boot, and are not the NVS experiment totals.
 
-The autonomous path never calls `saveCheckpoint()` and never modifies `experimentId`, `completedInterval`, `runningCharge_mAh`, or `runningEnergy_mWh`. Each record carries `experiment_id` only as read-only context. Experiment 2's accounting cannot be double-counted or erased by this test.
+The autonomous measurement path never calls `saveCheckpoint()` or advances tethered experiment accounting. Claiming a host session resumes the separate tethered checkpoint path. Each record carries `experiment_id` only as read-only context. The latest supplied hardware check preserves Experiment 3; autonomous-local totals must not be read as its tethered checkpoint totals.
 
 Interval accounting and machine-readable CSV output are suspended while the test runs, for the same reasons as the deep-sleep power test.
 
@@ -641,18 +641,18 @@ Interval accounting and machine-readable CSV output are suspended while the test
 
 The branch happens at the top of `setup()`, before any cold-boot initialization, and skips both development delays:
 
-- `delay(1500)` for USB CDC enumeration — nothing to enumerate on battery.
+- `delay(1500)` for USB CDC enumeration — measurement happens first, and the subsequent 10-second rendezvous provides time for USB discovery.
 - `delay(2000)` for ADC settling — the INA228 stayed powered and converting through the whole sleep, so its ADC never stopped. The datasheet's 60 µs start-up figure applies to leaving shutdown mode, which is not what happened.
 
 Cold-boot behavior is unchanged.
 
 ### Deviation from the design's record semantics
 
-One, and it is deliberate: `running_charge_uAh` and `running_energy_uWh` carry **test-local** totals rather than experiment cumulative totals, because of the accounting isolation above. The field layout, byte offsets, and 72-byte size are exactly as specified in Section 5.
+The 72-byte layout and offsets are implemented, but semantic differences matter: running totals are autonomous-local; `avg_current_uA` / `avg_power_uW` contain instantaneous snapshots; time quality is always UNKNOWN; failed snapshots use D-042 sentinels; interval duration uses commanded sleep plus awake time and has the known overrun limitation. Section 5 now labels these directly.
 
 ### What still needs hardware
 
-Everything in Section 12 remains open. **No timing value has been recorded yet**, because the first run's instrumentation was wrong.
+The Section 12 characterization questions remain open. Claimed-wake measurement-work and host-session timings exist, but neither is the complete unattended timer-wake budget. See the 2026-09-23 LAB_NOTES addendum for the observed figures and their scope.
 
 Timing output is now split so the answers are readable: `Wake -> I2C ready`, `INA accumulated read`, `INA snapshot`, `LittleFS mount`, `Record append total` broken into open / write / flush+close, `Accumulator reset`, `Total work (no Serial)`, and a total whose label names the path it measured. Storage scan and recovery time is reported on the cold-boot path, which is the only path that scans.
 
@@ -662,7 +662,9 @@ Timing output is now split so the answers are readable: `Wake -> I2C ready`, `IN
 
 ## 13. Recommended first implementation milestone
 
-Deliberately narrow. Storage first, sync second.
+Original proposed order, retained as history. Steps 1–5 now exist (with the recovery/sequence differences above), and autonomous deep sleep in step 7 shipped before the sync API in step 6. `LOGGER STORAGE INFO/DUMP` are inspection commands, not completion of step 6. Sync/ACK/reclamation remain future work.
+
+The original plan was deliberately narrow: storage first, sync second.
 
 1. Mount LittleFS on the existing `spiffs` partition. No partition-table change.
 2. Add `autonomous_interval_seconds` in NVS, default 60, as the single cadence authority.
@@ -672,7 +674,7 @@ Deliberately narrow. Storage first, sync second.
 6. Add `INFO` and `SYNC FROM` over the existing serial command path. `ACK` and reclamation come after.
 7. Only then restructure the wake path for autonomous deep-sleep operation, using the ordering in Section 4.
 
-Steps 1–6 are testable at a desk with the existing tooling and cannot lose experiment data. Step 7 is where the accumulator hazard becomes live, and it should not be attempted until the record format and recovery are proven.
+The original plan required desk validation of storage and recovery before restructuring the wake path. That wake path is now implemented; this historical ordering is not a pending instruction to reimplement it.
 
 ---
 

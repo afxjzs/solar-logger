@@ -6,6 +6,315 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-23: Telemetry extracted into a module - NOT hardware validated
+
+**No hardware was touched.** Nothing was uploaded or committed, Experiment 3 was
+not reset, storage was not cleared, and no serial port was opened. Every result
+below is a host test, a source audit, or a compile. **This image has not run on
+the board.**
+
+The fourth modularization stage, and stage 5 of the order in
+[BACKLOG.md](BACKLOG.md). The machine-readable CSV formatting moved into
+`Arduino/solar-logger/telemetry.h` and `telemetry.cpp`. Runtime behavior is
+intended to be unchanged, and nothing below found a change. The boundary is
+D-051: the module owns how a line is spelled, and never when one is emitted.
+
+### What moved, and what deliberately did not
+
+Six telemetry responsibilities were found in the sketch. Five moved whole, each
+renamed to say which line it builds. One was split, because it mixed
+measurement policy and acquisition with the row construction:
+
+| Split | Moved to the module | Stayed in the sketch |
+| --- | --- | --- |
+| `printLiveSample()` | the `CSV_SAMPLE` row construction, as `telemetryPrintSample()` | the `sleepPowerTestRunning` suppression (D-012), the `readSensor()` call and its error line, and the derivation of `elapsed_seconds` from `completedInterval` and `millis()` |
+
+| Was | Is now |
+| --- | --- |
+| `printCsvHeader()` | `telemetryPrintHeader()` |
+| `printCsvRow()` | `telemetryPrintInterval()` |
+| `printExperimentStartEvent()` | `telemetryPrintExperimentStart()` |
+| `printExperimentResumeEvent()` | `telemetryPrintExperimentResume()` |
+| `printSleepTestEvent()` | `telemetryPrintSleepTestEvent()` |
+
+`CSV_HEADER` moved with `CSV_DATA`, although the module table gave the row only
+the three data lines: the header names the data row's fields and the two are one
+fact. The blank line and the `[CSV] Machine-readable interval logging enabled.`
+line that have always preceded it moved with it, so both call sites emit the
+same three lines as before.
+
+Nothing else moved. The interval close, the experiment lifecycle, the power-test
+state machine, the accounting-suspension predicate, and the command protocol all
+stayed. `CMD_ACK`, `CMD_RESULT` and the bounded protocol writer were not touched,
+and the 100 ms protocol deadline and `Serial.setTxTimeoutMs(0)` are unchanged.
+
+### Four hidden globals became parameters
+
+`printCsvRow()` read `experimentId`, `runningCharge_mAh` and
+`runningEnergy_mWh` out of the sketch. All three event printers read
+`experimentId`, and `printExperimentResumeEvent()` also read
+`completedInterval`. Those four globals are all passed in now. No global was
+exported, and no `extern` was added. This is the D-050 rule applied again.
+
+The two row types, `TelemetrySample` and `TelemetryInterval`, list their members
+in wire order. They repeat the four measurement fields rather than taking a
+`SensorReading`, which keeps the module's only dependency on Arduino, as the
+module table requires. The alternative was thirteen positional arguments, seven
+of them `double`.
+
+### The move was audited as a move
+
+Same method as the three earlier stages, over the tokenizer in
+`tests/firmware_source.py`, comments stripped:
+
+- The sketch's tokens equal `HEAD`'s with one 388-token run deleted - exactly
+  the five function definitions and nothing else - plus the `CSV_SAMPLE` print
+  chain inside `printLiveSample()`, and 10 call sites renamed with their new
+  explicit arguments. The only insertion that is not an argument is
+  `#include "telemetry.h"`.
+- **Four of the five moved functions have token-identical bodies**:
+  `telemetryPrintHeader`, `telemetryPrintExperimentStart`,
+  `telemetryPrintExperimentResume` and `telemetryPrintSleepTestEvent`. The last
+  is identical despite gaining a parameter, because the body already printed
+  `experimentId` in that position.
+- **`telemetryPrintInterval` is identical after substituting the struct field
+  for the former global or loose parameter**, and nothing else.
+- **Every emitted `Serial` call matches, in order, with its precision
+  argument**: 3, 2, 4, 6 and 26 calls across the five, and 12 for the
+  `CSV_SAMPLE` chain. The one difference in the whole comparison is a name: the
+  sketch's local `experimentElapsedSeconds` is the struct's `elapsedSeconds`.
+  Same position, same precision, same value, still computed in the sketch.
+
+The audit script was a scratch file for this stint and is not in the repository.
+
+### The tests
+
+`tests/test_characterization_telemetry.py`, 23 tests, freezing the wire format.
+It compiles the module's real source on the host against a recording `Serial`,
+runs it, and asserts the exact lines for one fixed set of inputs; then it feeds
+those same lines to `app/solar_logger.py`'s own `parse_sample()`,
+`parse_interval()` and `parse_event()`.
+
+**The golden lines were captured from the monolith before the move.** The suite
+was written first, run green against unmodified `HEAD` source, and then run
+green again after the extraction with `GOLDEN` and `INPUTS` untouched. Three
+things in the file did change with the move, and all three are plumbing rather
+than contract: which function names the harness extracts, how the driver calls
+them, and one constant, `TELEMETRY_SOURCE`, naming the file every CSV line is
+built in. A fourth change is an assertion that legitimately follows the code -
+the interval close now builds a `TelemetryInterval` before emitting it, and the
+test pins that ordering against the running totals and the NVS checkpoint.
+
+One limit is stated in the file rather than left implicit: the stand-in
+`Serial` carries a copy of `Print::printFloat` from the ESP32 core 3.3.11,
+because Arduino does not format a double the way `printf` does - it adds half of
+the last requested place and truncates digit by digit. The copy differs from the
+device only where `unsigned long` width matters, which is past the `ovf` cutoff
+both apply at 4294967040.0, and every asserted value is far inside it.
+
+Telemetry had **no test coverage of any kind** before this stint: no test in the
+suite mentioned a CSV prefix or any of the six functions.
+
+**The existing suite was not edited.** 226 passed and 1 xfailed before the move
+and after it; the run with the new module is 249 passed, 1 xfailed. The xfail is
+the unrelated overrun defect.
+
+### The gate
+
+`tools/check.sh` reported ALL OK before the move and after it.
+
+```text
+pytest             249 passed, 1 xfailed        (226 + 23 new)
+pyright            0 errors, 0 warnings, 0 informations
+py_compile         PASS
+firmware compile   clean, --warnings all, no warnings
+intellisense       5 translation units, all verified
+shell syntax       PASS
+whitespace         PASS
+```
+
+**The editor found the new module by itself**, the second time the D-048
+contract has been exercised by a module created after it was written.
+`git diff tools/ .vscode/` is empty.
+
+```text
+[INTELLISENSE] Project translation units found (5):
+[INTELLISENSE]   connection.cpp
+[INTELLISENSE]   ina228.cpp
+[INTELLISENSE]   nvs_persistence.cpp
+[INTELLISENSE]   solar-logger.ino
+[INTELLISENSE]   telemetry.cpp
+[INTELLISENSE]   telemetry.cpp: compiles cleanly: ALL OK
+                 (direct includes: telemetry.h, Arduino.h)
+```
+
+### Where the 118 bytes went
+
+Measured with `size -A` and `nm -S` on both images, built from a clean worktree
+at `d017f7d` and from the current tree. Flash 1,102,337 -> 1,102,455.
+
+**Global variables are unchanged at 36,332 bytes**, which is what "the module
+owns no mutable state" looks like in the link map. `.flash.rodata` is unchanged
+too, so no diagnostic string was duplicated. `.flash.text` +118 is the whole
+delta; every other changed section is debug info, which is not flashed.
+
+`.flash.text`, per symbol. This build has no LTO, so a call that used to be
+inside one translation unit can no longer be inlined:
+
+| Group | Delta |
+| --- | ---: |
+| the four functions that moved whole and unchanged | 0 |
+| `printCsvRow` 458 -> `telemetryPrintInterval` 360 | -98 |
+| `printLiveSample` 346 -> 216, plus `telemetryPrintSample` 180 | +50 |
+| call sites now passing what they used to leave implicit | +166 |
+| **total** | **+118** |
+
+- `telemetryPrintHeader` (56), `telemetryPrintExperimentStart` (50),
+  `telemetryPrintExperimentResume` (80) and `telemetryPrintSleepTestEvent` (108)
+  are each **byte-for-byte the same size** as the function they replaced.
+- **`telemetryPrintInterval` got 98 bytes smaller.** Reading thirteen fields
+  through one struct pointer beats three globals at absolute addresses plus
+  seven loose parameters.
+- `closeMeasurementInterval()` +128 is that struct being filled on the stack
+  before the call, which is where those 98 bytes went and a little more.
+- The remaining +38 is six call sites passing `experimentId` or
+  `completedInterval` explicitly instead of the callee loading the global:
+  `setup()` +12, `stopAllPowerTests()` +8, `enterSleepPowerTestDeepSleep()` +8,
+  `armSleepPowerTest()` +8, `resetExperiment()` +4, `armWifiPowerTest()` -2.
+
+### Firmware identity unchanged
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+A move changes no command, record, cadence rule or protocol, so the version
+policy calls for no bump. The revision that `tools/upload.sh` injects will
+differ, and that is what identifies this source.
+
+### Hardware acceptance - PENDING, nothing below has been run
+
+This stage changes what reaches `app/solar_logger.py`, so the check is whether
+the host still parses what the board sends. After a deliberate
+`tools/upload.sh`, send each command on its own and expect exit 0 from each.
+Everything after "PREDICTED" is read from the source, not observed.
+
+1. The smoke test in [BACKLOG.md](BACKLOG.md). PREDICTED: a real revision hash,
+   `Tail status: INTACT` with at least as many records as before, and
+   `CMD_RESULT,...,OK` for HOLD, KEEPALIVE and RELEASE.
+2. Stage 5's own check, with `uv run python app/solar_logger.py` attached.
+   PREDICTED: `CSV_HEADER` at boot with its thirteen field names unchanged, one
+   `CSV_SAMPLE` per second parsed without a field-count warning, and one
+   `CSV_DATA` at the interval close. A `[WARNING] CSV_... field count is wrong`
+   from the host is the failure this stage would produce, and it would be loud.
+3. `data/samples.csv` and `data/intervals.csv` gain rows under their **existing**
+   headers. PREDICTED: no header-mismatch exit from `open_csv_file()`, which
+   fails closed on a changed schema (D-005). That check is the host's own and
+   was not modified.
+4. One `CSV_EVENT`. PREDICTED: `EXPERIMENT_RESUME` at boot carrying the current
+   experiment id and completed-interval count, written to `data/events.csv` with
+   the interval number in the `detail` column.
+5. Compare one captured `CSV_DATA` row against a row captured before the upload.
+   PREDICTED: same field count, same column order, same decimal places in each
+   column - 3 for elapsed seconds, 6 for V/mA/mW and the averages, 4 for
+   temperature, 9 for the charge and energy columns.
+
+## 2026-09-23: Documentation audit and supplied hardware validation addendum
+
+**Evidence, not a new hardware run.** This audit read the attachments in
+[Audit BMW Logger Project](chatgpt-conversation://6a972711-ff64-83e8-ad38-d78bc4c0e22a)
+and compared them with repository revision `d017f7d`, current source, tests and
+tooling. No serial port was opened, no upload was performed, Experiment 3 was
+not reset and storage was not cleared. Older entries below retain their
+original end-of-stint status; “pending” there is historical and is superseded
+only by the specific observations recorded here. Discovery-time source line
+links can move during modularization; named functions remain the lookup key.
+
+### Observed in supplied hardware transcripts
+
+- INA228 image: clean `4a096d9`; this supplies transcript evidence for the
+  earlier reported smoke-test addendum. Connection image: clean `8776ba0`,
+  `0.3.0-dev`, build ID `solar-logger-protocol-ack-v3`. The connection trace
+  shows NONE before claim, USB claimed on HOLD, session status, successful
+  KEEPALIVE and RELEASE, and USB release before sleep.
+- NVS image: clean `d017f7d`, same version/build ID. After upload, `STATUS`
+  restored Experiment 3, completed interval 52, charge **6.068727 mAh**, energy
+  **83.561586 mWh**, with accounting ACTIVE.
+- Its storage snapshot: **3,272 valid 72-byte records**, log **235,584 bytes**,
+  sequences **1412–4683**, **0 trailing bytes**, tail **INTACT**. Filesystem:
+  **1,441,792 total / 245,760 used / 1,196,032 free bytes**. The displayed
+  16,611-record / 11-day remainder is a free-space estimate, not a fill test or
+  a live reading. Storage was not full at this observation.
+- Follow-up POWER TEST STATUS: neither test armed; INA228 continuous conversion.
+  HOLD, KEEPALIVE and RELEASE each received machine ACK and `CMD_RESULT,...,OK`.
+  RELEASE closed a real **1.757 s** interval and wrote schema **2**, experiment
+  **3**, interval **53**, charge **6.068421 mAh**, energy **83.565454 mWh**,
+  followed by `NVS CHECKPOINT SAVED SUCCESSFULLY`.
+- RELEASE armed the 250 ms grace, delivered its OK result, and reported
+  **59,750 ms** remaining before sleep; the host classified the following
+  disconnect as expected. This confirms the corrected D-046 RELEASE path on
+  hardware. It is a firmware-reported commanded remainder, not an independent
+  measurement of actual sleep duration or clock accuracy.
+- Next autonomous status: ON, armed YES, running YES, cadence **60 s**, boot
+  **29**, RTC valid YES, next sequence **4746**, reserved through **4804**, and
+  new-record experiment context **3**. Tethered `STATUS` on that unclaimed
+  timer wake printed zero experiment/interval/totals with accounting SUSPENDED.
+  Source explains why: the early wake path reads experiment context separately
+  and bypasses the tethered checkpoint load. Those zeroes do not establish NVS
+  loss, nor does this status independently reread the new interval-53 checkpoint.
+- Claimed-wake traces include measurement-work timings: **51.438 ms** on
+  `8776ba0` and **42.376 ms** on the NVS follow-up. These are individual reported
+  spans, not an unattended wake budget, a before/after performance comparison,
+  or a breakdown of LittleFS costs.
+
+The small negative charge change on interval 53 accompanies measured negative
+current; monotonically increasing charge was an incorrect acceptance criterion.
+Energy rose. The snapshot establishes preservation of Experiment 3 at that time,
+not its current interval or totals while the device continues running.
+
+### What remains unproven or unimplemented
+
+No explicit no-keepalive lease-expiry trace was found in the reviewed
+attachments. That path shares tested scheduler arithmetic, but the RELEASE
+observation does not prove it independently. Pending failure-injection checks,
+long-session timing, full storage, RTC drift, and full unattended wake/power
+characterization remain open. The NVS restore/write smoke does not exercise NVS
+failure handling or a cold-boot reread of the newly saved interval 53.
+
+Sync, storage ACKs, acknowledged-sequence state, reclamation, ring storage and
+SET_TIME are absent. The 10-second-cadence boundary/accumulator overrun issue
+remains the one strict `xfail`. The two NVS read-default defects remain open.
+A separate DIAG_ALRT ordering contradiction is recorded as a source question in
+BACKLOG, not a proven hardware overflow failure.
+
+### Local validation and documentation changes
+
+Fresh host run in this audit: `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m pytest -p no:cacheprovider` — **226 passed, 1 xfailed in 38.48 s**. This includes
+the real IntelliSense scratch-sketch scenario; it does not open serial. No new
+tests or runtime changes were made.
+
+The supplied `d017f7d` transcript, rather than a new full gate run by this audit,
+records `tools/check.sh` ALL OK: 226 passed / 1 xfailed, pyright 0 errors / 0
+warnings, py_compile pass, clean Arduino compile with `--warnings all`, shell
+checks and whitespace pass. IntelliSense discovered and compiled four project
+units automatically: `connection.cpp`, `ina228.cpp`, `nvs_persistence.cpp`, and
+`solar-logger.ino`. Check build: 1,102,337 bytes flash, 36,332 bytes globals;
+revision-injected upload build: 1,102,281 bytes flash, same globals.
+
+The canonical validation command remains `tools/check.sh`; uploads use
+`tools/upload.sh`, serial commands use `tools/send.sh`, and editor staleness is
+checked with `tools/intellisense.sh --check`. KEEPALIVE/RELEASE never wait;
+explicit `--wait` on either is refused. A queued command through the running
+logger has no completion result in the sender, even if its exit status is 0.
+
+The audit corrects current status, old echo-based instructions, partition usage,
+record-field semantics, storage-full wording and historical proposal labels in
+INDEX, PROJECT, DECISIONS, BACKLOG, STORAGE_SYNC_DESIGN and README. Firmware
+identity remains **0.3.0-dev / solar-logger-protocol-ack-v3**; documentation does
+not remove the firmware's dev suffix. Telemetry extraction is in progress in a
+separate task; this audit neither edits its code nor declares it complete.
+
 ## 2026-09-23: NVS persistence extracted into a module - NOT hardware validated
 
 **No hardware was touched.** Nothing was uploaded or committed, Experiment 3
@@ -475,9 +784,11 @@ brief does not mention the records' flags or a nonzero `dQ_uAh`. Step 5 is not
 mentioned. The RELEASE figure is also the first check listed under the
 scheduler entry below, which predicted a remainder just under 59,750 ms.
 
-**No hardware was touched.** Nothing was uploaded or committed, Experiment 3
-was not reset, and storage was not cleared. Every result below is a host test,
-a source audit, or a compile. **This image has not run on the board.**
+**Original extraction-stint status (before the smoke-test addendum above):**
+no hardware was touched, nothing was uploaded or committed, Experiment 3 was
+not reset and storage was not cleared. The extraction results below are host
+tests, a source audit and a compile; the image had not yet run on the board at
+the time they were recorded.
 
 The first modularization stage. The INA228 driver moved out of
 `solar-logger.ino` into `Arduino/solar-logger/ina228.h` and `ina228.cpp`.

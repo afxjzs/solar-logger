@@ -1,5 +1,9 @@
 # Decisions
 
+Entries retain the context and examples from when they were adopted. Later
+amendments identify superseded behavior; current operating instructions and
+firmware identity are in PROJECT, and dated hardware evidence is in LAB_NOTES.
+
 ## D-001: `data/` is live telemetry
 
 The Python logger writes current telemetry to `data/samples.csv`, `data/intervals.csv`, and `data/events.csv`. `logs/` remains archive/legacy data. New code and documentation must use `data/` for live polling output.
@@ -126,7 +130,7 @@ The wake, accounting, and storage cadence of the autonomous logger is governed b
 
 No second hard-coded cadence may exist in the autonomous path. The existing `MEASUREMENT_INTERVAL_MS` belongs to the host-tethered logger and must not be reused as the autonomous cadence.
 
-Every durable record stores the **actual measured** interval duration rather than the configured one, so a log spanning a cadence change, a late wake, or a reboot mid-interval remains correct and self-describing.
+Every durable record must store its interval duration rather than merely the configured cadence. Current duration uses commanded sleep plus measured awake time, so it inherits RTC drift and is not independent wall-clock evidence. The known overrun branch violates the intended accumulator/boundary alignment; see D-032 and the strict `xfail` in BACKLOG.
 
 ESP32 wake cadence and INA228 conversion cadence are separate concepts. The INA228 continues converting and accumulating CHARGE and ENERGY in hardware while the ESP32 sleeps, so a longer wake interval costs temporal resolution of the voltage, current, power, and temperature snapshots without costing accuracy of integrated charge and energy.
 
@@ -150,13 +154,15 @@ A host may retrospectively anchor records written before a sync, using the sessi
 
 Clock drift and periodic resynchronization are normal operating considerations, not failure modes. The RTC slow clock is the internal RC oscillator (`CONFIG_RTC_CLK_SRC_INT_RC=y`), calibrated at boot but not crystal-backed, and nothing in this project may describe it as precision wall-clock hardware. No absolute-time accuracy figure may be published in documentation, firmware output, or host tooling until drift on this board has been measured.
 
+**Implementation status, 2026-09-23:** records currently use only `UNKNOWN` with `epoch_s = 0`. `SET_TIME`, clock-age tracking, synchronized/holdover transitions, and host anchoring are not implemented. The statements above define the intended contract.
+
 No external RTC is required or added. One becomes worth considering only if a measured drift figure, or a real need for wall-clock continuity across power loss, justifies it.
 
 ## D-020: Accumulators are read before they are reset
 
 The INA228 hardware CHARGE and ENERGY registers hold the integral of the entire period since they were last cleared, including any period during which the ESP32 was in deep sleep. Any code path that resets them without first reading them destroys that integral, and destroys it silently.
 
-The current `setup()` does exactly this: it calls `resetInaAccumulators()` and never reads ENERGY or CHARGE. That is harmless only because both deep-sleep power tests suspend interval accounting. The autonomous wake path must not inherit it.
+The pre-autonomous `setup()` did exactly this. Current cold-boot initialization still resets the accumulators, but a normal armed timer wake takes the early branch into `runAutonomousWakeCycle()` first: read, durable append, then reset. RTC-loss recovery deliberately discards an unknown-duration interval with diagnostics. The original hazard is not the normal autonomous wake path today.
 
 An autonomous wake reads accumulators, reads the `DIAG_ALRT` overflow flags that qualify them, builds and durably stores the record, and only then resets the accumulators for the next interval. Reads come before writes.
 
@@ -173,6 +179,10 @@ On this firmware the window opens on a true cold boot, lasts `AUTONOMOUS_COLD_BO
 A stop that is requested but cannot be persisted must not be followed by deep sleep. Sleeping after an explicit stop request is the same failure this window exists to prevent, so the firmware refuses to sleep and states that the flag is still armed.
 
 ## D-022: A command is acknowledged only when the firmware says so
+
+**Historical implementation below:** echo-based acknowledgement was replaced by
+D-036 machine ACK/RESULT, D-041 completion semantics, and D-045 missing-ACK
+handling. The logger-owned queue still cannot report device completion.
 
 Writing bytes to a serial device proves that the host accepted them. It proves nothing about whether the firmware read, parsed, or executed them.
 
@@ -266,6 +276,10 @@ Host abstractions mirror the firmware's transport model rather than assuming USB
 
 ## D-030: A command echo proves parsing, not success
 
+**Historical implementation below:** the distinction remains valid, but the
+host now derives session outcomes from `CMD_RESULT`, not the listed human
+lines. See D-036, D-041 and D-045.
+
 The firmware prints `[COMMAND] Received: <COMMAND>` from `processCommand()` **before** dispatching, so it echoes a command it is about to refuse. `LOGGER SESSION HOLD` on a board that is not in autonomous mode is echoed and then rejected.
 
 Treating the echo as success would leave the host convinced it holds a lease that was never granted, reporting a session the board does not have, and skipping the reconnect logic that should have run.
@@ -307,6 +321,13 @@ measured duration. This avoids both silent drift and an immediate-wake loop.
 The accumulator read, durable append, and accumulator reset ordering remains
 unchanged. A rendezvous claim still transitions to the ordinary host-session
 path rather than changing the autonomous record cadence.
+
+**Known exception, found 2026-09-18 and still open:** the overrun branch moves
+the boundary without resetting the accumulators. The next record understates
+the duration its charge covers; every unclaimed 10-second cadence reaches this
+branch. The full-cadence fallback avoids an immediate-wake loop but does not
+make that next record correct. BACKLOG and the strict schedule-test `xfail`
+track the required correction; this decision is not proof it has been fixed.
 
 ## D-033: `session_elapsed_ms` is monotonic within `boot_id`
 
@@ -790,7 +811,10 @@ unbuilt BACKLOG item, not something the ACK could supply.
 ## D-046: The scheduler adds only the time since the retained clock was exact
 
 Found by reading on 2026-09-18 and fixed the same day. Compiled and tested on
-the host. **Not uploaded, and not verified on hardware.**
+the host. **At the end of that stint:** not uploaded or hardware verified.
+Subsequent hardware transcripts show the corrected RELEASE sleep remainder of
+59,750 ms, including clean `d017f7d`; the 2026-09-23 LAB_NOTES addendum records
+that limited confirmation. Explicit lease-expiry timing remains unrecorded.
 
 **The defect.** Two RTC-retained values carry autonomous time across deep
 sleep. `rtcAutoSessionElapsedMs` is the session time at one known instant.
@@ -803,9 +827,9 @@ the handoff's own "now", which includes the awake time, and the scheduler then
 added the awake time again.
 
 The consequences below were computed by running the firmware's own arithmetic
-on the host with the defect restored. None was observed on the board, and per
-[LAB_NOTES.md](LAB_NOTES.md) no image containing the 2026-09-16 change that
-routed handoffs through the retained clock has been uploaded.
+on the host with the defect restored. None of those defective outcomes was observed on the board. At the time of
+this source investigation, LAB_NOTES recorded no upload of the 2026-09-16
+change that routed handoffs through the retained clock.
 
 - A RELEASE 28 s after the wake's `setup()` entry commanded 31,750 ms of sleep
   instead of 59,750 ms. The next record still claimed 60,150 ms, although only
@@ -867,7 +891,7 @@ meaning which clock readings the scheduler and the handoff pass in and what they
 store, is still pinned by source tests. D-043 is amended to record the
 exception.
 
-**Identity.** The version stays `0.3.0-dev`. HEAD records `0.2.0-dev`, and
+**Identity at the time of this stint.** The version stayed `0.3.0-dev`. HEAD then recorded `0.2.0-dev`, and
 `0.3.0-dev` exists only in the uncommitted working tree and has never been
 uploaded, so this change joins it rather than bumping again. The build ID is
 unchanged, because the protocol is untouched.
@@ -986,8 +1010,10 @@ was decided.
 
 ## D-049: The connection module holds transport claims and nothing else
 
-Set by the second modularization stage on 2026-09-18. Compiled and host-tested;
-**not validated on hardware**.
+Set by the second modularization stage on 2026-09-18. Compiled and host-tested
+at extraction; the supplied `8776ba0` hardware transcript later confirmed USB
+claim, session status, keepalive and release. Recorded in the 2026-09-23
+LAB_NOTES addendum; this is not a lease-expiry or multi-transport test.
 
 `connection.h` / `connection.cpp` answer one question: which transport has a
 host claimed? They hold the transport bitmask, claim and release, and
@@ -1023,8 +1049,10 @@ when no session is held (D-031).
 ## D-050: The NVS module owns how a value is stored, never when it changes
 
 Set by the third modularization stage on 2026-09-23, which is stage 1 of the
-order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested; **not validated on
-hardware**.
+order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested at extraction;
+checkpoint restore and write were subsequently smoke-tested on hardware
+revision `d017f7d`, preserving Experiment 3. See the 2026-09-23 LAB_NOTES
+addendum for observations and untested failure paths.
 
 `nvs_persistence.h` / `.cpp` hold the single `Preferences` object, the
 `solarlog` namespace, every key name, `NVS_SCHEMA_VERSION`, and the typed reads
@@ -1083,6 +1111,85 @@ the caller, which runs the check on the default. The two agree only while the
 default cadence is in range, so a `static_assert` in the sketch fails the build
 if it ever stops being. Everything else in the stage recomposes token for token
 against `HEAD`.
+
+## D-051: Telemetry owns how a line is spelled, never when it is emitted
+
+Set by the fourth modularization stage on 2026-09-23, which is stage 5 of the
+order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested; **not validated on
+hardware**.
+
+`telemetry.h` / `.cpp` hold the machine-readable CSV lines: `CSV_HEADER`,
+`CSV_SAMPLE`, `CSV_DATA`, and the three `CSV_EVENT` shapes. They own the prefix,
+the fields, their order, their precision, and the commas between them. They
+decide nothing about what happened, when a line should be emitted, or which
+values belong to it. Those stay in `solar-logger.ino` and call down (D-047).
+
+The module does not know that an interval lasts sixty seconds, that a sample is
+taken once a second, that a deep-sleep test suspends the sample row, or that an
+experiment can be reset. It is handed finished numbers and prints them.
+
+**The wire format is a contract, so it is pinned as bytes.** `app/solar_logger.py`
+parses these lines by position and refuses a row whose field count is wrong.
+`tests/test_characterization_telemetry.py` compiles the module's real source on
+the host against a recording `Serial`, runs it, and asserts the exact lines —
+then feeds those same lines to the host's own parsers. The golden strings were
+captured from the monolith **before** the move and did not change during it.
+That is the difference between a test that freezes behavior and one that
+restates the new code.
+
+**The module holds no mutable state, and that was measured rather than claimed.**
+Everything printed arrives as a parameter. Global variables are unchanged at
+36,332 bytes across the move, which is what "owns no state" looks like in the
+link map.
+
+**A hidden global becomes a parameter, as in D-050.** Four sketch globals were
+read straight out of the sketch by the code that printed them: `printCsvRow()`
+took `experimentId`, `runningCharge_mAh` and `runningEnergy_mWh`; all three
+event printers took `experimentId`, and `printExperimentResumeEvent()` also took
+`completedInterval`. Every one of them is passed in now. No global was exported,
+and no `extern` was added.
+
+**The row structs repeat the measurement fields instead of taking a
+`SensorReading`.** Doing otherwise would make telemetry depend on the INA228
+driver for four doubles it only prints, and the module table in
+[BACKLOG.md](BACKLOG.md) puts `telemetry` on Arduino alone. `TelemetrySample`
+and `TelemetryInterval` list their members in wire order, so the line and the
+type that describes it cannot drift apart. Thirteen positional arguments, seven
+of them `double`, was the alternative: a caller could transpose two and nothing
+would say so.
+
+**Three event functions rather than one `TelemetryEvent`.** The three lines are
+genuinely different shapes and the host depends on that: it splits an event into
+a type, an experiment id, and a tail it keeps whole. `EXPERIMENT_START` has no
+tail, which is why the host's minimum is three fields. One struct with an
+optional detail would have had to invent a way to say "no tail". This is the
+case the brief for the stage called out: a broad abstraction is not an
+improvement when the current arguments are simpler.
+
+**`CSV_HEADER` moved with `CSV_DATA`,** because the header names the data row's
+fields and the two are one fact. The blank line and the human-readable
+`[CSV] Machine-readable interval logging enabled.` that have always preceded it
+moved with it, so the emission at both call sites is unchanged byte for byte.
+
+**`printLiveSample()` was split rather than moved,** the same cut D-050 made
+twice. The suppression rule for the deep-sleep test (D-012), the `readSensor()`
+call, and the derivation of `elapsed_seconds` from `completedInterval` and
+`millis()` are all measurement policy and stayed in the sketch. Only the row
+construction moved.
+
+**The command protocol is not telemetry, and the boundary is now two files
+rather than a convention.** `CMD_ACK` and `CMD_RESULT` go through the bounded
+protocol writer with its own 100 ms deadline (D-036) and stay in
+`solar-logger.ino`. Telemetry uses ordinary `Serial` output, which under
+`Serial.setTxTimeoutMs(0)` is dropped rather than waited on when nothing is
+draining the port (D-027). The two have different delivery guarantees on
+purpose, and neither may acquire the other's. Nothing about either was changed
+by this stage.
+
+**Precision literals were left inline.** Naming them would have been a
+readability change riding inside a move, and it would have broken the
+token-for-token recomposition the audit depends on. The per-field precisions are
+explained in a comment in `telemetry.cpp` and pinned by a test.
 
 ## Project practice
 

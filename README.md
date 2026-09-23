@@ -12,7 +12,7 @@ The measured system is a solar panel maintaining a 12 V lead-acid battery. On th
 
 ## What it does
 
-The firmware stays awake and highly observable. It emits three kinds of machine-readable line over serial, alongside human-readable diagnostics:
+The firmware supports autonomous sleep/wake logging to LittleFS and awake, host-tethered telemetry. In tethered operation it emits three kinds of machine-readable line over serial, alongside human-readable diagnostics:
 
 | Message | Cadence | Contents |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ The firmware stays awake and highly observable. It emits three kinds of machine-
 | `CSV_DATA` | 1/minute | completed interval using the INA228's **hardware** CHARGE and ENERGY accumulators |
 | `CSV_EVENT` | on change | experiment lifecycle and power-test markers |
 
-Experiment state — id, interval number, running charge and energy — is checkpointed to ESP32 NVS every interval, so it survives power loss.
+Tethered experiment state — id, interval number, running charge and energy — is checkpointed to ESP32 NVS every interval. Autonomous mode stores separate 72-byte CRC-protected interval records in LittleFS while the INA228 keeps accumulating through ESP32 sleep. Local storage and USB sessions are hardware smoke-tested; sync, storage ACKs, reclamation and a storage-full policy remain unbuilt. See [docs/PROJECT.md](docs/PROJECT.md) for the current baseline and limitations.
 
 The Python host logger discovers the board, prints everything the firmware says, adds a timezone-aware host timestamp to every row, writes durable CSVs, and drives a four-panel live plot with zoom, follow, and hover inspection.
 
@@ -63,7 +63,11 @@ tools/check.sh
 
 ```text
 HELP
-STATUS
+STATUS | VERSION
+LOGGER AUTONOMOUS ON | OFF | STATUS
+LOGGER INTERVAL <seconds>   10–3600 while disarmed; use 60 s for current baseline
+LOGGER STORAGE INFO | DUMP
+LOGGER SESSION HOLD | KEEPALIVE | RELEASE | STATUS
 WIFI ON | WIFI OFF | WIFI STATUS
 POWER TEST WIFI              repeating Wi-Fi on/off power test
 POWER TEST SLEEP             deep-sleep test, INA228 keeps converting
