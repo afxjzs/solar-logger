@@ -62,16 +62,41 @@ constexpr uint8_t REG_CONFIG = 0x00;
 constexpr uint8_t REG_ADC_CONFIG = 0x01;
 constexpr uint8_t REG_SHUNT_CAL = 0x02;
 
-// Diagnostic flags and alert register. Datasheet SLYS021A Table 7-9.
+// Diagnostic flags and alert register. Datasheet SLYS021A Table 7-16.
+// (An earlier revision of this comment cited Table 7-9, which is a different
+// register. Verified against SLYS021A, January 2021, revised May 2022.)
 //
-// The three bits that decide whether a completed interval can be trusted:
+// The three bits that decide whether a completed interval can be trusted, with
+// the datasheet's clear conditions quoted because they are the whole problem:
 //
-//   bit 11  ENERGYOF   ENERGY register overflowed
-//   bit 10  CHARGEOF   CHARGE register overflowed; CLEARS WHEN CHARGE IS READ
-//   bit  9  MATHOF     arithmetic overflow; current and power may be invalid
+//   bit 11  ENERGYOF   ENERGY register overflowed.
+//                      "Clears when the ENERGY register is read."
+//   bit 10  CHARGEOF   CHARGE register overflowed.
+//                      "Clears when the CHARGE register is read."
+//   bit  9  MATHOF     arithmetic overflow; current and power may be invalid.
+//                      "Must be manually cleared by triggering another
+//                      conversion or by clearing the accumulators with the
+//                      RSTACC bit."
 //
-// CHARGEOF clearing on read matters: it must be sampled in the same wake that
-// reads CHARGE, or the evidence is gone.
+// CONSEQUENCE, AND THE RULE FOR EVERY CALLER. Reading ENERGY or CHARGE destroys
+// its own overflow flag. Sampling DIAG_ALRT in the same wake is NOT sufficient:
+// it must be sampled BEFORE the accumulator reads, or ENERGYOF and CHARGEOF are
+// already zero and read as "no overflow".
+//
+// This was a live defect until 2026-09-23: runAutonomousWakeCycle() read the
+// accumulators first, so AUTO_FLAG_INA_ACCUM_OF could never be set by a real
+// overflow and every record claimed a clean interval. The order is now DIAG_ALRT
+// first, and test_characterization_record.py pins it so a later file move cannot
+// quietly restore the old order.
+//
+// Any NEW caller that reads these accumulators owns the same ordering
+// obligation. closeMeasurementInterval(), the tethered interval close, still
+// does not read DIAG_ALRT at all - a known gap, not a false claim, tracked in
+// docs/BACKLOG.md. See also docs/DECISIONS.md D-020.
+//
+// MATHOF is not affected by this ordering, because a read does not clear it.
+// In continuous conversion mode it is cleared by the next conversion instead,
+// so it qualifies roughly the latest conversion rather than the whole interval.
 constexpr uint8_t REG_DIAG_ALRT = 0x0B;
 
 constexpr uint16_t DIAG_ENERGYOF_MASK = 0x0800;

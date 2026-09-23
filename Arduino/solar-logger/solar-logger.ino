@@ -3947,27 +3947,32 @@ bool runAutonomousWakeCycle()
 	}
 
 	// --------------------------------------------------------------------------
-	// READ THE COMPLETED INTERVAL FIRST. Nothing above this line resets it.
+	// READ DIAG_ALRT BEFORE THE ACCUMULATORS. THE ORDER IS THE CORRECTNESS.
+	//
+	// Fixed 2026-09-23. This read used to sit below the accumulator reads, which
+	// made it useless: SLYS021A Table 7-16 states that ENERGYOF "Clears when the
+	// ENERGY register is read" and CHARGEOF "Clears when the CHARGE register is
+	// read". Reading an accumulator destroys its own overflow flag, so sampling
+	// DIAG_ALRT afterwards always saw zero and AUTO_FLAG_INA_ACCUM_OF could never
+	// be set by a real overflow. Every record claimed "no accumulator overflow"
+	// with a correct CRC over the claim, and nothing errored.
+	//
+	// Being in the same wake is NOT sufficient. Do not move this below the
+	// accumulator reads again; test_characterization_record.py pins the order.
+	//
+	// Nothing is lost by reading it here: reading DIAG_ALRT clears none of the
+	// three bits this cares about, the firmware never writes DIAG_ALRT so ALATCH
+	// stays at its reset value 0 (Transparent), and nothing reads CNVRF or the
+	// threshold bits.
+	//
+	// MATHOF was never affected by the ordering, because a read does not clear
+	// it. It is cleared by the next conversion instead, and this INA228 converts
+	// continuously, so MATHOF qualifies roughly the latest conversion rather than
+	// the whole interval. That is a separate open question in docs/BACKLOG.md and
+	// this fix does not address it.
+	//
+	// See docs/DECISIONS.md D-020.
 	// --------------------------------------------------------------------------
-	double intervalCharge_mAh = 0.0;
-	double intervalEnergy_mWh = 0.0;
-
-	bool chargeOk = readAccumulatedCharge_mAh(intervalCharge_mAh);
-	bool energyOk = readAccumulatedEnergy_mWh(intervalEnergy_mWh);
-
-	const uint32_t tAccumRead = micros();
-
-	if (!chargeOk || !energyOk)
-	{
-		Serial.println(
-				"[AUTO] ERROR: Could not read the accumulated CHARGE/ENERGY for the "
-				"completed interval.");
-		intervalValid = false;
-		flags |= AUTO_FLAG_ACCUM_SUSPECT;
-	}
-
-	// DIAG_ALRT must be sampled in the same wake as CHARGE: CHARGEOF clears
-	// when CHARGE is read, so the evidence is gone after this point.
 	uint16_t diag = 0;
 	bool diagOk = readRegister16(REG_DIAG_ALRT, diag);
 
@@ -3990,6 +3995,26 @@ bool runAutonomousWakeCycle()
 			flags |= AUTO_FLAG_INA_MATHOF;
 			intervalValid = false;
 		}
+	}
+
+	// --------------------------------------------------------------------------
+	// NOW READ THE COMPLETED INTERVAL. Nothing above this line resets it.
+	// --------------------------------------------------------------------------
+	double intervalCharge_mAh = 0.0;
+	double intervalEnergy_mWh = 0.0;
+
+	bool chargeOk = readAccumulatedCharge_mAh(intervalCharge_mAh);
+	bool energyOk = readAccumulatedEnergy_mWh(intervalEnergy_mWh);
+
+	const uint32_t tAccumRead = micros();
+
+	if (!chargeOk || !energyOk)
+	{
+		Serial.println(
+				"[AUTO] ERROR: Could not read the accumulated CHARGE/ENERGY for the "
+				"completed interval.");
+		intervalValid = false;
+		flags |= AUTO_FLAG_ACCUM_SUSPECT;
 	}
 
 	// --------------------------------------------------------------------------
@@ -4302,7 +4327,11 @@ bool runAutonomousWakeCycle()
 	Serial.print((tContextRead - tI2cReady) / 1000.0, 3);
 	Serial.println(" ms");
 
-	Serial.print("[TIMING] INA validate+accum read:");
+	// This bucket covers validate, the DIAG_ALRT read and both accumulator reads.
+	// DIAG_ALRT moved into it on 2026-09-23 when the read order was fixed; before
+	// that it was counted in the snapshot bucket below, which is why these two
+	// numbers are not comparable across that change.
+	Serial.print("[TIMING] INA validate+diag+accum: ");
 	Serial.print((tAccumRead - tContextRead) / 1000.0, 3);
 	Serial.println(" ms");
 
