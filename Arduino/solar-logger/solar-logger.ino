@@ -13,6 +13,10 @@
 // accumulator primitives. When to use them stays in this file.
 #include "ina228.h"
 
+// Which transport a host has claimed. Leases, sleep, and when autonomous mode
+// resumes stay in this file, which calls down into it.
+#include "connection.h"
+
 // ============================================================================
 // BMW SOLAR LOGGER
 // Development firmware
@@ -511,27 +515,6 @@ constexpr uint32_t SESSION_RELEASE_ACK_GRACE_MS = 250;
 // rare enough not to flood a host that is still enumerating.
 constexpr uint32_t AUTONOMOUS_RENDEZVOUS_TICK_MS = 1000;
 
-// ----------------------------------------------------------------------------
-// Host connection transports
-// ----------------------------------------------------------------------------
-//
-// Sleep policy asks anyHostConnected(), never isUsbConnected(). USB is simply
-// the only transport implemented today; Wi-Fi and BLE must be able to hold the
-// board awake later without the autonomous state machine learning about them.
-//
-// A transport becomes active through the explicit software lease, never through
-// electrical presence. USB being plugged in is not a claim: the host has to say
-// LOGGER SESSION HOLD. That distinction is what the 2026-09-11 audit of
-// isPlugged() and isConnected() forced, and it is also what lets a future
-// BLE client participate on equal terms.
-// ----------------------------------------------------------------------------
-constexpr uint8_t CONNECTION_NONE = 0x00;
-constexpr uint8_t CONNECTION_USB = 0x01;
-constexpr uint8_t CONNECTION_WIFI = 0x02;
-constexpr uint8_t CONNECTION_BLE = 0x04;
-
-uint8_t activeTransports = CONNECTION_NONE;
-
 // Where the autonomous logger currently is. Printed on every transition,
 // because a state machine that changes silently is one nobody can debug.
 enum AutoState : uint8_t
@@ -849,7 +832,7 @@ bool writeProtocolLine(const String &line, uint32_t timeoutMs);
 // FORWARD DECLARATIONS
 // ============================================================================
 //
-// These nineteen functions are called above the line where they are defined.
+// These seventeen functions are called above the line where they are defined.
 // The build works without this block only because Arduino CLI synthesizes
 // prototypes into the generated .ino.cpp it actually compiles - which means
 // the file a person edits is not, by itself, a valid C++ translation unit.
@@ -869,7 +852,6 @@ bool writeProtocolLine(const String &line, uint32_t timeoutMs);
 // Keep them sorted, and delete each one as its owner moves into a real module
 // with a real header - see the modularization plan in docs/BACKLOG.md.
 
-bool anyHostConnected();
 bool armAutonomousTest();
 const char *autoStateName(AutoState state);
 bool autonomousUsbRendezvous(bool cycleOk);
@@ -878,7 +860,6 @@ bool dumpStorage();
 HoldResult hostSessionHold();
 void hostSessionKeepalive();
 bool hostSessionRelease();
-void printActiveTransports();
 void printAutonomousStatus();
 void printDeprecatedCommand(const char *oldName, const char *newName);
 void printHostSessionStatus();
@@ -5770,100 +5751,6 @@ void servicePendingAutonomousSleep()
 // ============================================================================
 // AUTONOMOUS BENCH TEST: ARM / STOP / STATUS
 // ============================================================================
-
-// ============================================================================
-// CONNECTION OWNERSHIP
-// ============================================================================
-
-bool anyHostConnected()
-{
-	return activeTransports != CONNECTION_NONE;
-}
-
-void printActiveTransports()
-{
-	Serial.print("[CONNECTION] Active transports: ");
-
-	if (activeTransports == CONNECTION_NONE)
-	{
-		Serial.println("NONE");
-		return;
-	}
-
-	bool first = true;
-
-	if (activeTransports & CONNECTION_USB)
-	{
-		Serial.print("USB");
-		first = false;
-	}
-
-	if (activeTransports & CONNECTION_WIFI)
-	{
-		if (!first)
-			Serial.print("+");
-		Serial.print("WIFI");
-		first = false;
-	}
-
-	if (activeTransports & CONNECTION_BLE)
-	{
-		if (!first)
-			Serial.print("+");
-		Serial.print("BLE");
-		first = false;
-	}
-
-	Serial.println();
-}
-
-const char *transportName(uint8_t transport)
-{
-	switch (transport)
-	{
-	case CONNECTION_USB:
-		return "USB";
-	case CONNECTION_WIFI:
-		return "WIFI";
-	case CONNECTION_BLE:
-		return "BLE";
-	default:
-		return "UNKNOWN";
-	}
-}
-
-void connectionClaim(uint8_t transport)
-{
-	const uint8_t before = activeTransports;
-
-	activeTransports |= transport;
-
-	if (before != activeTransports)
-	{
-		Serial.print("[CONNECTION] ");
-		Serial.print(transportName(transport));
-		Serial.println(" transport CLAIMED by an explicit host lease.");
-		printActiveTransports();
-		Serial.println("[CONNECTION] Any host connected: YES");
-	}
-}
-
-void connectionRelease(uint8_t transport)
-{
-	const uint8_t before = activeTransports;
-
-	activeTransports &= (uint8_t)~transport;
-
-	if (before != activeTransports)
-	{
-		Serial.print("[CONNECTION] ");
-		Serial.print(transportName(transport));
-		Serial.println(" transport RELEASED.");
-		printActiveTransports();
-		Serial.print("[CONNECTION] Any host connected: ");
-		Serial.println(anyHostConnected() ? "YES" : "NO");
-	}
-}
 
 const char *autoStateName(AutoState state)
 {

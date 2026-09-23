@@ -473,6 +473,12 @@ real build never noticed because Arduino CLI supplied the prototypes. They are
 declared in the sketch now, so the file stands on its own as ordinary C++ and
 the verification step catches the next one by name.
 
+**Amended by D-048 on 2026-09-18:** every project module now gets an entry of
+its own, found by discovery. And the database the editor reads is no longer
+the file Arduino CLI writes: they were the same file, so a failed verification
+left the editor with Arduino CLI's raw database while the script said the
+previous one was still in place.
+
 ## D-040: Waiting for a rendezvous is the default; session-scoped commands never wait
 
 The board's normal state is autonomous sleep, so a missing `/dev/cu.usbmodem*`
@@ -886,7 +892,9 @@ is recorded in [BACKLOG.md](BACKLOG.md) and as a strict `xfail`.
 ## D-047: A module exports what code outside it uses, and each stage is audited as a move
 
 Set by the first modularization stage, the INA228 driver, on 2026-09-18.
-Compiled and host-tested; **not validated on hardware**. The rules apply to
+Compiled and host-tested; **not validated on hardware** when this was written.
+A hardware smoke test of that image was reported later the same day, and is
+recorded, as reported, in [LAB_NOTES.md](LAB_NOTES.md). The rules apply to
 every later stage in [BACKLOG.md](BACKLOG.md).
 
 **The header is the boundary.** A module's header declares only what code
@@ -935,6 +943,82 @@ The first stage ran this as a scratch script over the tokenizer in
 translation-unit boundary changes inlining, because this build has no LTO. The
 stage compares per-symbol sizes of the two images and names where the bytes
 went. A change that cannot be explained stops the stage.
+
+## D-048: Every project module is configured for the editor by discovery
+
+Decided 2026-09-18, when the first module turned out to have no editor
+configuration: Arduino CLI's database names the build copy of `ina228.cpp`, and
+the tooling added an entry for the `.ino` only. **Adding a module must never
+require an edit to the IntelliSense tooling or to any editor setting.** The
+rule applies to every later stage and every later module.
+
+- **Discovered from the real build, cross-checked against the sketch.** The
+  project's translation units are the entries Arduino CLI's database has for
+  copies under `<build>/sketch/`, mapped back to the files a person edits. A
+  separate scan of the sketch root and `src/`, which is where Arduino CLI looks,
+  must find no C or C++ source that Arduino CLI did not compile. Nothing names
+  a module.
+- **One entry per file, naming the real file.** Each editor entry replaces the
+  entry for the copy, with every response file and `-iprefix` resolved (D-039).
+  A deleted module's entry cannot survive: Arduino CLI drops it, and an entry
+  for a project file that no longer exists is refused.
+- **Proven before it is written.** Every entry must resolve `Arduino.h` and the
+  four ESP-IDF headers from D-039, and every project file is compiled
+  `-fsyntax-only` with exactly its entry's flags. Any failure leaves the
+  previous database untouched.
+- **Arduino CLI never writes the file the editor reads.** It builds into
+  `build/intellisense/arduino-cli/`, and the editor reads
+  `build/intellisense/compile_commands.json`. Until this decision they were one
+  file, so the "previous configuration is still in place" message was false.
+  That was observed in a scratch copy on 2026-09-18.
+- **The gate regenerates it.** `tools/check.sh` runs `tools/intellisense.sh` as
+  a step rather than only checking staleness. Regeneration measured 2.6 s warm
+  and 12.5 s on a new build path, and a stale database is exactly the thing
+  nobody remembers to fix.
+
+Assembler (`.S`) gets no editor entry. cpptools offers no IntelliSense for it,
+so the tool prints a NOTE when it finds one rather than skipping it silently.
+The sketch has none.
+
+This decision covers the database, which is verified by compiling it. What
+cpptools then displays is observed in VS Code, and was not observed when this
+was decided.
+
+## D-049: The connection module holds transport claims and nothing else
+
+Set by the second modularization stage on 2026-09-18. Compiled and host-tested;
+**not validated on hardware**.
+
+`connection.h` / `connection.cpp` answer one question: which transport has a
+host claimed? They hold the transport bitmask, claim and release, and
+`anyHostConnected()`, and they print the `[CONNECTION]` lines. They do not know
+what a lease is, how long it lasts, whether the board may sleep, or when
+autonomous mode resumes. Session and autonomous code call down into the module,
+and it calls nothing above it (D-025, D-034).
+
+- **The bitmask is private.** `activeTransports` is `static` in
+  `connection.cpp`, and only `connectionClaim()` and `connectionRelease()`
+  write it. Nothing reads it from outside, so there is no `extern`. Callers ask
+  `anyHostConnected()`.
+- **The header exports what is used (D-047).** That is `CONNECTION_USB`,
+  `anyHostConnected()`, `printActiveTransports()`, `connectionClaim()` and
+  `connectionRelease()`. `CONNECTION_NONE`, `CONNECTION_WIFI` and
+  `CONNECTION_BLE` stay in `connection.cpp` until something outside it uses
+  one. No query or accessor nothing calls was added.
+- **Presence is not connection state.** `printUsbPresence()` and the
+  rendezvous's `USB plugged` and `CDC connected` lines stayed in the sketch.
+  They report electrical presence, which D-025 says is never a claim, and
+  keeping them out of this module keeps that line visible. This departs from
+  the BACKLOG module table, which gave `connection` the "USB presence
+  diagnostics"; the stage table's "1 global, 5 functions" is what was built.
+- **Lease state stays with the lease.** `hostSessionHeld`, the deadlines,
+  `hostClaimedRendezvous` and the deferred sleep stay for `host_session`. The
+  module does not write any of them, so by D-047 they could not move with it.
+
+`tests/test_characterization_connection.py` compiles the module's real source
+on the host and runs it, and pins the call sites: HOLD is the only claim, every
+way out of a session releases USB, and `LOGGER AUTONOMOUS OFF` releases it only
+when no session is held (D-031).
 
 ## Project practice
 

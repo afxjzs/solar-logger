@@ -27,7 +27,7 @@
     },
     {
       "label": "Solar Logger: Generate IntelliSense Database",
-      "detail": "Run after adding an #include or a new forward reference in the sketch.",
+      "detail": "Finds every module itself. tools/check.sh runs it too; run it directly to update the editor sooner.",
       "type": "shell",
       "command": "${workspaceFolder}/tools/intellisense.sh",
       "problemMatcher": []

@@ -14,6 +14,7 @@ All paths in these documents are relative to the repository root.
 | --- | --- |
 | Firmware | `Arduino/solar-logger/solar-logger.ino` |
 | INA228 driver module | `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp` |
+| Connection module | `Arduino/solar-logger/connection.h`, `Arduino/solar-logger/connection.cpp` |
 | Python logger | `app/solar_logger.py` |
 | Current sample telemetry | `data/samples.csv` |
 | Current interval telemetry | `data/intervals.csv` |
@@ -26,7 +27,7 @@ All paths in these documents are relative to the repository root.
 | CSV archiver | `tools/archive-data.py` |
 | Shared host/device protocol | `app/device_session.py` |
 | Host protocol CLI | `app/device_tool.py` |
-| Editor IntelliSense config | `tools/intellisense.sh`, `tools/intellisense.py` |
+| Editor IntelliSense config | `tools/intellisense.sh`, `tools/intellisense.py`; finds every module itself |
 
 `data/` is the current telemetry directory. `logs/` is archive/legacy data and is not the live polling destination.
 
@@ -34,7 +35,11 @@ All paths in these documents are relative to the repository root.
 
 The firmware is being split out of `solar-logger.ino` into real `.h`/`.cpp` modules, one stage at a time. The plan and its order are in [BACKLOG.md](BACKLOG.md), and the boundary rules are [DECISIONS.md](DECISIONS.md) D-047.
 
-One module exists. **The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. It was extracted on 2026-09-18 with no intended behavior change, and it is compiled and host-tested but **not yet validated on hardware**; see [LAB_NOTES.md](LAB_NOTES.md).
+Two modules exist. Both were extracted on 2026-09-18 with no intended behavior change, and both are audited in [LAB_NOTES.md](LAB_NOTES.md).
+
+**The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. A hardware smoke test of that image was reported later the same day and is recorded, as reported, in LAB_NOTES.
+
+**Connection bookkeeping**, `connection.h` and `connection.cpp`, answers one question: which transport has a host claimed? It holds the private transport bitmask, `connectionClaim()` and `connectionRelease()`, `anyHostConnected()`, and the `[CONNECTION]` lines. It does not know about leases, sleep, or autonomous mode; the session and autonomous code in `solar-logger.ino` decide those and call down into it. USB presence (`isPlugged()`, `isConnected()`) is not connection state and stayed in the sketch. The boundary is [DECISIONS.md](DECISIONS.md) D-049. It is compiled and host-tested but **not yet validated on hardware**.
 
 ## Development Workflow
 
@@ -58,14 +63,17 @@ tools/check.sh
 
 | Step | Command |
 | --- | --- |
-| pytest | `uv run pytest`; needs a host C++ compiler as `c++` on `PATH` |
+| pytest | `uv run pytest`; needs a host C++ compiler as `c++` on `PATH`, and `arduino-cli` with the ESP32 core for `tests/test_intellisense.py` |
 | pyright | `uvx pyright --pythonpath .venv/bin/python` on every file in `app/`, `tools/`, `tests/`, and `main.py` |
 | py_compile | `uv run python -m py_compile` on the same files |
 | firmware compile | `arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger`; any warning fails the step |
+| intellisense | `tools/intellisense.sh`: regenerate the editor database for every module it finds, and verify each entry by compiling that file with it |
 | shell syntax | `bash -n` on every `tools/*.sh` |
 | whitespace | `git diff HEAD --check`, tracked files only; untracked files are listed as not covered |
 
-Every step runs even after one fails. The summary comes from each step's exit status and the script exits 1 if anything failed. It uploads nothing and opens no serial port. The compiled image is not the one `tools/upload.sh` flashes, because nothing injects a revision into it. See [DECISIONS.md](DECISIONS.md) D-043.
+Every step runs even after one fails. The summary comes from each step's exit status and the script exits 1 if anything failed. It uploads nothing and opens no serial port. The compiled image is not the one `tools/upload.sh` flashes, because nothing injects a revision into it. The intellisense step writes only `build/intellisense/`, which Git ignores. See [DECISIONS.md](DECISIONS.md) D-043 and D-048.
+
+pytest took 30.2 s on 2026-09-18, of which 26.6 s is the one IntelliSense scenario test that runs the real Arduino CLI against a copy of the sketch. It was 2.3 s before that test existed.
 
 `--clean` makes every compile a full rebuild; one measured on 2026-09-18 took 23 seconds. It is required: a cached object prints no warnings, so without it a warning fails the gate once and then passes on every later run.
 
@@ -86,11 +94,13 @@ Host-side tests. They touch no hardware and open no serial port.
 | `tests/test_characterization_protocol.py` | `tools/send.sh` exit status for every wire outcome; the firmware dispatcher's ACK/RESULT contract, command set and identity markers | real host code + source |
 | `tests/test_characterization_policy.py` | refusals before state changes, including HOLD while a sleep is pending; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle | source |
 | `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation | source |
+| `tests/test_characterization_connection.py` | transport claim and release, run on the host with the exact `[CONNECTION]` wording; who claims, who releases, and that sleep policy asks `anyHostConnected()` | firmware code run on the host + source |
+| `tests/test_intellisense.py` | a module added to, broken in, and deleted from a scratch copy of the sketch, through the real generator; every refusal of the database validator | real tooling + real host code |
 | `tests/firmware_source.py` | reads every sketch file as C++ tokens for the source tests | helper |
 
-The three `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
+The four `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
 
-A source test proves the code still has the shape a rule needs. It does not execute firmware. The one exception is `test_autonomous_schedule.py`: it takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046). A missing compiler fails the run rather than skipping it. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+A source test proves the code still has the shape a rule needs. It does not execute firmware. Two modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` does the same with the connection code, against a stand-in `Serial` that records what is printed. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
 
 `tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source.
 
@@ -134,19 +144,23 @@ IDE builds and plain `arduino-cli compile` are unaffected and produce a working 
 `tools/intellisense.sh` generates the VS Code C/C++ configuration; `.vscode/c_cpp_properties.json` points at `build/intellisense/compile_commands.json`, which the script writes.
 
 ```text
-tools/intellisense.sh            regenerate the database
+tools/intellisense.sh            regenerate and verify the database
 tools/intellisense.sh --check    report staleness only, change nothing
 ```
 
-Run it after adding an `#include`, and after adding a function that is called above where it is defined. `--check` answers "is it stale?" in well under a second; both are also VS Code tasks.
+**It configures every project file by itself, including modules that do not exist yet.** The `.ino` and every `.c`, `.cpp`, `.cc` and `.cxx` file Arduino CLI compiles for the sketch, meaning the sketch root and `src/`, each get one entry that names the real file. Nothing lists the modules. They are read out of Arduino CLI's database and checked against a scan of the sketch directory. A deleted module's entry is gone after the next run. See [DECISIONS.md](DECISIONS.md) D-048.
+
+**`tools/check.sh` runs it on every check**, so adding a module and running the gate is the whole procedure. Run it directly to update the editor before the next check. Regenerating took 2.6 s on a warm build path on 2026-09-18. `--check` answers "is it stale?" in well under a second, names any file with a missing or stale entry, and prints the command to run. Both are also VS Code tasks.
 
 **Nothing in the repository writes down a path under `~/Library/Arduino15`.** Every include path, define, and flag comes from the database Arduino CLI produces. The script resolves the `@response-file` and `-iprefix` indirection the ESP32 core uses, because the editor does not, and that indirection is where the entire ESP-IDF include path lives. See [DECISIONS.md](DECISIONS.md) D-039.
 
-**The script compiles the sketch with the flags it is about to hand the editor, and refuses to write the database if that fails**, leaving the previous configuration in place and printing the compiler's own diagnostics. A configuration nobody compiled is a claim rather than a fact.
+**The script compiles every project file with the flags it is about to hand the editor, and refuses to write the database if any one fails**, printing the compiler's own diagnostics. It also requires `Arduino.h` and the four ESP-IDF headers from D-039 to resolve in every entry. A configuration nobody compiled is a claim rather than a fact.
 
-The sketch's half of this is a forward-declaration block near the top of `solar-logger.ino`. Arduino CLI synthesizes prototypes into the generated `.ino.cpp` it actually compiles, so a sketch can call a function defined further down and still build — while the file a person edits is not valid C++. Those eighteen declarations are written out now, and the verification step names the next missing one instead of leaving a squiggle to explain.
+**A refused database leaves the previous one in place.** Arduino CLI builds into `build/intellisense/arduino-cli/` and writes its own database there. Before 2026-09-18 it wrote to the file the editor reads, so a failed verification left the editor with Arduino CLI's raw database, with no entry for the `.ino`, while the script and this section said the previous configuration was still in place. Output of the old layout left in `build/intellisense/` is reported by the script and can be deleted.
 
-**The editor entry covers `solar-logger.ino` only.** `ina228.cpp` has no entry of its own: Arduino CLI's entry names the build copy under `build/intellisense/sketch/`. So expect the editor, but not the build, to misreport that file until the script learns to add module entries. Found 2026-09-18 and recorded in [BACKLOG.md](BACKLOG.md). The editor's behavior on it has not been observed.
+The sketch's half of this is a forward-declaration block near the top of `solar-logger.ino`. Arduino CLI synthesizes prototypes into the generated `.ino.cpp` it actually compiles, so a sketch can call a function defined further down and still build — while the file a person edits is not valid C++. Those declarations are written out, seventeen of them since the connection stage, and the verification step names the next missing one instead of leaving a squiggle to explain. A `.cpp` module gets no such help and no forced `#include <Arduino.h>`: it is compiled as it is.
+
+**What VS Code displays has not been observed** for the module entries. The database is proven by compiling every entry; the editor's side of it is confirmed by opening `ina228.cpp` or `connection.cpp` and seeing no include errors.
 
 ### Upload ownership
 

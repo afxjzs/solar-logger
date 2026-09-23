@@ -16,19 +16,20 @@ All paths below are relative to the repository root.
 
 - Firmware: `Arduino/solar-logger/solar-logger.ino`
 - INA228 driver module: `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp`
+- Connection module (which transport a host has claimed): `Arduino/solar-logger/connection.h`, `Arduino/solar-logger/connection.cpp`
 - Python logger: `app/solar_logger.py`
 - Current telemetry: `data/samples.csv`, `data/intervals.csv`, `data/events.csv`
 - Legacy/archive data: `logs/`
 - Firmware identity: `Arduino/solar-logger/firmware_version.h`
 - Canonical upload tool: `tools/upload.sh`
 - Serial command tool: `tools/send.sh`
-- Local validation gate: `tools/check.sh` (tests, type check, warning-free compile; never uploads)
+- Local validation gate: `tools/check.sh` (tests, type check, warning-free compile, editor database; never uploads)
 - CSV archiver: `tools/archive-data.py` (host files only; never touches the device)
-- Editor IntelliSense config: `tools/intellisense.sh` (`--check` reports staleness)
+- Editor IntelliSense config: `tools/intellisense.sh` (finds every module itself; `tools/check.sh` runs it; `--check` reports staleness)
 
 The firmware reports its own identity at boot, on every autonomous wake, in `STATUS`, and on the `VERSION` command: a hand-edited version, the Git revision injected by `tools/upload.sh`, and the command-protocol build ID. An image built any other way prints `Revision: UNKNOWN` rather than a blank. See [DECISIONS.md](DECISIONS.md) D-038 and the version policy in [PROJECT.md](PROJECT.md).
 
-Firmware modularization has started. The INA228 driver became its own module on 2026-09-18; it is compiled and host-tested and has **not** yet been validated on hardware. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. See [DECISIONS.md](DECISIONS.md) D-043 and D-047, and the extraction plan in [BACKLOG.md](BACKLOG.md).
+Firmware modularization has started. Two modules were extracted on 2026-09-18. The INA228 driver's hardware smoke test was reported later that day and is recorded, as reported, in [LAB_NOTES.md](LAB_NOTES.md). Connection bookkeeping is compiled and host-tested and has **not** yet been validated on hardware. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. A new module needs no editor configuration: the gate regenerates the IntelliSense database, which finds every module itself. See [DECISIONS.md](DECISIONS.md) D-043, D-047, D-048 and D-049, and the extraction plan in [BACKLOG.md](BACKLOG.md).
 
 `tools/send.sh` waits for the next USB rendezvous by default, because a sleeping board's absent USB device is the ordinary state. `LOGGER SESSION KEEPALIVE` and `LOGGER SESSION RELEASE` are excluded: they address a session that already exists, so they fail immediately instead of acting on a later one. See [DECISIONS.md](DECISIONS.md) D-040.
 

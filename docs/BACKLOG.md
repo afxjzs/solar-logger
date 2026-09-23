@@ -15,22 +15,32 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
-## Firmware modularization — FIRST STAGE BUILT 2026-09-18, not hardware validated
+## Firmware modularization — TWO STAGES BUILT 2026-09-18
 
-`Arduino/solar-logger/solar-logger.ino` is 7,949 lines by `wc -l` after the
-INA228 extraction on 2026-09-18. It was 9,126 just before it, and 8,436 when
-this plan was written. The agreed direction is
+`Arduino/solar-logger/solar-logger.ino` is 7,836 lines by `wc -l` after the
+connection extraction on 2026-09-18. It was 7,949 after the INA228 extraction
+the same day, 9,126 before that, and 8,436 when this plan was written. The
+agreed direction is
 real `.h`/`.cpp` modules, **not** additional Arduino `.ino` tabs: extra tabs are
 concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-**One module exists: the INA228 driver**, `ina228.h` and `ina228.cpp`, extracted
-on 2026-09-18. It is compiled and host-tested, and it has **not** run on
-hardware. Runtime behavior is intended to be unchanged; the audit and its
-hardware check are in [LAB_NOTES.md](LAB_NOTES.md), and the boundary rules it
-set are [DECISIONS.md](DECISIONS.md) D-047. The gate every stage passes was
-built earlier the same day.
+**Two modules exist**, both extracted on 2026-09-18 with no intended behavior
+change:
+
+- **The INA228 driver**, `ina228.h` and `ina228.cpp`. A hardware smoke test of
+  that image was reported later the same day; it is recorded, as reported, in
+  [LAB_NOTES.md](LAB_NOTES.md). The boundary rules it set are
+  [DECISIONS.md](DECISIONS.md) D-047.
+- **Connection bookkeeping**, `connection.h` and `connection.cpp`: which
+  transport a host has claimed. Compiled and host-tested; it has **not** run on
+  hardware. Its boundary is D-049.
+
+The audits and hardware checks are in [LAB_NOTES.md](LAB_NOTES.md). The gate
+every stage passes was built earlier the same day, and since the connection
+stage it also regenerates the editor database, so a new module needs no editor
+configuration (D-048).
 
 ### What the source actually contains
 
@@ -73,7 +83,7 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `rtcAutoCycleCount` | R | wake cycle, arm, cold-boot resume, RTC-loss path | Zero means "first record of this session", which is what sets `FIRST_AFTER_BOOT`. |
 | `rtcAutoCommandedSleepMs` | R | `autonomousDeepSleepAgain()` | **Written, never read.** No invariant, because nothing depends on it. |
 | `rtcSleepTestMagic`, `rtcSleepTestCycle` | R | `armSleepPowerTest()`, `enterSleepPowerTestDeepSleep()`, `stopAllPowerTests()`, cold-boot resume | Belong to `power_test`, not `auto_state`. Guarded by their own magic (D-011). |
-| `activeTransports` | V | `connectionClaim()`, `connectionRelease()` | A bit is set only by an explicit software lease, never by electrical presence (D-025). |
+| `activeTransports` | V | `connectionClaim()`, `connectionRelease()` | A bit is set only by an explicit software lease, never by electrical presence (D-025). Moved into `connection.cpp` as a `static` on 2026-09-18; nothing outside reads it (D-049). |
 | `hostSessionHeld`, `hostLeaseDeadlineMs`, `hostLeaseRenewedMs`, `hostKeepaliveCount`, `hostSessionStartedMs`, `hostSessionIntervalCloses` | V | `hostSessionHold()`, `hostSessionKeepalive()`, `hostSessionRelease()`, `serviceHostLease()`, `stopAutonomousTest()` | A lease is a property of one awake period, so plain RAM is right. `hostSessionIntervalCloses` is incremented inside `closeMeasurementInterval()` — measurement writing session state. |
 | `hostSessionBaselineEstablished` | V | `hostSessionHold()`, release, lease expiry, `stopAutonomousTest()` | Means "the accumulators were reset at the claim". `setup()` reads it to decide whether to reset again. A cross-function ordering contract with no enforcement. |
 | `hostClaimedRendezvous` | V | `hostSessionHold()`, rendezvous loop, release, expiry, stop | The rendezvous loop's exit condition. Set by the command parser, read by the autonomous orchestrator — the coupling that the `pumpCommands` injection is meant to formalize. |
@@ -107,7 +117,7 @@ forced them.
 | Module | Owns | Depends on |
 | --- | --- | --- |
 | `nvs_rtc` | the single `Preferences` object and every typed get/put | Arduino |
-| `connection` | `activeTransports`, `anyHostConnected()`, claim/release, USB presence diagnostics | Arduino |
+| `connection` | **BUILT 2026-09-18** as `connection.h` / `connection.cpp`: `activeTransports`, `anyHostConnected()`, claim/release, `printActiveTransports()`. The USB presence diagnostics stayed in the sketch, because presence is not a claim (D-049) | Arduino |
 | `auto_state` | `AutoState`, the ten `rtcAuto*` RTC globals, `setAutoState()`, `autonomousOwnsBoard()`, LittleFS mount, 72-byte record encode/CRC/append, tail scan, sequence reservation | `nvs_rtc` |
 | `ina228_regs` | **Merged into `ina228`, built 2026-09-18.** I2C register read/write, sign extension | Arduino, `Wire` |
 | `ina228` | **BUILT 2026-09-18** as `ina228.h` / `ina228.cpp`: the register layer, identity, configuration, shutdown, `readSensor`, accumulator read/reset. `inaShutdownActive` stayed in the sketch (D-047) | Arduino, `Wire` |
@@ -282,15 +292,16 @@ calls. Each stage compiles and uploads on its own. **Do not batch them.**
 | Stage | Move | Why it is safe | Hardware check afterwards |
 | ---: | --- | --- | --- |
 | 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls | reboot; `experiment_id` and interval number survive |
-| 2 | `connection` | the other true leaf; 1 global, 5 functions | `LOGGER SESSION STATUS` reports the same transports |
+| 2 | `connection` | the other true leaf; 1 global, 5 functions. **BUILT 2026-09-18**, as planned: exactly that global and those five functions | `LOGGER SESSION STATUS` reports the same transports. **PENDING** |
 | 3 | `ina228_regs` | leaf but for the bus; no globals | `STATUS` reports live V/I/P/temperature |
 | 4 | `ina228` | above stage 3; no globals, since `inaShutdownActive` stayed in the sketch (D-047) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
 | 5 | `telemetry` | formatting only, no state | one `CSV_SAMPLE` and one `CSV_DATA` row reach the logger unchanged |
 
 **Stages 3 and 4 are BUILT, 2026-09-18, as one module, `ina228`, ahead of
-stages 1 and 2. Their hardware checks are PENDING.** Two departures from this
-table, both at the direction of that stint's brief and recorded here so neither
-is silent:
+stages 1 and 2.** A hardware smoke test covering their checks was reported
+later the same day and is recorded, as reported, in
+[LAB_NOTES.md](LAB_NOTES.md). Two departures from this table, both at the
+direction of that stint's brief and recorded here so neither is silent:
 
 - **Order.** The driver calls nothing but `Wire`, `Serial` and `delay()`, so it
   was a leaf in the same sense as stages 1 and 2. "Nothing moves before the
@@ -299,7 +310,11 @@ is silent:
   The hardware check afterwards is both rows' checks together. The full list is
   in [LAB_NOTES.md](LAB_NOTES.md), under the 2026-09-18 INA228 entry.
 
-The remaining order is unchanged: 1, 2, 5, 6, 7, 8, 9, 10, 11.
+**Stage 2 is BUILT, 2026-09-18, and its hardware check is PENDING.** It moved
+exactly what the row above says. One departure from the module table is
+recorded in D-049: `printUsbPresence()` stayed in the sketch.
+
+The remaining order is unchanged: 1, 5, 6, 7, 8, 9, 10, 11.
 | 6 | `auto_state` | **the split. Read-only first, append last.** Carries the ten `rtcAuto*` RTC globals | `LOGGER STORAGE INFO` and `LOGGER STORAGE DUMP` decode the existing log with the same record count and an intact tail |
 | 7 | `experiment` | 8 globals; everything it calls has moved | a full 60-second interval closes with the same running totals |
 | 8 | `power_test` | self-contained; nothing else calls into it | arm and stop each variant; confirm the refusal to arm two |
@@ -325,8 +340,9 @@ order:
 3. `tools/check.sh` reports `ALL OK` again. The characterization tests are
    unchanged. A test edited to fit the move is a behavior change and needs a
    separate reason.
-4. `tools/intellisense.sh` regenerates the editor database, since new files
-   and removed forward declarations make it stale.
+4. The editor database covers every new file. Since 2026-09-18 the
+   `intellisense` step of `tools/check.sh` regenerates and verifies it, so
+   step 3 already did this and there is nothing to configure (D-048).
 5. `tools/upload.sh`, deliberately, then the smoke test below, then that
    stage's own hardware check from the table above.
 
@@ -400,7 +416,8 @@ them, including lease expiry (step 7), five consecutive unclaimed records
   `.ino`. That is a gain, not a loss, and the forward-declaration block in the
   sketch shrinks by one entry per function moved. The INA228 stage removed no
   entry: each of its functions was defined above its first caller, so none was
-  in the block.
+  in the block. The connection stage removed two, `anyHostConnected()` and
+  `printActiveTransports()`, leaving seventeen.
 - **A `.cpp` does not get the `#include <Arduino.h>` that Arduino CLI prepends
   to the sketch.** It includes `<Arduino.h>` and any library it uses itself
   (D-047).
@@ -420,6 +437,11 @@ them, including lease expiry (step 7), five consecutive unclaimed records
   cpptools applies no ESP32 include paths to `ina228.cpp`. The real build is
   unaffected. Direction: have the script add and verify an entry for each
   sketch `.cpp`, the way it does for the `.ino`. Not done in that stint.
+  **RESOLVED 2026-09-18 (D-048)**, generically: every C and C++ file Arduino
+  CLI compiles for the sketch gets one verified entry naming the real file,
+  found by discovery, and `tools/check.sh` regenerates the database.
+  `connection.cpp` was configured by it with no edit. What VS Code displays
+  has still not been observed.
 
 ### Target end state
 
@@ -433,9 +455,11 @@ else.
 `uv run pytest` reported 78 passed and 1 xfailed when the gate was built. After
 the RELEASE/HOLD correctness fixes the same day it reported 101 passed and 0
 xfailed: the xfail became a passing test (D-044). After the scheduler fix, also
-the same day, it reports **153 passed, 1 xfailed**. The new xfail records the
-overrun defect found in that stint, below. The full local gate, including the
-warning-free ESP32 compile, is:
+the same day, it reported 153 passed, 1 xfailed. The new xfail records the
+overrun defect found in that stint, below. The connection stage, still the same
+day, added the connection and IntelliSense tests: **183 passed, 1 xfailed**,
+the same xfail. The full local gate, including the warning-free ESP32 compile
+and the editor database, is:
 
 ```text
 tools/check.sh
@@ -454,6 +478,8 @@ plan.
 | `tests/test_characterization_protocol.py` | `tools/send.sh` exit status and report for 17 wire transcripts (11 at first; 6 added 2026-09-18 for D-044 and D-045); ACK-once and RESULT-once in the dispatcher; RELEASE's completion rule; every handler's result reaching `CMD_RESULT`; the frozen command set and status vocabulary; firmware identity | real host code + source |
 | `tests/test_characterization_policy.py` | the defect 4 and defect 6 refusals, and HOLD's refusal while a sleep is pending, all happening before any state change; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle (one arm, one cancel, stop cancels first) | source |
 | `tests/test_characterization_record.py` | `AutoRecord` field order, width, signedness and packing; CRC coverage; CRC computed last; validation rule; record constants | source |
+| `tests/test_characterization_connection.py` | added 2026-09-18, before the connection move, and unchanged by it: claim, release and the transport bits run on the host, with the exact `[CONNECTION]` wording; HOLD as the only claim; every way out of a session releasing USB; sleep policy asking `anyHostConnected()` and never `isPlugged()` / `isConnected()` | firmware code run on the host + source |
+| `tests/test_intellisense.py` | added 2026-09-18 (D-048): a module added to, broken in and deleted from a scratch copy of the sketch, through the real generator and Arduino CLI; every refusal of the database validator, one defect at a time | real tooling + real host code |
 | `tests/firmware_source.py` | reads every sketch file as C++ tokens, so source tests survive file moves and reformatting | helper |
 | `tests/fake_serial.py` | a scripted stand-in for a pyserial port | helper |
 

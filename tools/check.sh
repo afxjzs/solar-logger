@@ -11,6 +11,9 @@
 #   pyright           uvx pyright against the project venv, every Python file
 #   py_compile        every Python file
 #   firmware compile  arduino-cli compile --clean --warnings all; any warning FAILS
+#   intellisense      tools/intellisense.sh: regenerate the editor database for
+#                     every project module it finds, and verify each entry by
+#                     compiling that file with it
 #   shell syntax      bash -n on every tools/*.sh
 #   whitespace        git diff HEAD --check (tracked files only)
 #
@@ -21,7 +24,8 @@
 # It uploads nothing, opens no serial port, and touches no device. The compile
 # builds into arduino-cli's own cache, not the repository. It is NOT the image
 # tools/upload.sh would flash: that one carries an injected Git revision, and
-# this one would print "Revision: UNKNOWN".
+# this one would print "Revision: UNKNOWN". The intellisense step writes only
+# build/intellisense/, which is generated and ignored by Git.
 
 set -u
 
@@ -129,6 +133,11 @@ run_step "pytest" uv run pytest
 run_step "pyright" uvx pyright --pythonpath .venv/bin/python "${PYTHON_FILES[@]}"
 run_step "py_compile" uv run python -m py_compile "${PYTHON_FILES[@]}"
 run_step "firmware compile" compile_firmware
+
+# Regenerated rather than only checked, so adding a module and running this
+# gate is the whole procedure: nothing has to remember to update the editor.
+run_step "intellisense" tools/intellisense.sh
+
 run_step "shell syntax" check_shell_syntax
 run_step "whitespace" check_whitespace
 

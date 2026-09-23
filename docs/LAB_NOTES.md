@@ -6,7 +6,268 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-18: Connection bookkeeping extracted, and the editor database finds every module - NOT hardware validated
+
+**No hardware was touched.** Nothing was uploaded or committed, Experiment 3
+was not reset, and storage was not cleared. Every result below is a host test,
+a source audit, or a compile. **This image has not run on the board.**
+
+Two changes, in this order: the IntelliSense tooling now configures every
+project module by discovery (D-048), and then the second modularization stage
+moved the transport bookkeeping into `Arduino/solar-logger/connection.h` and
+`connection.cpp` (D-049). Runtime behavior is intended to be unchanged, and
+nothing below found a change.
+
+### Why the editor could not find Arduino.h in ina228.cpp
+
+Read out of the generated database, not inferred. Arduino CLI compiles copies
+of the sketch files under `<build>/sketch/`, and its compilation database
+names the copies. The only entry for the driver was for
+`build/intellisense/sketch/ina228.cpp`, and its ESP-IDF include path was still
+behind the `@response` / `-iprefix` indirection D-039 describes. Nothing named
+`Arduino/solar-logger/ina228.cpp`, and cpptools matches entries by path, so the
+file a person edits had no configuration at all. `tools/intellisense.py` added
+an editor entry for the `.ino` only.
+
+### A second defect found in the same tool: the "previous configuration" was gone
+
+Observed in a scratch copy of the sketch with the tool as it was at `HEAD`. When
+verification failed, it printed:
+
+```text
+[INTELLISENSE] ERROR: The sketch does NOT compile under the flags the editor is
+about to be given (exit 1, output above). The database has NOT been written, so
+the previous configuration is still in place.
+```
+
+The database file then held 80 entries and no entry for the `.ino`. Arduino CLI
+writes its raw database to its build path, and the build path was the directory
+the editor reads from, so the previous editor database had been overwritten
+before verification ran. PROJECT.md made the same claim. Arduino CLI now
+builds into `build/intellisense/arduino-cli/`; see D-048.
+
+### Arduino CLI's behavior, measured on arduino-cli 1.5.1
+
+A scratch copy of the sketch with a probe file of each kind:
+
+- The database has an entry for `.c`, `.cpp`, `.cc`, `.cxx` and `.S` files in
+  the sketch root and anywhere under `src/`. A `.cpp` in any other
+  subdirectory is copied into the build and gets no entry.
+- `.c` and `.S` are compiled with `riscv32-esp-elf-gcc`, the rest with `g++`.
+- Deleting a module removes both its build copy and its database entry on the
+  next run. Arduino CLI leaves no stale entry behind.
+- `--only-compilation-database` took 9.0 s on a new build path, 8.4 s after a
+  file changed, and 1.5 s with nothing changed.
+- 2 of the 335 expanded include directories do not exist in the installed SDK
+  (`esp_system/port/soc` and an `espressif__esp_matter` path). The core lists
+  them anyway, so the tool cannot require every include directory to exist.
+
+### What the tooling does now
+
+- The project's translation units are read out of Arduino CLI's database:
+  every entry for a copy under `<build>/sketch/`, mapped back to the real file.
+  No module is named anywhere. A scan of the sketch root and `src/` must agree.
+- Each one gets exactly one entry naming the real file, with every response
+  file and `-iprefix` expanded, and it replaces the build copy's entry. The
+  `.ino` also gets `-x c++ -include Arduino.h`; a `.cpp` gets neither.
+- Before writing, every entry must resolve `Arduino.h` and the four ESP-IDF
+  headers from D-039, and every file is compiled `-fsyntax-only` with exactly
+  its entry's flags, in parallel.
+- `tools/check.sh` runs `tools/intellisense.sh` as a step. Adding a module and
+  running the gate is the whole procedure.
+- `--check` reports a stale entry for a deleted file, a missing entry for a new
+  one, and any change to a source or header, and names the command to run.
+
+In a scratch copy with `.c`, `.cc`, `.cxx`, `.S`, a nested `src/sub/` module and
+a `.cpp` outside `src/`, the tool configured and verified the six C and C++
+units, printed a NOTE that the `.S` file gets no editor entry, and left the
+other subdirectory alone.
+
+### The generator's output for this repository
+
+After `connection.cpp` was created, with no configuration edit of any kind:
+
+```text
+[INTELLISENSE] Project translation units found (3):
+[INTELLISENSE]   connection.cpp
+[INTELLISENSE]   ina228.cpp
+[INTELLISENSE]   solar-logger.ino
+[INTELLISENSE] Every project entry resolves Arduino.h, freertos/FreeRTOS.h, esp_sleep.h, soc/soc_caps.h, esp_rom_crc.h: ALL OK
+[INTELLISENSE]   connection.cpp: compiles cleanly: ALL OK (direct includes: connection.h, Arduino.h)
+[INTELLISENSE]   ina228.cpp: compiles cleanly: ALL OK (direct includes: ina228.h, Arduino.h, Wire.h)
+[INTELLISENSE]   solar-logger.ino: compiles cleanly: ALL OK (direct includes: ... ina228.h, connection.h)
+```
+
+Regeneration took 12.5 s on a new build path and 2.6 s on a warm one.
+`--check` took 0.07 s.
+
+**Not observed: what VS Code shows.** The database is proven by compiling every
+entry. Whether cpptools applies it to `ina228.cpp` and `connection.cpp` has to
+be seen in the editor. The clang diagnostics Claude Code displayed for
+`connection.cpp` while it was being written came from a clangd process that
+Claude Code itself started, not from VS Code, so they say nothing about what
+cpptools shows.
+
+### What moved into connection
+
+- `activeTransports`, now `static` in `connection.cpp`. Only
+  `connectionClaim()` and `connectionRelease()` write it.
+- `CONNECTION_NONE`, `CONNECTION_USB`, `CONNECTION_WIFI`, `CONNECTION_BLE`.
+  Only `CONNECTION_USB` is in the header, because nothing else outside the
+  module uses the others (D-047).
+- `anyHostConnected()`, `printActiveTransports()`, `connectionClaim()`,
+  `connectionRelease()`, exported, and `transportName()`, now `static`.
+- The two forward declarations the sketch kept for `anyHostConnected()` and
+  `printActiveTransports()`. `connection.h` declares them now, so the block is
+  seventeen entries.
+
+What stayed in the sketch, deliberately (D-049):
+
+- Everything about the lease: HOLD, KEEPALIVE, RELEASE, expiry, the lease
+  globals, `hostClaimedRendezvous`, the deferred sleep.
+- `printUsbPresence()` and the rendezvous's `USB plugged` / `CDC connected`
+  lines. They report electrical presence, which is not connection state.
+- Every call site. HOLD claims USB, RELEASE and lease expiry release it,
+  `LOGGER AUTONOMOUS OFF` releases it only with no session held, and sleep
+  policy asks `anyHostConnected()`. All unchanged.
+
+`solar-logger.ino` went from 7,949 to 7,836 lines by `wc -l`: 118 removed and 5
+added. `connection.h` is 50 lines and `connection.cpp` 120.
+
+### Validation performed
+
+| Check | Result |
+| --- | --- |
+| `tools/check.sh` before any change | `ALL OK`: 153 passed, 1 xfailed; pyright 0 errors, 0 warnings, 0 informations; compile clean |
+| `tools/check.sh` after the tooling change, before the move | `ALL OK`, seven steps including the new `intellisense` step: 183 passed, 1 xfailed; pyright 0/0/0; compile clean; image unchanged |
+| `tools/check.sh` after the move | `ALL OK`, seven steps: 183 passed, 1 xfailed, the same overrun `xfail`; pyright 0/0/0; compile clean with `--warnings all`, no warnings; intellisense covers all three translation units |
+| firmware image | 1,101,475 → 1,101,517 bytes (84%, +42) |
+| globals | 36,332 → 36,332 bytes (11%, unchanged) |
+| untracked files | `connection.h`, `connection.cpp` and both new test files: no trailing whitespace and no space before a tab |
+
+The 30 new tests are in two files. `tests/test_characterization_connection.py`
+was written and passed against the monolith before the move, then passed
+unchanged after it. `tests/test_intellisense.py` holds one scenario test that
+runs the real generator, Arduino CLI and toolchain against a scratch copy of the
+sketch, and nineteen fast tests of the validator, the copy-to-source mapping and
+the fingerprint. The scenario took 26.6 s, and it is why pytest went from 2.3 s
+to 30.2 s.
+
+### The tests were verified to fail
+
+- **Connection, 10 of 10 mutations caught**, run once against the monolith and
+  once after the move: release clearing every bit, `anyHostConnected()`
+  asking about USB only, HOLD no longer claiming, the `Host claimed` wording,
+  `LOGGER AUTONOMOUS OFF` releasing a held session's USB, the `+` separator,
+  the maintenance window trusting `Serial.isConnected()`, booting with USB
+  claimed, the claim line's wording, and the BLE bit colliding with Wi-Fi.
+  Reformatting every brace K&R and editing comments left the suite green.
+- **IntelliSense, both defects restored and caught** by the scenario test:
+  only the `.ino` getting an entry, and the database written before
+  verification. The second one first passed. The refused database held the
+  same bytes as the previous one, so an unchanged file also fit a rewrite. The
+  test now marks the previous file with trailing whitespace first, which the
+  generator never writes.
+
+### The move was audited as a move
+
+Same method as the INA228 stage, over the tokenizer in
+`tests/firmware_source.py`, comments stripped:
+
+- The sketch's tokens equal `HEAD`'s with four runs deleted, 350 tokens in
+  total, and `#include "connection.h"` inserted. Nothing else changed.
+- All 340 moved tokens are in the new files. The 46 added tokens are
+  `#pragma once`, three includes, two `static`, and the four declarations in
+  `connection.h`.
+- All five functions have identical bodies and parameter lists. All four
+  constants and the `activeTransports` definition are identical, with
+  `static` added to the state.
+
+The audit script was a scratch file for this stint and is not in the repository.
+
+### Where the 42 bytes went
+
+Measured with `nm`, `size -A` and `objdump` on both images. `.flash.text`
++38 and `.eh_frame` +4; the debug sections do not reach flash.
+
+- `anyHostConnected()` had no symbol before: it was inlined into every caller
+  in the same translation unit. It is now a 4-instruction, 14-byte function,
+  called three times from `setup()` and once each from the rendezvous, the
+  maintenance window and `printHostSessionStatus()`. Those last three became
+  one instruction shorter, 4 bytes each. `setup()` kept 789 instructions and
+  grew 2 bytes; that was not examined further.
+- `transportName()` was a separate 58-byte function called by claim and
+  release. As a `static` it was inlined into both: `connectionClaim()` went
+  from 34 to 48 instructions and `connectionRelease()` from 52 to 66, 46 bytes
+  each.
+- `hostSessionHold()`, `hostSessionRelease()`, `serviceHostLease()` and
+  `stopAutonomousTest()` have the same size and instruction count, and call the
+  same connection functions as before.
+- The 4 bytes of `.eh_frame` were not examined.
+
+### Firmware identity unchanged
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+A move changes no command, record, cadence rule or protocol, so the version
+policy calls for no bump. The revision that `tools/upload.sh` injects will
+differ, and that is what identifies this source.
+
+### Hardware acceptance - PENDING, nothing below has been run
+
+After a deliberate `tools/upload.sh`, send each command on its own and expect
+exit 0 from each. Everything after "PREDICTED" is read from the source, not
+observed.
+
+1. The smoke test in [BACKLOG.md](BACKLOG.md). PREDICTED: a real revision hash,
+   `Tail status: INTACT` with at least as many records as before, and
+   `CMD_RESULT,...,OK` for HOLD, KEEPALIVE and RELEASE.
+2. Stage 2's own check, run during the HOLD from step 1: `tools/send.sh LOGGER
+   SESSION STATUS`. PREDICTED: `[CONNECTION] Active transports: USB` and
+   `[CONNECTION] Any host connected: YES`. HOLD's own output PREDICTED:
+   `[CONNECTION] USB transport CLAIMED by an explicit host lease.`
+3. RELEASE's output. PREDICTED: `[CONNECTION] USB transport RELEASED.`,
+   `[CONNECTION] Active transports: NONE`, `[CONNECTION] Any host connected:
+   NO`, then the result, then the transport disappearing.
+4. An unclaimed rendezvous, read with `tools/watch-port.sh` or a terminal on
+   the port. PREDICTED, once per second: `[CONNECTION] Active transports: NONE`
+   and `[CONNECTION] Host claimed: NO`, next to whatever `USB plugged` and
+   `CDC connected` report.
+5. Lease expiry, optional: HOLD and send nothing. PREDICTED: `[CONNECTION] USB
+   transport RELEASED due to lease expiry.` and the same three lines as
+   step 3.
+
 ## 2026-09-18: INA228 driver extracted into a module - NOT hardware validated
+
+### Addendum, reported later the same day: the INA228 image was smoke-tested
+
+**Reported in the connection stint's brief, and recorded here from it. Not
+observed by the agent that wrote this addendum.** The brief states that the
+image built from `4a096d9` was uploaded and checked on hardware, and gives
+these results:
+
+- `VERSION`: `0.3.0-dev`, revision `4a096d9` with no `-dirty`,
+  `solar-logger-protocol-ack-v3`.
+- `LOGGER STORAGE INFO`: `Tail status: INTACT`, more than 2,000 valid 72-byte
+  records, about 12 days free at the 60-second cadence.
+- `LOGGER AUTONOMOUS STATUS`: on, armed, running, 60-second interval, RTC state
+  valid.
+- `LOGGER SESSION HOLD`, `KEEPALIVE` and `RELEASE`: `CMD_RESULT,...,OK` for
+  each. RELEASE closed the tethered interval, saved the NVS checkpoint, armed
+  the deferred sleep with about 59,750 ms remaining, and the transport
+  disappeared after the RESULT.
+- `STATUS` after the next wake: valid live voltage, current and power.
+- `POWER TEST STATUS`: the INA228 in continuous conversion.
+- Recent autonomous records: `interval_ms` of 60,004, consecutive sequences,
+  cumulative charge and energy that reconcile, and no invalid records.
+
+That covers steps 1 to 3 of the pending list below, and part of step 4: the
+brief does not mention the records' flags or a nonzero `dQ_uAh`. Step 5 is not
+mentioned. The RELEASE figure is also the first check listed under the
+scheduler entry below, which predicted a remainder just under 59,750 ms.
 
 **No hardware was touched.** Nothing was uploaded or committed, Experiment 3
 was not reset, and storage was not cleared. Every result below is a host test,
