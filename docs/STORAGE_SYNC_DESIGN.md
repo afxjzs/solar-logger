@@ -6,6 +6,39 @@ Design and implementation record for autonomous local logging and later host syn
 
 Sections below retain the original design rationale. CONFIRMED denotes the stated evidence, not universal hardware validation; PROPOSED denotes remaining design or an original proposal with an implementation note. Section 12a and its implementation differences describe what exists. Accepted decisions live in [DECISIONS.md](DECISIONS.md).
 
+## Intended installed host — iPhone over BLE, server behind the phone
+
+**Settled direction, not implemented:** D-053 makes BLE the installed transport
+and the native iPhone app the sync host and clock source. The phone discovers
+and connects, requests unsynced records, saves them durably, then ACKs; it also
+provides time/configuration and graph/display functions. It uploads to the
+user's self-hosted server over its normal Internet connection. Server work
+includes long-term storage, web/historical access, analysis, inference and
+higher-level processing, likely built alongside the iOS app.
+
+The ESP remains responsible for measurement, local storage, record sequencing,
+record/status/settings access, ACK/time/configuration acceptance and reliable
+sleep. Some of those are future interfaces: sync, storage ACKs and time-setting
+remain unimplemented. The logger neither knows about nor depends on the server.
+Phone durability is the ACK boundary; server upload is a separate app duty.
+Neither being near home Wi-Fi nor Wi-Fi/NTP on the ESP is required.
+
+Permanent manual physical SYNC wakes the device into a BLE advertising/access
+window (planned, D-054). The first version may use reset/manual-button awake
+windows. Timer wakes keep serving periodic measure/store; a future vehicle-on
+wake is a separate, unchosen signal to research with IBS integration. A fully
+sleeping radio is not assumed to be remotely wakeable. Installed locations and
+open BMW trunk topology are in PROJECT/D-052; they do not change record/ACK
+semantics.
+
+**Current correctness status:** the DIAG_ALRT reorder is in source, with
+regression tests and a reported green gate, but was not uploaded or hardware
+validated at the coding-agent report. The deployed Experiment 3 golden record
+confirms the existing 72-byte/version-1 layout and IEEE/zlib CRC convention,
+not the new read order. The record-format module has not been extracted. See
+the dated LAB_NOTES entry; this documentation update performs no new code or
+hardware validation.
+
 ## The problem
 
 The original system was host-tethered:
@@ -25,9 +58,12 @@ INA228 keeps converting
   -> writes a durable local record
   -> sleeps again
 
-later: host connects -> asks for records after sequence N
-  -> ESP32 streams -> host stores -> host ACKs
-  -> only then does storage become reclaimable
+planned: iPhone connects over BLE -> asks for records after sequence N
+  -> ESP32 streams -> phone durably saves -> phone ACKs
+  -> acknowledged records become eligible for future reclamation
+
+separately: phone Internet connection -> self-hosted server
+  -> long-term storage, web UI, analysis and inference
 ```
 
 ---
@@ -175,8 +211,9 @@ Verified against INA228 datasheet SLYS021A, Table 7-5 (CONFIG, address `0h`):
 1.  capture esp_sleep_get_wakeup_cause()
 2.  Wire.begin() — bus only, no device writes
 3.  verifyInaIdentity() — MANUFACTURER_ID / DEVICE_ID, read-only, safe
-4.  READ ENERGY and CHARGE            <-- the sleep interval's integral
-5.  READ DIAG_ALRT (0Bh) — ENERGYOF bit 11, CHARGEOF bit 10, MATHOF bit 9
+4.  READ DIAG_ALRT (0Bh) — ENERGYOF bit 11, CHARGEOF bit 10, MATHOF bit 9
+                                       <-- MUST precede step 5; see below
+5.  READ ENERGY and CHARGE            <-- the sleep interval's integral
 6.  READ VBUS / CURRENT / POWER / DIETEMP snapshot
 7.  compute interval duration from RTC-retained elapsed time
 8.  build the record, CRC it, append it durably
@@ -187,7 +224,23 @@ Verified against INA228 datasheet SLYS021A, Table 7-5 (CONFIG, address `0h`):
 
 Reads come before writes. Nothing touches ADC_CONFIG on a normal wake at all — the INA228 is already configured and already converting, so reconfiguring it would only discard an in-flight conversion.
 
-Step 5 reflects the current source order, not validated overflow handling. The code and earlier design say `CHARGEOF` clears when CHARGE is read, yet read `DIAG_ALRT` afterwards. Being in the same wake alone does not resolve that ordering contradiction. Datasheet/read-order verification and an overflow test remain required before claiming reliable charge-overflow detection; see BACKLOG. No runtime change was made by this audit.
+**Steps 4 and 5 are shown in their corrected order, fixed 2026-09-23.** They used to be the other way round, and that was a real defect: the earlier audit recorded it as an open ordering question, and it was settled against the datasheet, quoted verbatim from SLYS021A Table 7-16 (the `DIAG_ALRT` field descriptions; an earlier note in `ina228.h` cited Table 7-9, which is a different register):
+
+| Bit | Field | Datasheet clear condition, verbatim |
+| --- | --- | --- |
+| 11 | ENERGYOF | "Clears when the ENERGY register is read." |
+| 10 | CHARGEOF | "Clears when the CHARGE register is read." |
+| 9 | MATHOF | "Must be manually cleared by triggering another conversion or by clearing the accumulators with the RSTACC bit." |
+
+Reading ENERGY and CHARGE clears ENERGYOF and CHARGEOF. With the accumulator reads first, the `DIAG_ALRT` read that followed saw a register in which both bits were already zero. Same-wake sampling is not sufficient — the flag must be read **before** the accumulators — and until the fix `INA_ACCUM_OF` could not be set by a real accumulator overflow. Every autonomous record asserted "no accumulator overflow" regardless of what happened. `MATHOF` detection was unaffected, because a read does not clear it.
+
+**Fixed in source 2026-09-23**, by transposing the two steps as shown above. The flag logic is unchanged and `tests/test_characterization_record.py` pins the order inside `runAutonomousWakeCycle()`. See BACKLOG and DECISIONS D-020.
+
+**Still not hardware validated.** An overflow has never been induced on the board, so the corrected path has never been observed to set the flag. The datasheet settles the ordering; it does not substitute for that test.
+
+**Records written before the fix are not retroactively qualified.** Their `INA_ACCUM_OF = 0` means "not measured", not "no overflow". Their charge and energy values are unaffected.
+
+**`closeMeasurementInterval()` — the tethered interval close — still reads no overflow flag at all**, so `CSV_DATA` rows carry no overflow qualification. A gap rather than a false claim; see BACKLOG.
 
 Step 3 must not become step 3-and-reconfigure. Validating identity is a read; reconfiguring is not.
 
@@ -230,6 +283,10 @@ Fixed-width, little-endian, versioned, CRC-protected. Binary, not CSV — the ho
 
 **Packed size: 72 bytes exactly.**
 
+**This layout is verified against a real deployed record, 2026-09-23.** A `LOGGER STORAGE DUMP` line from Experiment 3 (`seq=4445`, `crc=0xFB25DA73`) was rebuilt byte-for-byte from the table above, and `zlib.crc32` over bytes 0..67 reproduces the CRC the board stored. Because the checksum covers all 68 preceding bytes, that match confirms every offset, width, signedness and byte order here, the absence of padding, and the covered range — not just the total size. The fixture and its tests live in `tests/test_characterization_record.py`.
+
+**The CRC convention is confirmed, not merely named.** `esp_rom_crc32_le(0, ...)` is standard IEEE 802.3 CRC-32: reflected polynomial `0xEDB88320`, initial value `0xFFFFFFFF`, final XOR `0xFFFFFFFF`, which is `zlib.crc32` on the host. Three other plausible seed/inversion conventions were computed against the same record and all three disagree with it, so a host implementation must use this one. The ROM function pre-inverts its seed, which is why its `0` argument corresponds to no seed in zlib.
+
 Every 4-byte field sits on a 4-byte boundary and both int64 fields sit on 8-byte boundaries, so the layout needs no padding and no unaligned access on RISC-V.
 
 Range checks against the hardware: `bus_uV` covers the INA228's 85 V maximum in 85,000,000 counts; `avg_current_uA` covers ±2,147 A; `interval_charge_uAh` covers ±2,147 Ah per interval against roughly 1,500 µAh observed per minute; the int64 running totals cannot realistically overflow.
@@ -248,6 +305,10 @@ Range checks against the hardware: `bus_uV` covers the INA228's 85 V maximum in 
   4  INTERVAL_ODD       0x10  interval_ms differs materially from the cadence
   5  INA_MATHOF         0x20  DIAG_ALRT MATHOF was set; current/power suspect
   6  INA_ACCUM_OF       0x40  DIAG_ALRT ENERGYOF or CHARGEOF was set
+                              Reachable only since the 2026-09-23 read-order
+                              fix (Section 4). In records written before it,
+                              0 means "not measured", not "no overflow".
+                              Never yet observed set on hardware.
   7  EXPERIMENT_UNKNOWN 0x80  experiment_id could not be determined
 ```
 
@@ -419,20 +480,20 @@ SET_TIME <unix_epoch_seconds>
 
 | Transport | How it arrives | Status |
 | --- | --- | --- |
-| USB serial | the Python logger issues it automatically on connect | designed, not implemented |
-| Wi-Fi | NTP, with the result fed into the same operation | longer-term |
-| Bluetooth LE | mobile client supplies its own clock | longer-term |
+| Bluetooth LE | native iPhone app supplies wall-clock time / epoch mapping | intended installed source; not implemented |
+| USB serial | Python logger could supply time during bench sessions | optional bench aid; not implemented |
+| Wi-Fi | NTP could feed the same logical operation | optional later; not a dependency |
 
 The transport is irrelevant to the record semantics. Whatever sets the clock, the result is the same: `epoch_s` becomes real and `TIME_QUALITY` becomes `SYNCHRONIZED` for subsequent records.
 
-**Automatic sync from the Python logger** is the first one worth building, and it is cheap: the logger already owns the serial port and already writes commands through its own connection, so it can issue `SET_TIME` immediately after a successful connect without touching the `send.sh` handoff protocol or the upload handshake. Re-syncing periodically during a long session also costs nothing and keeps `HOLDOVER` from being reached while a host is attached.
+**Updated installed priority (D-053): the phone is the intended wall-clock source.** BLE synchronization will provide epoch/time mapping; exact exchange/encoding and clock-age handling remain design work. The earlier USB-first proposal is a possible bench convenience, not an installed requirement. Logger correctness must not depend on Wi-Fi/NTP. Current UNKNOWN-time / epoch-0 records remain valid historical behavior until sync is implemented, and any later host-derived mapping stays distinguishable from capture-time knowledge.
 
 Setting the clock must be idempotent and safe to repeat. It must never reorder, rewrite, or invalidate records already stored.
 
 ### What we can and cannot claim
 
 - **Ordering, within and across sessions: exact.** `seq` guarantees it and never depends on wall-clock time.
-- **Interval duration: good.** Every record carries its own measured `interval_ms`.
+- **Interval duration: qualified.** Records use commanded sleep plus measured awake time, with RTC drift and the separately tracked overrun defect; a field named `interval_ms` is not proof of independently measured elapsed time.
 - **Absolute time: only as good as the last sync, degraded by unmeasured RC drift, and absent entirely until a first sync.** Records say which of those applies to them.
 
 ### External RTC
@@ -443,7 +504,7 @@ Not required, not added. A battery-backed RTC is the only way to make absolute t
 
 ## 9. Sync protocol — PROPOSED
 
-Transport-independent. Record semantics stay fixed while transport changes from USB serial to BLE or Wi-Fi.
+Transport-independent record semantics, with **BLE/iPhone as the intended installed path** (D-053). USB remains the current bench interface; optional later Wi-Fi is not required. The command names below are a logical protocol proposal, not implemented BLE characteristics or a chosen wire encoding. Storage sync/ACK/reclamation remain unimplemented.
 
 ```text
 INFO
@@ -457,7 +518,7 @@ SYNC FROM <n>
   -> streams every stored record with seq > n, in ascending seq order
 
 ACK <n>
-  -> host asserts every record through seq n is durably stored
+  -> phone asserts every record through seq n is durably saved on the phone
 
 SET_TIME <unix_epoch_seconds>
   -> sets the clock; subsequent records carry TIME_QUALITY = SYNCHRONIZED
@@ -469,6 +530,7 @@ SET_TIME <unix_epoch_seconds>
 
 Rules:
 
+- **Phone save precedes ACK.** The iPhone commits records durably before acknowledging them to the ESP. Receiving bytes, displaying a graph or starting an upload is insufficient. ACK does not depend on Internet/server availability and does not assert server receipt. Phone-to-server retries and retention belong to the app/server design; the ESP has no server dependency.
 - **ACK is cumulative and highest-contiguous.** A host that receives 100–150 but is missing 120 acknowledges 119, never 150.
 - **Retransmission is always safe.** `SYNC FROM` is a pure read; it changes no device state.
 - **Duplicate delivery is harmless.** `seq` is the idempotency key; a host that already holds a record discards the copy.
@@ -583,7 +645,7 @@ A timer wake does not open a window, because awake time dominates the power budg
 
 A stop that is requested but cannot be persisted also prevents deep sleep. Resuming autonomous operation after an explicit stop request is the same failure the window exists to prevent, so the firmware refuses to sleep and states that the flag is still armed.
 
-This is a development recovery mechanism, not the final answer. An explicit maintenance button or a BLE management mode remains in [BACKLOG.md](BACKLOG.md).
+This is the current development recovery mechanism. The installed plan now retains a permanent manual physical SYNC/wake path followed by BLE access (D-054); button circuitry and awake-window behavior remain implementation work in [BACKLOG.md](BACKLOG.md). No remote wake of a fully sleeping radio is assumed.
 
 ### Autonomous lifecycle with USB rendezvous — IMPLEMENTED, rendezvous hardware-confirmed
 

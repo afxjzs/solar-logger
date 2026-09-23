@@ -15,6 +15,102 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
+## Installed-system work — settled direction, implementation and research pending
+
+The scope is D-052–D-054 in [DECISIONS.md](DECISIONS.md), summarized in
+[PROJECT.md](PROJECT.md). Nothing in this section is an installation result.
+BLE/iPhone/server work is intended architecture, not merely a speculative
+Wi-Fi alternative. No implementation dates or exact wake timings are chosen.
+
+### V1 cabin installation and permanent manual SYNC
+
+Plan the first installed version with the logger in the glove box/cabin and
+wiring from the designated under-hood charging/jump points into the cabin.
+V1 does not require IBS/LIN access or a separate ignition/switched-12V wire for
+vehicle-on detection. Route/circuit/connector details and installed validation
+remain work to do; the enclosure is not planned for the engine bay.
+
+Implement physical manual SYNC/wake and a BLE advertising/connection window.
+It remains permanently available as a backup and explicit user-access path.
+The first BLE version may use a reset/manual-button-initiated awake window;
+the exact button/wake circuit and window timing are not chosen. Do not assume
+a phone can remotely wake a fully sleeping radio.
+
+### BMW charging-point topology — OPEN, research before any trunk-side decision
+
+The planning question arises from BMW owner charging instructions commonly
+directing chargers to designated under-hood points rather than the trunk
+battery. No authoritative BMW evidence resolving the user's installation was
+found in this repository. That premise is a research lead, not an established
+explanation of the sensing topology.
+
+When the logger moves to the trunk for IBS/LIN access, can its power/solar/
+measurement connections correctly be made near the battery, or must they still
+connect electrically through the designated under-hood points? **Unanswered.**
+Find authoritative BMW documentation applicable to the **2017 M240i / F22** and
+record evidence for each of these questions:
+
+- Why does BMW specify the under-hood charging/jump points?
+- Is the purpose to route charging current through, or make it observable to,
+  the IBS/energy-management system?
+- Would direct battery-positive and/or battery-negative connections bypass a
+  required sensing path? Do the positive and negative rules differ?
+- Is there a correct trunk-side connection point preserving IBS measurement
+  and BMW energy-management behavior?
+- Does guidance for permanent low-current accessories/loggers differ from
+  guidance for external battery charging?
+- Which findings apply to this exact vehicle/platform, rather than another
+  BMW model, model year or electrical configuration?
+
+Until this research is complete: **V1 = under-hood charging points; future
+trunk wiring topology = OPEN.** The expected trunk enclosure location is not a
+wiring decision. This documentation stint does not answer these questions.
+
+### F22 IBS/LIN access and future vehicle-on wake — OPEN
+
+During the later IBS phase, expect to move the logger near the trunk battery/
+IBS wiring. Research exact F22 wiring, connector/access locations and available
+signals. Do not assert a convenient IBS/LIN tap exists in the cabin. Determine
+whether IBS/LIN or another signal found during that integration can supply
+vehicle-on/off detection; a separate switched ignition wire is not assumed.
+The signal, electrical interface, detection criteria and vehicle-off behavior
+remain unchosen. Manual physical SYNC must continue to work independently.
+
+A possible **future vehicle-active mode** could stay awake, sample more often,
+capture richer charging/alternator telemetry and provide BLE, then return to
+parked/deep-sleep behavior after vehicle-off. This is an idea, not implemented
+behavior or a chosen cadence/state-transition design.
+
+### Native iPhone BLE app and durable record sync — PLANNED, not implemented
+
+Build BLE discovery/connection, requests for unsynced records, durable local
+phone storage, and ACK only after successful durable save. Add display, graphs
+and configuration. Define the BLE protocol/profile, interrupted-sync recovery
+and local persistence behavior; preserve sequence-based ordering and the
+proposed cumulative ACK semantics. Current USB command ACKs are not storage
+ACKs. Firmware sync/ACK/reclamation remain unbuilt; storage-full policy and its
+interaction with sequence authority still need their own decision.
+
+### Phone wall-clock synchronization — PLANNED, not implemented
+
+The phone is the intended clock source, supplying epoch/time mapping over BLE.
+Define the D-019 operation and clock-age/mapping behavior without making
+correctness depend on Wi-Fi/NTP. Preserve existing UNKNOWN-time / epoch-0
+records and distinguish any host-derived timestamp from what the device knew
+at capture. Clock drift and deep-sleep wall-clock retention still need the
+measurements listed in STORAGE_SYNC_DESIGN. USB time-setting may serve bench
+work; it is no longer the first installed clock dependency.
+
+### Self-hosted server integration — PLANNED alongside the native iOS app
+
+The phone uploads using whatever normal Internet connection it has. The server
+owns long-term storage, web UI/historical access, analysis, inference and
+higher-level processing. Design upload/retry, deduplication and phone retention
+across interrupted Internet access. ACK to the ESP follows durable phone save,
+not server availability; phone ACK is not proof of server receipt. The ESP must
+not know about or depend on the home inference/web server. Home Wi-Fi proximity
+is never assumed; direct logger Wi-Fi is optional later work.
+
 ## Firmware modularization — FOUR STAGES BUILT, LATEST 2026-09-23
 
 `Arduino/solar-logger/solar-logger.ino` is 7,059 lines by `wc -l` after the
@@ -42,9 +138,9 @@ nothing, and keep the file that a person edits from being valid C++ on its own
   2026-09-23: the `Preferences` object, the namespace, every key, and the typed
   reads and writes. Compiled and host-tested; restore and checkpoint-write
   smoke tests passed on hardware revision `d017f7d`, preserving Experiment 3.
-  See the 2026-09-23 LAB_NOTES addendum for limits. Its boundary is D-050. This is the `nvs_rtc` row of the module table below,
-  **NVS only** — the RTC-retained state that row also names did not move and
-  belongs to `auto_state`.
+  See the 2026-09-23 LAB_NOTES addendum for limits. Its boundary is D-050.
+  **NVS only** moved; RTC-retained state remains a separate future boundary,
+  not part of NVS or a combined storage/scheduler module (D-055).
 
 - **Telemetry**, `telemetry.h` and `telemetry.cpp`, 2026-09-23: how each
   machine-readable CSV line is spelled, and nothing about when one is emitted.
@@ -101,7 +197,7 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Autonomous-local totals, **not** experiment totals. Since the 2026-09-17 fix, advanced only after a successful durable append. |
 | `rtcAutoCycleCount` | R | wake cycle, arm, cold-boot resume, RTC-loss path | Zero means "first record of this session", which is what sets `FIRST_AFTER_BOOT`. |
 | `rtcAutoCommandedSleepMs` | R | `autonomousDeepSleepAgain()` | **Written, never read.** No invariant, because nothing depends on it. |
-| `rtcSleepTestMagic`, `rtcSleepTestCycle` | R | `armSleepPowerTest()`, `enterSleepPowerTestDeepSleep()`, `stopAllPowerTests()`, cold-boot resume | Belong to `power_test`, not `auto_state`. Guarded by their own magic (D-011). |
+| `rtcSleepTestMagic`, `rtcSleepTestCycle` | R | `armSleepPowerTest()`, `enterSleepPowerTestDeepSleep()`, `stopAllPowerTests()`, cold-boot resume | Belong to power-test state, not RTC-retained autonomous state. Guarded by their own magic (D-011). |
 | `activeTransports` | V | `connectionClaim()`, `connectionRelease()` | A bit is set only by an explicit software lease, never by electrical presence (D-025). Moved into `connection.cpp` as a `static` on 2026-09-18; nothing outside reads it (D-049). |
 | `hostSessionHeld`, `hostLeaseDeadlineMs`, `hostLeaseRenewedMs`, `hostKeepaliveCount`, `hostSessionStartedMs`, `hostSessionIntervalCloses` | V | `hostSessionHold()`, `hostSessionKeepalive()`, `hostSessionRelease()`, `serviceHostLease()`, `stopAutonomousTest()` | A lease is a property of one awake period, so plain RAM is right. `hostSessionIntervalCloses` is incremented inside `closeMeasurementInterval()` — measurement writing session state. |
 | `hostSessionBaselineEstablished` | V | `hostSessionHold()`, release, lease expiry, `stopAutonomousTest()` | Means "the accumulators were reset at the claim". `setup()` reads it to decide whether to reset again. A cross-function ordering contract with no enforcement. |
@@ -126,40 +222,49 @@ Three ownership problems fall straight out of the table and are written up under
   storage committed its record. Both retained totals now advance only after a
   successful append; the source characterization tests pin that ordering.
 
-### Proposed modules
+### Module boundaries — revised plan, 2026-09-23
 
-Named after what owns the state rather than after the existing section
-comments. The two splits that make the graph acyclic — `auto_state` /
-`auto_orchestrator` and `connection` / `host_session` — are why the list is
-eleven modules rather than nine; the next section shows the measurement that
-forced them.
+D-055 replaces the old broad `auto_state` proposal. The historical analysis
+below remains useful for the couplings it found, but grouping record format,
+files, sequence authority, RTC variables and scheduling in one module is no
+longer the plan. Future rows below describe responsibilities, **not chosen
+filenames or completed extractions**.
 
-| Module | Owns | Depends on |
+| Module or future concept | Owns | Boundary / status |
 | --- | --- | --- |
-| `nvs_rtc` | **NVS HALF BUILT 2026-09-23** as `nvs_persistence.h` / `.cpp`: the single `Preferences` object, the namespace, every key and every typed get/put. The name in this row is misleading and the split was made deliberately (D-050): RTC-retained state is a different store with a different lifetime, and it stays for `auto_state` | Arduino |
-| `connection` | **BUILT 2026-09-18** as `connection.h` / `connection.cpp`: `activeTransports`, `anyHostConnected()`, claim/release, `printActiveTransports()`. The USB presence diagnostics stayed in the sketch, because presence is not a claim (D-049) | Arduino |
-| `auto_state` | `AutoState`, the ten `rtcAuto*` RTC globals, `setAutoState()`, `autonomousOwnsBoard()`, LittleFS mount, 72-byte record encode/CRC/append, tail scan, sequence reservation | `nvs_rtc` |
-| `ina228_regs` | **Merged into `ina228`, built 2026-09-18.** I2C register read/write, sign extension | Arduino, `Wire` |
-| `ina228` | **BUILT 2026-09-18** as `ina228.h` / `ina228.cpp`: the register layer, identity, configuration, shutdown, `readSensor`, accumulator read/reset. `inaShutdownActive` stayed in the sketch (D-047) | Arduino, `Wire` |
-| `telemetry` | **BUILT 2026-09-23** as `telemetry.h` / `telemetry.cpp`: `CSV_HEADER` / `CSV_SAMPLE` / `CSV_DATA` / `CSV_EVENT` formatting. `CSV_HEADER` was not in this row and moved with `CSV_DATA`, which it describes. No state, and no dependency beyond Arduino, which is why the row structs repeat the measurement fields rather than taking a `SensorReading` (D-051) | Arduino |
-| `experiment` | `experimentId`, `completedInterval`, running totals, `intervalStartMs`, checkpoint save/load, interval close, accounting-suspension predicate | `ina228`, `nvs_rtc`, `telemetry`, `auto_state` |
-| `power_test` | Wi-Fi test, both deep-sleep variants, arm/stop/status | `ina228`, `nvs_rtc`, `experiment` |
-| `auto_orchestrator` | wake cycle, USB rendezvous, deadline scheduler, cold-boot window, host handoff, arm/stop/status, storage commands, `validateInaForWake()` | `auto_state`, `connection`, `experiment`, `ina228`, `nvs_rtc` |
-| `host_session` | the lease: `hostSessionHeld`, deadlines, keepalive accounting, HOLD/KEEPALIVE/RELEASE, deferred-release sleep, `serviceHostLease()` | `connection`, `auto_orchestrator`, `experiment` |
-| `command` | tokenizing, `CMD_ACK`/`CMD_RESULT`, the bounded protocol writer, dispatch | everything below it |
-| `solar-logger.ino` | `setup()`, `loop()`, boot ordering, the `pumpCommands` wiring | everything |
+| `nvs_persistence` | Preferences namespace, keys and typed reads/writes | Extracted; caller decides when to change values; no RTC ownership (D-050) |
+| `connection` | Transport claims and queries | Extracted; does not own leases, BLE radio behavior or sleep policy (D-049) |
+| `ina228` | Register access, device configuration and sensor/accumulator operations | Extracted; callers own measurement timing and accounting (D-047) |
+| `telemetry` | CSV formatting/emission mechanics | Extracted and host-tested; hardware validation pending (D-051) |
+| Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Planned, extraction not started; preserve the real Experiment 3 golden bytes; no filesystem, RTC, sequence allocation or scheduler |
+| LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Planned; use the record contract; expose log facts without deciding sequence authority, reclamation or corruption policy during a move |
+| Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | Separate concept; consumes storage results and NVS access; RTC holds retained values, not this decision policy. Future placement/API not chosen |
+| RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
+| Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
+| Experiment accounting | Tethered interval/experiment state, interval close and checkpoint timing | Planned; calls existing INA/NVS/telemetry interfaces and explicit autonomous-ownership queries |
+| Power tests | Wi-Fi/deep-sleep test state and their separate RTC lifetime | Planned; keep separate from autonomous retained-state ownership |
+| Session logic | Lease acquisition/renewal/release, expiry and accounting handoff | Planned; transport claims stay in `connection`; scheduling coordination is an explicit interface |
+| Command protocol / composition | Parse and dispatch, bounded ACK/RESULT writer, boot/loop ordering and command-pump wiring | Planned later; command protocol stays distinct from CSV and future storage ACKs |
 
-`ina228_regs`, `ina228`, `telemetry` and `experiment` are shown separately
-because they are separate files worth having; the measured stack in the next
-section treats them as one `measurement` level, which is where they all sit.
+The `record_format` extraction was stopped before it began when the DIAG_ALRT
+correctness issue was confirmed. The subsequent reorder is source-tested and
+the coding agent reports a green gate, **not uploaded or hardware validated**.
+That correctness change is separate from a future structural move. Record
+version is still 1. The golden record establishes 72 packed bytes, coverage
+0–67 and CRC at 68; it does not validate overflow behavior.
 
-The first two were built as one module on 2026-09-18. Outside the driver, the
-only register-layer function anything calls is `readRegister16()`, used by
-`validateInaForWake()` and the wake cycle's DIAG_ALRT read. A separate
-`ina228_regs` would have had to export every register helper to `ina228`. As one
-module, nine of the ten are `static` and only `readRegister16()` is public.
+The old `ina228_regs` / `ina228` rows were deliberately built as one module in
+September 2026. No separate register module is required by this revised plan.
+The dependency direction is from scheduling/composition toward mechanics and
+explicit state/results. The revised call graph must be checked when interfaces
+are scoped; the historical counts below do not prove the new graph is acyclic.
 
-### Dependency direction — CORRECTED 2026-09-16
+### Dependency direction — historical analysis, corrected 2026-09-16
+
+**Historical graph, not the current module grouping.** The `auto_state` and
+`nvs_rtc` labels through the following graph discussion describe the old
+proposal. D-050 and D-055 supersede those groupings; the revised table above is
+the current plan. No fresh graph measurement is claimed by this doc update.
 
 An earlier version of this plan claimed "exactly one hard cycle, `command` ↔
 `autonomous`." **That was wrong.** A full call-graph pass over all 119
@@ -172,7 +277,7 @@ pairs, and all three run through autonomous scheduling:
 | `host sessions` ↔ `autonomous scheduling` | 8 | 8 |
 | `measurement/accounting` ↔ `autonomous scheduling` | 3 | 8 |
 
-### Why every arrow through autonomous looked bidirectional
+### Historical graph: why autonomous looked bidirectional
 
 Because **autonomous scheduling is not a layer.** It is two things sharing one
 name, and they belong at opposite ends of the stack:
@@ -196,7 +301,7 @@ autonomous sleep policy to *read* connection state; D-034 requires the session
 to *invoke* autonomous scheduling. Those point opposite ways only while both
 live in one module.
 
-### What the splits actually achieve — measured, not asserted
+### Historical graph: measured effect of the old splits
 
 With `auto_state` / `auto_orchestrator` and `connection` / `host_session`
 separated, the module graph has **two** remaining cycles, and both pass through
@@ -217,7 +322,7 @@ re-running cycle detection with it removed: 0 cycles. The autonomous module
 takes a `void (*pumpCommands)()` supplied by `solar-logger.ino`, the only place
 allowed to know about both. Two call sites.
 
-### Resulting dependency stack
+### Historical dependency stack — superseded grouping
 
 Computed from the real call graph after both splits and the injection. Higher
 depends on lower; nothing points upward.
@@ -242,14 +347,15 @@ stacked.
 `connection` and `nvs_rtc` are the only true leaves — zero outgoing
 cross-module calls each.
 
-### Upward calls worth fixing while moving, not after — CORRECTED 2026-09-18
+### Historical call-site correction — 2026-09-18
 
 This section used to list two, both in the `measurement` → `auto_orchestrator`
 direction. **Only one is real:**
 
 - `intervalAccountingSuspended()` and `intervalAccountingSuspendReason()` call
-  `autonomousOwnsBoard()`. Harmless once that moves to `auto_state`, which is
-  below measurement.
+  `autonomousOwnsBoard()`. The old plan placed that query in `auto_state`.
+  D-055 now calls for an explicit ownership-query boundary; this historical
+  placement is not an instruction to recreate the combined module.
 
 The second entry said `validateInaForWake()` calls `autonomousDeepSleepAgain()`.
 **It does not.** Re-read on 2026-09-18: its body only reads registers and
@@ -304,10 +410,12 @@ Three things the table makes visible:
   the 250 ms grace, through the same deferred path RELEASE uses. That shared
   grace window is where the second 2026-09-18 finding below lives.
 
-### Extraction order, lowest risk first
+### Extraction history and remaining boundaries
 
-Bottom of the measured stack first, so nothing ever moves before the things it
-calls. Each stage compiles and uploads on its own. **Do not batch them.**
+Keep each extraction narrow and validate its dependencies before moving it.
+The numbered table below records the original plan and the stages already
+built; it is not a schedule for one combined `auto_state` extraction. Hardware
+smoke tests remain deliberate follow-up work, not automatic uploads.
 
 | Stage | Move | Why it is safe | Hardware check afterwards |
 | ---: | --- | --- | --- |
@@ -352,24 +460,28 @@ construction moved. Four of the five moved bodies are token-identical to
 `HEAD`, and the fifth differs only where loose parameters and three sketch
 globals became one explicit struct.
 
-The remaining original plan is below; these later stages have not been
-executed.
+### Remaining extraction plan — concepts, not filenames
 
-| Stage | Move | Why / boundary | Hardware check afterwards |
-| ---: | --- | --- | --- |
-| 6 | `auto_state` | **the split. Read-only first, append last.** Carries the ten `rtcAuto*` RTC globals | `LOGGER STORAGE INFO` and `LOGGER STORAGE DUMP` decode the existing log with the same record count and an intact tail |
-| 7 | `experiment` | 8 globals; everything it calls has moved | a full 60-second interval closes with the same running totals |
-| 8 | `power_test` | self-contained; nothing else calls into it | arm and stop each variant; confirm the refusal to arm two |
-| 9 | `auto_orchestrator` | the other split, plus the `pumpCommands` injection | five consecutive unclaimed records at the configured cadence; then `LOGGER AUTONOMOUS OFF` inside the cold-boot window, which is the edge being inverted |
-| 10 | `host_session` | the lease; carries D-026, D-028, D-035 | HOLD, three KEEPALIVEs, RELEASE; then lease expiry with no keepalives |
-| 11 | `command` | last, because everything it dispatches to has moved | representative commands in `HELP`; assert each expected result, including refusals/errors, without resetting Experiment 3 or clearing storage |
+First complete the DIAG_ALRT change's separate validation/reporting cycle; no
+hardware result is claimed here. Record format/CRC is the next scoped candidate,
+but has **not** been extracted. Keep the version-1 byte/CRC contract and golden
+record unchanged. Do not fold a behavior fix into that move.
 
-**Stages 6 and 9 are the two that carry real risk.** Stage 6 moves the RTC
-globals, where a header-defined copy silently resets the session clock. Stage 9
-inverts the command pump, and its hardware check has to include the cold-boot
-maintenance window specifically: that window is the reason the edge exists
-(D-021), and it is the one path that cannot be exercised from an ordinary
-rendezvous.
+| Future boundary | What must remain separate | Validation focus when undertaken |
+| --- | --- | --- |
+| Record format / CRC | No LittleFS, RTC, sequence allocation or scheduling | Exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics |
+| LittleFS mechanics | No sequence-authority or storage-full policy decision | Preserve append/read/recovery behavior; handle the known corrupt-record/tail issue as an explicit correctness change, not silent cleanup |
+| Sequence authority / reservation | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases, NVS write failure and duplicate avoidance; reclamation must revisit authority explicitly |
+| RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
+| Autonomous scheduling / policy | Consume mechanics/state through explicit boundaries | Existing deadline, handoff and command-pump contracts; preserve the known overrun xfail until its own fix |
+| Experiment, power-test, session and command concerns | Retain accounting ownership and the separation of transport claims from leases | Scoped characterization, required local gate and later deliberate hardware checks for each move |
+
+These rows are separate scopes, not permission to batch them. Exact filenames,
+interfaces and order after record format remain to be chosen from actual
+coupling. Do not carry forward the old numeric stage 6 as an all-in-one module.
+RTC lifetime and command-pump inversion remain high-risk boundaries; moving
+normal timer-wake or session logic still requires its own hardware acceptance,
+including the cold-boot maintenance window and lease expiry where applicable.
 
 ### The gate every stage passes — BUILT 2026-09-18
 
@@ -425,8 +537,9 @@ addendum. A past pass does not validate the next image:
   RELEASE ends with the capture reporting that the transport disappeared after
   the successful result.
 
-**Stages 6, 7, 9 and 10 need more than this.** They move autonomous state,
-experiment accounting, the orchestrator and the host session. Run the full
+**Extractions touching retained state, experiment accounting, autonomous
+policy or host sessions need more than this.** The old stage numbers no longer
+define those boundaries. Run the full
 acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md) 2026-09-17 after each of
 them, including lease expiry (step 7), five consecutive unclaimed records
 (step 8), and the refusals (steps 9 and 10).
@@ -439,10 +552,10 @@ them, including lease expiry (step 7), five consecutive unclaimed records
   would silently reset. This is the single highest-risk detail in the whole
   plan.
 - **There are twelve `RTC_DATA_ATTR` globals, not eleven, and they split across
-  two modules.** Ten are `rtcAuto*` and belong to `auto_state`;
-  `rtcSleepTestMagic` and `rtcSleepTestCycle` belong to `power_test` (D-011).
-  Counted by `grep -c RTC_DATA_ATTR` on 2026-09-17. Moving all twelve into
-  `auto_state` would put the deep-sleep power test's cycle counter under the
+  two ownership domains.** Ten are `rtcAuto*` and belong to retained autonomous
+  state; `rtcSleepTestMagic` and `rtcSleepTestCycle` belong to power-test state
+  (D-011). Counted by `grep -c RTC_DATA_ATTR` on 2026-09-17. Moving all twelve
+  under one autonomous validity guard would put the deep-sleep power test's cycle counter under the
   autonomous module's magic guard, where a `stopAutonomousTest()` that clears
   `rtcAutoMagic` sits next to state it does not own.
 - **`rtcAutoCommandedSleepMs` now has a consumer.** RESOLVED 2026-09-17. It was
@@ -1217,19 +1330,130 @@ already records that instant as `intervalStartMs`.
 
 ## SHOULD FIX DURING MODULARIZATION
 
-### DIAG_ALRT read order may lose charge-overflow evidence — source question, 2026-09-23
+### DIAG_ALRT was read after the accumulators, destroying overflow evidence — FIXED IN SOURCE 2026-09-23, NOT YET HARDWARE VALIDATED
 
-`runAutonomousWakeCycle()` reads CHARGE and ENERGY before `DIAG_ALRT`.
-Its comment and STORAGE_SYNC_DESIGN say `CHARGEOF` clears when CHARGE is read.
-If that stated clear-on-read behavior is correct, reading the flag afterwards,
-even in the same wake, cannot establish that no charge overflow occurred.
-This audit confirms the ordering contradiction only; it has not verified the
-silicon behavior against the datasheet or induced an overflow on hardware.
+Raised 2026-09-23 as an open ordering question, confirmed the same day against the
+datasheet, and fixed the same day. **The source fix is in; the flag has still
+never been seen to fire on hardware.**
 
-**Open question:** should DIAG_ALRT be captured before the accumulator reads?
-Verify the datasheet's clear conditions and exercise an overflow before changing
-runtime order. Until then, do not treat same-wake sampling as validated overflow
-protection. This is separate from the existing scheduler-overrun `xfail`.
+**What was wrong.** `runAutonomousWakeCycle()` read CHARGE and ENERGY and only
+then read `DIAG_ALRT`. SLYS021A Table 7-16 states verbatim that ENERGYOF "Clears
+when the ENERGY register is read" and CHARGEOF "Clears when the CHARGE register is
+read", so the two accumulator reads cleared both bits before they were sampled.
+`AUTO_FLAG_INA_ACCUM_OF` (0x40) could not be set by a genuine accumulator overflow
+on the autonomous wake path, and every record asserted "no accumulator overflow"
+with a correct CRC over the claim. A wrong belief rather than an error: nothing
+failed and nothing was logged.
+
+**What changed.** The single `readRegister16(REG_DIAG_ALRT, diag)` call moved above
+`readAccumulatedCharge_mAh()` / `readAccumulatedEnergy_mWh()` in
+[runAutonomousWakeCycle()](../Arduino/solar-logger/solar-logger.ino#L3901). The
+flag-setting logic is unchanged. Nothing is lost by reading earlier: reading
+`DIAG_ALRT` clears none of the three bits, the firmware never writes `DIAG_ALRT`
+so ALATCH stays at its reset value 0 (Transparent), and nothing reads CNVRF or the
+threshold bits.
+
+`test_characterization_record.py` now pins `diag < charge` and `diag < energy`
+inside that function, plus that the flag bodies are unchanged and that D-020's
+read-before-reset still holds. The order is the correctness, so it is asserted
+rather than commented — and it was verified to fail against the pre-fix source, so
+it is a real guard and not a tautology.
+
+**Two side effects, both stated rather than absorbed.** In the case where both the
+DIAG_ALRT read and the accumulator reads fail, the two error lines now print in the
+opposite order. And the `[TIMING] INA validate+accum read` bucket became
+`INA validate+diag+accum`: the DIAG_ALRT read used to be counted in the snapshot
+bucket, so those two timing numbers are not comparable across this change. The
+label was updated rather than left to mean something different than it says.
+
+**Records already written are not retroactively qualified.** Experiment 3's stored
+records still carry `INA_ACCUM_OF = 0` from the broken path, and that zero means
+"not measured", not "no overflow". Their charge and energy values are unaffected —
+accumulators were always read correctly and before any reset (D-020), and the
+40-bit registers are nowhere near overflow at roughly 1.5 mAh per minute — but the
+flag cannot be used as evidence for any record below the sequence at which the
+fixed image starts running.
+
+**Outstanding, and the datasheet does not substitute for it:** an overflow has
+never been induced on hardware, so the corrected path has never been observed to
+set the flag. The reorder makes it reachable in principle; only an induced overflow
+proves it fires. Needs a hardware check before `INA_ACCUM_OF` is trusted either way.
+
+**Not addressed by this fix.** `MATHOF` (0x20) was never affected by the ordering,
+because a read does not clear it. But the datasheet clears MATHOF on "triggering
+another conversion" and this firmware converts continuously, so
+`AUTO_FLAG_INA_MATHOF` qualifies approximately the most recent conversion rather
+than the whole interval. That is a measurement-semantics question and remains open.
+
+Separate from the scheduler-overrun `xfail`.
+
+### Charge is a signed net integral but energy is an unsigned magnitude integral — semantic asymmetry, 2026-09-23
+
+Observed in real Experiment 3 data, not inferred. From the golden record now
+fixtured in `tests/test_characterization_record.py`:
+
+```text
+I_mA=-0.616   dQ_uAh=-10     Qsum_uAh=380771
+P_mW=8.025    dE_uWh=129     Esum_uWh=5602351
+```
+
+Current and charge go negative during discharge. Power and energy stay positive
+for the same period. So **`running_charge_uAh` can decrease while
+`running_energy_uWh` only ever increases**, and the two running totals in one
+record are not the same kind of quantity.
+
+**This is the INA228's own behavior, not a firmware defect.** Verified against
+SLYS021A:
+
+| Register | Table | Datasheet wording |
+| --- | --- | --- |
+| CURRENT (7h) | 7-12 | "Two's complement value." |
+| POWER (8h) | 7-13 | "Unsigned representation. Positive value." |
+| ENERGY (9h) | 7-14 | "Unsigned representation. Positive value." |
+| CHARGE (Ah) | 7-15 | "Two's complement value." |
+
+The firmware reads each with matching signedness — `readRegister24Unsigned(REG_POWER, ...)`
+and `readRegister40Unsigned(REG_ENERGY, ...)` against `readRegister40Signed(REG_CHARGE, ...)`
+— so nothing is being misread. The hardware integrates |P| dt and cannot report
+negative power.
+
+**The consequence worth stating:** `running_energy_uWh` is a magnitude integral,
+so **net energy balance cannot be computed from these records at all**, and
+comparing `Qsum` against `Esum` as though both were net is wrong. A host that
+assumes energy is signed will silently conclude the battery gained energy during
+a discharge. The record fields are declared `int64_t` / `int32_t`, which suggests
+a signed quantity the hardware never produces, and that is the part most likely
+to mislead a reader.
+
+**Not changed, and deliberately so.** Fixing this is not a bug fix — it is a
+choice among: leave it and document the asymmetry; derive a signed energy on the
+host from `sign(dQ) * dE`, which is an approximation whenever current reverses
+inside one interval; or reconstruct signed energy on the device, which the INA228
+cannot do without integrating V·I in firmware and giving up the hardware
+accumulator. The third changes what the instrument measures. **None of these may
+be chosen without a decision, and the first is what is in force today.**
+
+Any change to the stored representation is also a 72-byte format change and a
+record version decision. See STORAGE_SYNC_DESIGN Section 5.
+
+### The tethered interval close performs no overflow check at all — 2026-09-23
+
+Found while confirming the defect above. `readRegister16(REG_DIAG_ALRT, ...)` at
+[solar-logger.ino:3990](../Arduino/solar-logger/solar-logger.ino#L3990) is the
+**only** `DIAG_ALRT` read in the entire firmware.
+
+`closeMeasurementInterval()`
+[:2786](../Arduino/solar-logger/solar-logger.ino#L2786), which closes every
+host-session/tethered interval, reads the snapshot, reads CHARGE, reads ENERGY,
+and resets the accumulators without ever consulting `DIAG_ALRT`. So the
+`CSV_DATA` interval rows in `data/intervals.csv` carry no overflow qualification
+of any kind — not a cleared one, none.
+
+This is a coverage gap rather than a wrong claim: the CSV schema never had an
+overflow column, so nothing asserts the interval was clean. Worth resolving in
+the same change as the ordering fix, since both want the flag read before the
+accumulators. Whether tethered rows should carry the qualification is a schema
+decision and is not assumed here.
 
 ### One corrupt record discards every valid record after it
 
@@ -1680,11 +1904,14 @@ An external battery-backed RTC would remove that gap and would also sidestep the
 
 Two things should be measured before this is even evaluated: actual RC drift on this board, and whether wall-clock genuinely survives deep sleep here as the build configuration suggests. Both are listed in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md) Section 12. Adding hardware to fix an unmeasured problem is the wrong order.
 
-## Wi-Fi NTP and Bluetooth time sync
+## Optional Wi-Fi/NTP — later, not an installed dependency
 
-The `SET_TIME` operation is designed to be transport-independent, so NTP over Wi-Fi and a Bluetooth mobile client both feed the same logical operation with no change to record semantics. Neither transport is implemented.
-
-The first one worth building is automatic `SET_TIME` from the Python logger on USB connect, which is listed in the storage design rather than here because it is part of that milestone.
+Phone/BLE time and sync are now the intended installed path (D-053), tracked in
+the installed-system work above. Automatic USB `SET_TIME` is a possible bench
+aid rather than the first required installed implementation. Wi-Fi/NTP could
+later feed the same transport-independent time contract, but no home Wi-Fi
+proximity or ESP-to-server connection is assumed. Neither BLE time-setting nor
+Wi-Fi/NTP time-setting is implemented.
 
 ## Hardware power-gating of the INA228
 
@@ -1721,18 +1948,19 @@ Status update: LittleFS local records and sequence recovery are implemented.
 The sync/ACK/reclamation portions remain unbuilt; the background above is the
 original motivation, not a claim that autonomous storage is still absent.
 
-## Explicit maintenance mode for an autonomously armed device
+## Installed access versus the current maintenance window
 
-The 15-second cold-boot maintenance window ([DECISIONS.md](DECISIONS.md) D-021) is a development recovery mechanism. It costs awake time on every cold boot and it requires physical access to reset the board.
+The 15-second cold-boot maintenance window (D-021) is implemented for development
+recovery. D-054 now settles the installed direction: a permanent manual physical
+SYNC/wake path followed by BLE phone access, with button circuitry and awake
+window details still to implement. This is no longer merely a choice between a
+button and BLE; the physical wake makes the radio available. No remote wake of
+a fully sleeping radio is assumed.
 
-Two better mechanisms are worth considering once the logger leaves the bench:
-
-- **A hardware maintenance signal.** A button or a jumper read at boot, so a deployed logger can be put into management mode deliberately rather than by timing a window. This is the more robust option, and it costs a pin and a part.
-- **A BLE management mode.** Would allow stopping, inspecting, and syncing without physical access, and shares the transport that time sync and record sync will want anyway. It costs radio power and a larger attack surface on a device parked in a car.
-
-USB-host detection was investigated as a way to open the window only when someone is actually attached, and it is not reliable enough to gate recovery on. See [LAB_NOTES.md](LAB_NOTES.md) 2026-09-11 for what `isPlugged()` and `isConnected()` actually report. The diagnostics are printed on every window open and close, so the data to revisit this is being collected.
-
-Not scheduled.
+Future vehicle-on wake is separate and does not replace manual SYNC. Its signal
+is unchosen and belongs with IBS/F22 wiring research above. USB electrical
+presence still does not count as a host claim (D-025), and the current USB
+management workflow remains unchanged.
 
 ## Battery state of charge
 

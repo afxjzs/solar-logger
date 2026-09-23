@@ -24,6 +24,21 @@ Tethered experiment state — id, interval number, running charge and energy —
 
 The Python host logger discovers the board, prints everything the firmware says, adds a timezone-aware host timestamp to every row, writes durable CSVs, and drives a four-panel live plot with zoom, follow, and hover inspection.
 
+## Planned installed system
+
+V1 connects electrically at the 2017 BMW M240i / F22's designated under-hood
+charging/jump points, with wiring into the cabin and the logger in the glove
+box. No IBS/LIN tap or separate ignition wire for vehicle-on detection is
+required for V1. A later IBS phase is expected to move the logger to the trunk;
+correct trunk-side electrical connections remain a research question.
+
+BLE is the intended installed transport. A native iPhone app will save records
+durably before ACKing, provide time, display/configure the logger and upload to
+the self-hosted server. The ESP will not depend on that server or home Wi-Fi.
+Manual physical SYNC remains a permanent access path; vehicle-on wake is future
+work with no signal chosen. These are plans, not implemented or installed
+features. See [docs/PROJECT.md](docs/PROJECT.md) and decisions D-052–D-054.
+
 ## Power characterization results
 
 The rig was used to characterize its own consumption. All figures are DMM readings with the board on external AA power and USB physically disconnected.

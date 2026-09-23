@@ -154,7 +154,7 @@ A host may retrospectively anchor records written before a sync, using the sessi
 
 Clock drift and periodic resynchronization are normal operating considerations, not failure modes. The RTC slow clock is the internal RC oscillator (`CONFIG_RTC_CLK_SRC_INT_RC=y`), calibrated at boot but not crystal-backed, and nothing in this project may describe it as precision wall-clock hardware. No absolute-time accuracy figure may be published in documentation, firmware output, or host tooling until drift on this board has been measured.
 
-**Implementation status, 2026-09-23:** records currently use only `UNKNOWN` with `epoch_s = 0`. `SET_TIME`, clock-age tracking, synchronized/holdover transitions, and host anchoring are not implemented. The statements above define the intended contract.
+**Implementation status, 2026-09-23:** records currently use only `UNKNOWN` with `epoch_s = 0`. `SET_TIME`, clock-age tracking, synchronized/holdover transitions, and host anchoring are not implemented. The statements above define the intended contract. D-053 now selects the iPhone over BLE as the intended installed clock source; Wi-Fi/NTP remains optional and USB time-setting a possible bench aid.
 
 No external RTC is required or added. One becomes worth considering only if a measured drift figure, or a real need for wall-clock continuity across power loss, justifies it.
 
@@ -164,7 +164,15 @@ The INA228 hardware CHARGE and ENERGY registers hold the integral of the entire 
 
 The pre-autonomous `setup()` did exactly this. Current cold-boot initialization still resets the accumulators, but a normal armed timer wake takes the early branch into `runAutonomousWakeCycle()` first: read, durable append, then reset. RTC-loss recovery deliberately discards an unknown-duration interval with diagnostics. The original hazard is not the normal autonomous wake path today.
 
-An autonomous wake reads accumulators, reads the `DIAG_ALRT` overflow flags that qualify them, builds and durably stores the record, and only then resets the accumulators for the next interval. Reads come before writes.
+An autonomous wake reads `DIAG_ALRT` first, then CHARGE and ENERGY, builds and durably stores the record, and only then resets the accumulators for the next interval. Reads come before writes; the 2026-09-23 extension below establishes the required order between those reads.
+
+**Extended 2026-09-23, after those flags turned out to qualify nothing.** Reading an accumulator clears its own overflow flag. SLYS021A Table 7-16 states that ENERGYOF "Clears when the ENERGY register is read" and CHARGEOF "Clears when the CHARGE register is read". `runAutonomousWakeCycle()` read both accumulators and only then read `DIAG_ALRT`, so both bits were always zero by the time they were sampled and `AUTO_FLAG_INA_ACCUM_OF` was unreachable for a genuine overflow.
+
+The decision this adds, and the reason it is recorded here rather than only as a fixed bug: **a flag that is destroyed by the read it qualifies must be sampled before that read, not merely in the same wake.** "Reads come before writes" was the right rule for the accumulators and is not sufficient for the flags, because a read is a write as far as these three bits are concerned. Any future code that reads CHARGE or ENERGY inherits this obligation.
+
+`MATHOF` is exempt — a read does not clear it — and is cleared by the next conversion instead, so in continuous mode it qualifies approximately the latest conversion rather than the interval. That is an open question, not a settled part of this decision.
+
+**Ordering fixed in source 2026-09-23**: `DIAG_ALRT` is now read before both accumulators, the flag logic is unchanged, and `test_characterization_record.py` pins the order so a later extraction cannot silently restore it. **Not yet hardware validated** — an overflow has never been induced, so the corrected path has never been observed to set the flag, and stored Experiment 3 records still carry a `0` that means "not measured" rather than "no overflow". `closeMeasurementInterval()` still performs no overflow check at all. Both tracked in [BACKLOG.md](BACKLOG.md).
 
 A wake must not reconfigure an INA228 that is already configured and already converting. Writing the `ADC_CONFIG` MODE bits interrupts and restarts a conversion in progress, discarding accumulation that had not yet been committed. Reconfiguration belongs on cold boot, where the device state is genuinely unknown.
 
@@ -1190,6 +1198,107 @@ by this stage.
 readability change riding inside a move, and it would have broken the
 token-for-token recomposition the audit depends on. The per-field precisions are
 explained in a comment in `telemetry.cpp` and pinned by a test.
+
+## D-052: V1 uses under-hood electrical points and a cabin enclosure; trunk topology remains open
+
+Settled installation scope, 2026-09-23. **Planned, not installed or hardware
+validated.** For the user's 2017 BMW M240i / F22, the first installed version
+connects the solar/logger electrical path at the designated under-hood
+charging/jump points. The logger itself initially lives in the glove box/cabin,
+with wiring routed from the engine bay into the cabin.
+
+V1 requires no IBS/LIN tap and adds no separate ignition/switched-12V wire
+merely to detect vehicle-on. When IBS integration is undertaken, the logger is
+expected to move to the trunk near the battery/IBS wiring. Vehicle-on/off might
+then come from IBS/LIN or another signal discovered during that work; a
+separate switched wire is not assumed. A convenient cabin IBS/LIN tap is not
+established.
+
+**Enclosure location is not electrical topology.** Moving to the trunk does not
+settle where power, solar and measurement connections attach. Whether a
+trunk-side connection can preserve the required BMW sensing/energy-management
+path is an open research question, including potentially different positive
+and negative connection rules. BACKLOG owns that research. Until authoritative
+F22-specific evidence resolves it: V1 uses under-hood points; future trunk
+wiring topology remains OPEN.
+
+## D-053: BLE connects the logger to a phone that owns sync, clock and server bridging
+
+Settled architecture direction, 2026-09-23; **not an implemented BLE/sync stack**.
+BLE is the intended installed wireless transport. The car need never be near
+home Wi-Fi. Wi-Fi and NTP are optional later capabilities, not prerequisites for
+logging correctness, time synchronization or getting records to the server.
+
+- The ESP measures, stores, maintains record sequence, exposes
+  records/status/settings, accepts storage ACKs and time/configuration, and
+  sleeps reliably. This is the intended responsibility boundary; ACK and time
+  sync are not implemented yet.
+- The native iPhone app discovers/connects over BLE, requests unsynced records,
+  saves them durably, and **ACKs only after durable phone save**. It supplies
+  wall-clock time, displays/graphs/configures the logger, and uploads using the
+  phone's normal Internet connection.
+- The self-hosted server provides long-term storage, a web UI/historical access,
+  analysis, inference and higher-level processing. Server integration will
+  likely be built alongside the native iOS app.
+
+The phone is the bridge. The ESP does not know about or depend on the home
+inference/web server. A device ACK attests to phone durability, not server
+receipt; phone-to-server delivery is a separate responsibility. Storage
+reclamation and full-storage policy remain undecided and unimplemented.
+
+The phone is the intended wall-clock source. BLE sync can provide epoch/time
+mapping through the D-019 contract, without Wi-Fi/NTP. The exact BLE encoding
+and mapping are still design work. Existing UNKNOWN-time / epoch-0 records are
+valid historical records and are not rewritten. USB time-setting remains a
+possible bench aid, not a dependency of the installed system.
+
+## D-054: Manual SYNC is permanent; vehicle-on wake is a future extension
+
+Settled wake-access requirement, 2026-09-23; **planned except for the existing
+autonomous timer wake**. Keep these conceptual wake reasons distinct:
+
+1. TIMER: periodic autonomous measure/store.
+2. MANUAL SYNC BUTTON: physical wake followed by BLE advertising/phone access.
+   This remains permanently available as a fallback and explicit user-access
+   path, even after other wake sources exist.
+3. FUTURE VEHICLE-ON WAKE: investigate with IBS integration. The electrical
+   signal, detection rules and any additional wiring are not chosen.
+
+The first BLE version may use reset/manual-button-initiated awake windows. It
+must not depend on remotely waking a fully sleeping Wi-Fi/BLE radio; no
+“wake on LAN” mechanism is assumed. Button wiring and awake-window timing need
+implementation and validation.
+
+Vehicle-active logging—remaining awake, a higher sample cadence, richer
+charging/alternator telemetry and BLE availability, then returning to parked
+sleep—is a future idea only. This decision chooses no cadence or detection/
+vehicle-off rule.
+
+## D-055: Record format, storage, sequence authority, retained state and policy are separate boundaries
+
+Planning correction, 2026-09-23. **No module extraction is performed by this
+decision.** The old `auto_state` proposal grouped unrelated responsibilities
+and is superseded as an implementation plan. Distinguish:
+
+- record layout/version, units, flags, validation and CRC;
+- LittleFS mount/read/append/scan/truncate mechanics and error reporting;
+- sequence authority/reservation policy, using explicit log-recovery facts and
+  NVS results under D-023;
+- RTC-retained autonomous state, its validity and lifetime;
+- autonomous scheduling/state-machine policy, measurement/storage ordering and
+  sleep/awake transitions;
+- session leases and transport claims, retaining the existing separation of
+  `connection` bookkeeping from session and sleep policy.
+
+Storage mechanics must report recovery outcomes; it must not silently choose
+sequence authority or redefine corruption/reclamation policy during a move.
+Retained state does not own files, record encoding or the scheduler. Scheduling
+uses these lower-level results without making them own autonomous policy.
+The planned interface direction must be checked against the code when each
+extraction is scoped; the old call-graph counts are historical, not a proof of
+the revised design. Exact future filenames/APIs and later extraction order
+remain to be decided. The `record_format` extraction has not started; its
+72-byte/version-1 contract and the Experiment 3 golden record must survive it.
 
 ## Project practice
 

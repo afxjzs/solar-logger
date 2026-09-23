@@ -6,6 +6,315 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-23: Installed architecture decisions and modularization-plan correction — documentation only
+
+Recorded from the user's architecture brief, not from a hardware experiment.
+No firmware, tests or tooling were edited by this documentation stint; no build,
+upload or serial operation was performed, and no commit was made. Existing
+coding-agent changes and results remain separate from these decisions.
+
+D-052 settles V1 electrical attachment at the designated under-hood charging/
+jump points with the logger in the glove box/cabin, with neither an IBS/LIN tap
+nor a separate ignition wire for vehicle-on detection. The later IBS phase
+expects a trunk enclosure, but trunk electrical topology and F22 signal access
+remain open research; no authoritative BMW answer was found in the repository.
+
+D-053 selects BLE/iPhone as the installed path: phone durable save before ACK,
+phone-supplied time and phone-to-server upload. The ESP has no home-server or
+home-Wi-Fi dependency. D-054 retains manual physical SYNC permanently; exact
+vehicle-on wake and a possible vehicle-active mode remain future design work.
+None of these installed features is claimed built or measured.
+
+D-055 replaces the broad proposed `auto_state` grouping with separate record/
+CRC, LittleFS mechanics, sequence-authority, retained-state and scheduling/
+session concepts. Exact future filenames/APIs remain undecided. The old graph
+analysis is labeled historical rather than presented as proof of this plan.
+
+The coding-agent entry below remains the authority for its source tests and
+gate result. The DIAG_ALRT fix was source-tested, gate green, not uploaded and
+not hardware validated at that report. Record format/version did not change:
+version 1, 72 bytes, CRC covers 0–67 and is stored at 68, with the real
+Experiment 3 record matching IEEE/zlib CRC-32. That deployed-record evidence is
+not hardware validation of the reorder. `record_format` remains unextracted.
+The tethered overflow gap, MATHOF interval limits, signed-charge versus unsigned
+magnitude-energy/net-energy question, corrupt-tail behavior, overrun xfail and
+unimplemented sync/ACK/reclamation/full-storage policy remain open.
+
+Documentation drift corrected here: the obsolete telemetry-in-progress
+paragraph, USB-first installed clock priority, optional-only manual access,
+and the combined `auto_state` plan. BMW wiring questions were added without
+answering them. Historical measurements and the coding-agent report below are
+preserved.
+
+## 2026-09-23: DIAG_ALRT read order confirmed WRONG and FIXED; golden Experiment 3 record proves the 72-byte layout - record-format extraction NOT started
+
+**No hardware was touched.** Nothing was uploaded or committed, Experiment 3 was
+not reset, storage was not cleared, and no serial port was opened. **No overflow
+was induced on hardware, so the fixed path has never been seen to set the flag.**
+
+One runtime behavior change was made, after it was authorized explicitly: the
+`DIAG_ALRT` read order fix described below. The `record_format` extraction was
+NOT started.
+
+### What this stint was for, and why it stopped
+
+The stint was to extract the 72-byte durable record format and its CRC into a
+`record_format` module, after first resolving the "overflow-read ordering"
+question raised by the 2026-09-23 documentation audit. Its contract said that a
+real correctness defect stops the extraction and gets reported on its own,
+because a behavior fix must not ride inside a file move.
+
+The question turned out to be a real defect, so the extraction stopped and was
+reported. **The extraction was not started** — no `record_format.h` / `.cpp`
+exists. The ordering fix itself was then authorized explicitly, as its own change,
+and applied; the file move was not.
+
+### The defect
+
+`runAutonomousWakeCycle()` read the accumulators and then read the flag that
+qualifies them. The read destroys the flag.
+
+Order in the pre-fix source, at commit `79519df`, by in-function offset rather
+than line number so the reference survives the fix that follows:
+
+| Order | What happened |
+| ---: | --- |
+| 1 | `readAccumulatedCharge_mAh()` → reads CHARGE (0Ah), **clears CHARGEOF** |
+| 2 | `readAccumulatedEnergy_mWh()` → reads ENERGY (09h), **clears ENERGYOF** |
+| 3 | `readRegister16(REG_DIAG_ALRT, diag)` → reads 0Bh, **too late, always 0** |
+| 4 | sets `AUTO_FLAG_INA_ACCUM_OF`, which could never be reached |
+
+Current line numbers after the fix: `DIAG_ALRT` at
+[solar-logger.ino:3977](../Arduino/solar-logger/solar-logger.ino#L3977), the flag
+at [:3989](../Arduino/solar-logger/solar-logger.ino#L3989), CHARGE and ENERGY at
+[:4006](../Arduino/solar-logger/solar-logger.ino#L4006)-4007.
+
+### The evidence
+
+The in-repo evidence was circular: the only statement of the clear-on-read
+behavior was the comment in `ina228.h` whose correctness was the question, and it
+cited "Table 7-9", which is a different register. The datasheet was therefore
+fetched and read directly: TI INA228 SLYS021A, January 2021, revised May 2022,
+§7.6.1.12, Table 7-16, "DIAG_ALRT Register Field Descriptions". Quoted verbatim:
+
+| Bit | Field | Clear condition |
+| --- | --- | --- |
+| 11 | ENERGYOF | "Clears when the ENERGY register is read." |
+| 10 | CHARGEOF | "Clears when the CHARGE register is read." |
+| 9 | MATHOF | "Must be manually cleared by triggering another conversion or by clearing the accumulators with the RSTACC bit." |
+
+Register addresses were checked against the same document's register map
+(`ina228.cpp:30-31`, `ina228.h:75`): ENERGY = 9h, CHARGE = Ah, DIAG_ALRT = Bh.
+All three match.
+
+### Consequence
+
+Every autonomous record written by the pre-fix firmware reports "no accumulator
+overflow", with a correct CRC over that claim, whether or not an overflow
+occurred. Nothing errored and nothing was logged — the flag read as clean because
+the evidence was cleared microseconds earlier. This is a wrong belief, not a
+crash, which is the class that is found at the worst possible time.
+
+Experiment 3's 3,272 stored records are all affected in this respect. Their
+charge and energy values are unaffected: the accumulators themselves are read
+correctly and before any reset (D-020), and the 40-bit registers are nowhere near
+overflow at roughly 1.5 mAh per minute. The defect is that the record cannot
+*attest* to that, not that the data is known to be wrong.
+
+`MATHOF` is genuinely reachable — a read does not clear it. Separately, the
+datasheet says MATHOF clears on "triggering another conversion", and this
+firmware runs the INA228 continuously, so `AUTO_FLAG_INA_MATHOF` qualifies
+approximately the latest conversion rather than the whole interval. That is a
+measurement-semantics question, it is newly recorded, and the reorder does not
+address it.
+
+### A second finding
+
+`readRegister16(REG_DIAG_ALRT, ...)` at :3990 is the **only** `DIAG_ALRT` read in
+the firmware. `closeMeasurementInterval()`
+[:2786](../Arduino/solar-logger/solar-logger.ino#L2786) — every tethered interval
+close — never reads it, so `CSV_DATA` rows in `data/intervals.csv` carry no
+overflow qualification at all. A gap rather than a false claim, since the CSV
+schema has no overflow column.
+
+### The fix
+
+`readRegister16(REG_DIAG_ALRT, diag)` moved above `readAccumulatedCharge_mAh()`
+and `readAccumulatedEnergy_mWh()` in `runAutonomousWakeCycle()`. One call moved.
+The flag-setting logic is byte-for-byte the same, the record format is untouched,
+and no version was bumped.
+
+Nothing is lost by reading it earlier, and this was checked rather than assumed:
+reading `DIAG_ALRT` clears none of the three bits (Table 7-16 lists clear
+conditions only for the threshold bits and CNVRF, and only when ALATCH = 1), the
+firmware never writes `DIAG_ALRT` so ALATCH stays at its reset value 0
+(Transparent), and a grep found no reader of CNVRF or any threshold bit anywhere
+in the firmware.
+
+**Two side effects, recorded rather than absorbed:**
+
+1. If both the `DIAG_ALRT` read and the accumulator reads fail in one wake, the
+   two error lines now print in the opposite order. Cosmetic, in a double-failure
+   path.
+2. The `[TIMING]` breakdown bucket `INA validate+accum read` is now
+   `INA validate+diag+accum`. The `DIAG_ALRT` read used to fall in the *snapshot*
+   bucket, because `tAccumRead` was sampled before it. So that pair of timing
+   numbers is **not comparable across this change**, and the label was updated to
+   say what it now covers rather than left to mean something other than it says.
+
+**What the fix does not do.** It does not make the flag trustworthy. It makes it
+reachable. An overflow has never been induced on this board, so `INA_ACCUM_OF` has
+never been observed set, before or after. And stored Experiment 3 records keep
+their `INA_ACCUM_OF = 0` from the broken path, where **zero means "not measured",
+not "no overflow"**.
+
+### Tests added for the ordering
+
+`test_characterization_record.py` now pins, inside `runAutonomousWakeCycle()`,
+that `DIAG_ALRT` is read before both accumulators; that the two flag-setting
+bodies are unchanged; and that D-020's read-before-reset still holds.
+
+The order is the correctness, so it is asserted rather than commented. **The guard
+was verified to have teeth:** run against the pre-fix committed source, the
+`DIAG_ALRT` call sits at in-function offset 2450 against CHARGE at 1905 and ENERGY
+at 1969, so both new assertions fail on it. A guard that passes on the bug it
+describes is worse than none.
+
+### What changed here
+
+- `solar-logger.ino` — the reorder, the timing label, and comments. The comment at
+  the read site used to say the ordering was safe; it now says the order is the
+  correctness and points at the test.
+- `ina228.h` — corrected "Table 7-9" to Table 7-16, quoted the real clear
+  conditions, and stated the obligation any future accumulator reader inherits.
+- `tests/test_characterization_record.py` — golden record fixture, binary
+  compatibility tests, ordering guards.
+- `STORAGE_SYNC_DESIGN.md` §4 wake ordering and §5 record table and flag table,
+  `DECISIONS.md` D-020, `BACKLOG.md`, `PROJECT.md`, `INDEX.md`.
+
+### Gate result
+
+`tools/check.sh`: **ALL OK** at every stage — baseline, after the docs/comment
+pass, and after the fix.
+
+| | baseline | after docs+comments | after the fix |
+| --- | --- | --- | --- |
+| pytest | 249 passed, 1 xfailed | 249 passed, 1 xfailed | **333 passed, 1 xfailed** |
+| flash | 1,102,455 (84%) | 1,102,455 | 1,102,455 |
+| globals | 36,332 (11%) | 36,332 | 36,332 |
+
+The one `xfail` throughout is the known short-cadence autonomous overrun, unrelated.
+84 tests were added, all host-only.
+
+**On the flash figure.** The docs+comments pass could not change the image, because
+comments do not reach the code generator; identical size there confirms it was a
+comment-only edit. The fix stage is different: code moved and a string literal grew
+by one character, so **the image is certainly not identical even though its size
+is** — the size is quantized by alignment padding, which absorbed the difference.
+Equal size is not equal bytes, and this row should not be read as though it were.
+
+### Not done
+
+The `record_format` extraction was **not started**; no `record_format.h` / `.cpp`
+exists. `closeMeasurementInterval()` still reads no overflow flag at all. MATHOF's
+continuous-conversion semantics and the charge/energy sign asymmetry are both
+recorded in BACKLOG and unaddressed. Nothing was uploaded, so the board is still
+running the pre-fix image.
+
+### What the record-format extraction will need — established while scoping it
+
+Recorded so the next stint does not rediscover it. All four were read out of the
+source, not assumed.
+
+**The characterization tests survive the move without edits.**
+`tests/firmware_source.py` reads every file Arduino compiles —
+`SOURCE_SUFFIXES = {.ino, .h, .hpp, .c, .cpp}` in the sketch directory plus
+`src/` recursively — so the 23 record assertions in
+`test_characterization_record.py` and the `static_assert(sizeof(AutoRecord) == 72,`
+assertion at `test_autonomous_accounting.py:302` keep finding the struct after it
+moves into `record_format.h`. That is the property the module was built for.
+
+**Two of the requested binary-compatibility tests were blocked, then unblocked
+within the stint — see the golden-record section below.** They needed real record
+bytes, which `LOGGER STORAGE DUMP` does not print directly. A dump line was then
+supplied from the board, and it turned out to be sufficient: the dump prints every
+field except `magic` and `version` (fixed for any valid record), and prints the
+snapshot fields scaled but at exactly microunit resolution, so all 72 bytes are
+recoverable and the printed `crc=` checks the recovery. Both tests now exist.
+
+### Golden record from Experiment 3 — the 72-byte layout and the CRC convention are now PROVEN
+
+A real `LOGGER STORAGE DUMP` line was captured from the deployed board and is now
+a test fixture. This is the most durable result of the stint.
+
+```text
+[STORAGE] #3033 seq=4445 boot=26 exp=3 elapsed_ms=58629900 interval_ms=60004
+V=13.051367 I_mA=-0.616 P_mW=8.025 T_C=18.695 dQ_uAh=-10 dE_uWh=129
+Qsum_uAh=380771 Esum_uWh=5602351 time=UNKNOWN epoch=0 flags=0x0[none]
+crc=0xFB25DA73
+```
+
+Rebuilt from `FROZEN_LAYOUT` as little-endian packed bytes, the 68 covered bytes are:
+
+```text
+a5b501005d11000063cf0500000000002f7c550000000000030000001a0000000c9f7e03
+00000000 64ea0000 e725c700 98fdffff 591f0000 07490000 f6ffffff 81000000
+```
+
+and the full 72 bytes end `...8100000073da25fb`, the stored CRC little-endian at
+offset 68.
+
+**`zlib.crc32` of those 68 bytes is `0xFB25DA73` — exactly what the board stored.**
+It matched on the first attempt, with no search over layout variants.
+
+**Why one number settles so much.** The CRC covers all 68 preceding bytes, so it
+reproduces only if every field's offset, width, signedness and byte order matches
+the firmware that wrote it, the struct is genuinely packed with no padding, and the
+covered range really is bytes 0..67. Any one of those being wrong changes the
+checksum. Source reading could establish the *declared* layout; this establishes
+the *deployed* one.
+
+**The CRC convention is settled, and the documentation's claim was right.**
+`esp_rom_crc32_le(0, buf, len)` is standard IEEE 802.3 CRC-32 — reflected
+polynomial `0xEDB88320`, initial value `0xFFFFFFFF`, final XOR `0xFFFFFFFF` —
+which is `zlib.crc32`. The ROM function pre-inverts its seed internally, which is
+why a `0` seed there corresponds to no seed in zlib. Three other plausible
+conventions were computed and all three disagree with the board:
+
+| Convention over bytes 0..67 | Result |
+| --- | --- |
+| reflected 0xEDB88320, init 0xFFFFFFFF, xor 0xFFFFFFFF (= `zlib.crc32`) | **0xFB25DA73 — matches** |
+| init 0, xor 0 (no inversion) | 0xEBF2B4DE |
+| init 0xFFFFFFFF, xor 0 | 0x04DA258C |
+| init 0, xor 0xFFFFFFFF | 0x140D4B21 |
+
+The previous entry in this stint listed "IEEE 802.3" as an unverified claim
+inherited from the docs. It is now verified, and the distinction mattered: three
+of the four candidates are wrong.
+
+**Tests added** to `tests/test_characterization_record.py`, host-only, no firmware
+code moved: the 72-byte length, the golden CRC, CRC stored little-endian at offset
+68, magic/version against the frozen constants, **all 68 covered bytes individually
+mutated and each one breaking the CRC**, a flipped stored CRC failing validation,
+a guard that the CRC does *not* cover its own field, the snapshot fields traced
+back to the printed transcript so the fixture is auditable rather than fitted, and
+a check that the two genuinely-negative fields are negative.
+
+That last one matters: a signed field flipped to unsigned packs identically for
+positive values, so a golden record of all-positive numbers would not catch it.
+`avg_current_uA = -616` and `interval_charge_uAh = -10` on the real board, so the
+CRC test does catch it.
+
+**Flag-name decoding cannot move mechanically.** `printAutoRecord()`
+[solar-logger.ino:3320](../Arduino/solar-logger/solar-logger.ino#L3320) interleaves
+the flag tests with `Serial.print()` and comma bookkeeping, so there is no
+decode step to lift out. Extracting the vocabulary means rewriting it into a
+buffer-returning helper, which risks the output vocabulary and order the
+extraction is supposed to preserve. The clean split is struct, constants,
+`autoRecordCrc()`, `autoRecordValid()` and `autoRecordSnapshotUnread()` into
+`record_format`, leaving `printAutoRecord()` in the sketch as the console concern
+it is.
+
 ## 2026-09-23: Telemetry extracted into a module - NOT hardware validated
 
 **No hardware was touched.** Nothing was uploaded or committed, Experiment 3 was

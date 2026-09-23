@@ -6,6 +6,71 @@ The BMW Solar Logger measures an INA228-powered solar measurement path with an X
 
 The firmware supports autonomous sleep/wake logging to LittleFS as well as host-tethered CSV telemetry. Autonomous records survive without the Python logger; one-second CSV samples and serial events still require a connected host. Later synchronization, storage ACKs, reclamation, and a storage-full policy remain unimplemented; see [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
 
+## Installed system architecture — planned, not installed or validated
+
+The current measured system remains the desk/window bench rig. The following
+installation and responsibility boundaries were settled on 2026-09-23; they are
+requirements for future work, not claims that BLE, the iPhone app, time sync or
+the server integration have been built. See D-052 through D-054 in
+[DECISIONS.md](DECISIONS.md).
+
+### First installation versus later IBS integration
+
+| Phase | Logger location | Electrical connection and vehicle signals | Status |
+| --- | --- | --- | --- |
+| First installed version (V1), 2017 BMW M240i / F22 | Glove box / cabin | Solar/logger electrical connection at the designated under-hood charging/jump points; wiring runs from the engine bay into the cabin. No IBS/LIN tap and no separate ignition/switched-12V wire merely for vehicle-on detection. | Settled installation plan; not installed or hardware validated |
+| Later IBS phase | Expected to move to the trunk near the battery/IBS wiring | IBS/LIN access and a possible vehicle-on/off signal are research work. A separate switched ignition wire is not assumed. Power/solar/measurement connection topology in the trunk is OPEN. | Planned later phase; wiring unresolved |
+
+The physical location of the enclosure does not settle its electrical attachment
+points. The first version is **not an engine-bay-mounted logger**. The future
+trunk location does not authorize a direct battery connection. No authoritative
+BMW evidence resolving trunk-side topology or a convenient cabin IBS/LIN tap
+was found in the repository; the F22-specific questions are in BACKLOG. Until
+resolved: **V1 = under-hood charging points; future trunk wiring topology = OPEN.**
+
+### BLE, iPhone and self-hosted server
+
+BLE is the intended installed wireless transport. The design does not assume
+the car will ever be near home Wi-Fi; Wi-Fi/NTP is optional later work, not an
+installed-system dependency. USB and the Python logger remain the current bench
+interface.
+
+| Component | Intended responsibility | Current implementation boundary |
+| --- | --- | --- |
+| ESP/logger | Measure, store, maintain record sequence, expose records/status/settings, accept storage ACKs and time/configuration, sleep reliably | Local records, sequence tracking, USB status/settings and autonomous sleep exist; record sync, storage ACK and time-setting are not implemented |
+| Native iPhone app | Discover/connect over BLE, request unsynced records, save them durably on the phone, ACK only after that save, supply wall-clock time, graph/display/configure, upload over whatever normal Internet connection the phone has | Planned; not implemented |
+| User's self-hosted server | Long-term storage, web UI/historical access, analysis, inference and higher-level processing | Planned; integration likely built alongside the native iOS app |
+
+The phone is the bridge. The ESP should remain simple and stable and must not
+know about or depend on the inference/web server. A device ACK means durable
+receipt on the phone; it does not wait for a server upload and does not claim
+that one has completed. Phone-to-server retries and retention are app/server
+work, with details still to be designed.
+
+The phone is the intended wall-clock source. BLE sync will supply epoch/time
+mapping without depending on Wi-Fi/NTP. Current autonomous records with
+`TIME_QUALITY = UNKNOWN` and `epoch_s = 0` remain valid historical behavior;
+future clock sync must not rewrite them as if their original timestamps were
+known. The exact BLE protocol and mapping are not yet implemented.
+
+### Planned wake reasons
+
+| Conceptual reason | Intended behavior | Status |
+| --- | --- | --- |
+| TIMER | Periodic autonomous measure/store wake | Implemented on the bench; installed power behavior remains to be validated |
+| MANUAL SYNC BUTTON | Physical wake, then advertise BLE and allow a phone connection; permanent fallback and explicit user-access path | Required design; button circuit and BLE awake-window behavior not implemented |
+| FUTURE VEHICLE-ON WAKE | Wake using a vehicle-active signal, likely investigated with IBS integration | Future feature; exact electrical signal and detection rules unchosen |
+
+The first BLE implementation may use reset/manual-button-initiated awake
+windows. It does not rely on remotely waking a fully sleeping radio; Wi-Fi/BLE
+“wake on LAN” is not part of the design. The manual SYNC path remains even if a
+vehicle-on signal is added later.
+
+A vehicle-active mode is only a future idea: it could stay awake, sample more
+frequently, capture richer charging/alternator telemetry and offer BLE while the
+vehicle is active, then return to parked/deep-sleep mode after vehicle-off.
+No exact cadence, signal, timeout or transition rule has been chosen.
+
 ## Repository
 
 All paths in these documents are relative to the repository root.
@@ -53,7 +118,25 @@ What it deliberately does not own is when a line is emitted or what is in it. Th
 
 NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second, and needed none either.
 
-**Telemetry extraction is in progress in a separate task as of this audit.** The audited baseline is `d017f7d`, with the three modules above. No telemetry completion or hardware validation is claimed here. RTC/autonomous state, session/scheduler logic and LittleFS storage remain in the sketch at that baseline.
+**Current source versus observed hardware, 2026-09-23:** telemetry was extracted
+in `f30b62c` and remains host-tested, not hardware-validated in the recorded
+results. The subsequent DIAG_ALRT correctness change reads the diagnostic flags
+before CHARGE/ENERGY; regression tests and the full gate passed in the coding
+agent's report (333 passed, 1 expected xfail), but that change had not been
+uploaded or hardware validated. This documentation stint does not rerun that
+gate or establish a newer board state.
+
+The deployed Experiment 3 golden record (`seq=4445`, CRC `0xFB25DA73`) confirms
+72 packed bytes, CRC coverage of bytes 0–67, and CRC stored at offset 68; the
+captured record matches standard IEEE/zlib CRC-32 for
+`esp_rom_crc32_le(0, ...)`. This validates the deployed record format, not the
+new DIAG_ALRT order. Record version remains 1 and the `record_format` module
+has **not** been extracted. The sharper remaining boundaries—record format/CRC,
+LittleFS mechanics, sequence authority, RTC-retained state and autonomous
+scheduling/policy—are planned separately in BACKLOG (D-055); they still reside
+in the sketch. Tethered overflow qualification, MATHOF interval semantics,
+signed-charge versus magnitude-energy/net-energy semantics, corrupt-tail
+recovery and storage-full policy remain open.
 
 ## Development Workflow
 
@@ -107,7 +190,7 @@ Host-side tests. They touch no hardware and open no serial port.
 | `tests/test_autonomous_schedule.py` | the deadline scheduler: its three pure timing functions for every sleep path, handoffs, long sessions, overruns and rollover; how the scheduler and the handoff call them; one strict `xfail` | firmware code run on the host + source |
 | `tests/test_characterization_protocol.py` | `tools/send.sh` exit status for every wire outcome; the firmware dispatcher's ACK/RESULT contract, command set and identity markers | real host code + source |
 | `tests/test_characterization_policy.py` | refusals before state changes, including HOLD while a sleep is pending; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle | source |
-| `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation | source |
+| `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation; plus a **real Experiment 3 record** (`seq=4445`, `crc=0xFB25DA73`) rebuilt byte-for-byte and checked against the CRC the board stored, each of the 68 covered bytes mutated individually | source + real deployed record bytes |
 | `tests/test_characterization_connection.py` | transport claim and release, run on the host with the exact `[CONNECTION]` wording; who claims, who releases, and that sleep policy asks `anyHostConnected()` | firmware code run on the host + source |
 | `tests/test_characterization_nvs.py` | what is stored: the `solarlog` namespace, every key name and the 15-character limit, the five checkpoint keys with their widths, failure propagation on both checkpoint paths, power-test defaults, the sequence floor's ordering, and the one-owner boundary | source |
 | `tests/test_characterization_telemetry.py` | the machine-readable wire format: the exact `CSV_HEADER`, `CSV_SAMPLE`, `CSV_DATA` and `CSV_EVENT` bytes for known inputs, each field's precision, and the host's own parsers reading those same lines | firmware code run on the host + real host code + source |
@@ -462,7 +545,11 @@ LOGGER STORAGE DUMP         decode stored records to Serial
 LOGGER STORAGE CLEAR YES    erase stored records, never experiment state
 ```
 
-Each cycle wakes on the timer, validates the INA228 **by reading only**, reads the accumulated CHARGE and ENERGY for the completed interval, then reads `DIAG_ALRT` in the same wake, takes a V/I/P/temperature snapshot, appends one 72-byte CRC32-protected binary record to LittleFS, and only then resets the accumulators. If the record cannot be stored the accumulators are deliberately left alone, so the next interval covers both periods rather than losing one.
+Each cycle wakes on the timer, validates the INA228 **by reading only**, reads `DIAG_ALRT`, reads the accumulated CHARGE and ENERGY for the completed interval, takes a V/I/P/temperature snapshot, appends one 72-byte CRC32-protected binary record to LittleFS, and only then resets the accumulators. If the record cannot be stored the accumulators are deliberately left alone, so the next interval covers both periods rather than losing one.
+
+**`DIAG_ALRT` before the accumulators is load-bearing, and was fixed on 2026-09-23.** Datasheet SLYS021A Table 7-16: ENERGYOF "Clears when the ENERGY register is read" and CHARGEOF "Clears when the CHARGE register is read". The firmware previously read it afterwards, which made `INA_ACCUM_OF` unreachable and made every autonomous record report no accumulator overflow regardless of what happened. Reading it in the same wake is not sufficient. `MATHOF` was always fine, because a read does not clear it.
+
+**Not yet hardware validated:** an overflow has never been induced, so the flag has never been observed to set. Records written before the fix carry a `0` that means "not measured" rather than "no overflow"; their charge and energy values are unaffected. The tethered interval close still reads no overflow flag at all. See [BACKLOG.md](BACKLOG.md) and D-020.
 
 The timer-wake path branches at the top of `setup()`, before any cold-boot initialization, and skips the 1500 ms USB enumeration delay and the 2000 ms ADC settle. The INA228 never stopped converting, and USB discovery is served by the rendezvous after the measurement. Cold-boot behavior is unchanged.
 
