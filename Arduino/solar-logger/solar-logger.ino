@@ -20,6 +20,10 @@
 // writes. WHEN a persisted value should change is decided in this file.
 #include "nvs_persistence.h"
 
+// The machine-readable CSV lines: how each one is spelled. WHAT happened, WHEN
+// to emit a line, and which values it carries are decided in this file.
+#include "telemetry.h"
+
 // ============================================================================
 // BMW SOLAR LOGGER
 // Development firmware
@@ -915,36 +919,17 @@ void printLiveSample()
 			completedInterval * 60.0 +
 			(millis() - intervalStartMs) / 1000.0;
 
-	// Machine-readable high-resolution telemetry.
-	//
-	// Format:
-	//
-	// CSV_SAMPLE,
-	// experiment_id,
-	// elapsed_seconds,
-	// voltage_V,
-	// current_mA,
-	// power_mW,
-	// temperature_C
-	//
-	Serial.print("CSV_SAMPLE,");
+	// How the row is spelled is telemetry.cpp's. What is in it is decided
+	// here: this experiment, this moment, and the reading just taken.
+	const TelemetrySample sample = {
+			experimentId,
+			experimentElapsedSeconds,
+			reading.voltage_V,
+			reading.current_mA,
+			reading.power_mW,
+			reading.temperature_C};
 
-	Serial.print(experimentId);
-
-	Serial.print(',');
-	Serial.print(experimentElapsedSeconds, 3);
-
-	Serial.print(',');
-	Serial.print(reading.voltage_V, 6);
-
-	Serial.print(',');
-	Serial.print(reading.current_mA, 6);
-
-	Serial.print(',');
-	Serial.print(reading.power_mW, 6);
-
-	Serial.print(',');
-	Serial.println(reading.temperature_C, 4);
+	telemetryPrintSample(sample);
 }
 
 // One place decides how a sleep-test variant is named, so the banner, STATUS,
@@ -952,150 +937,6 @@ void printLiveSample()
 const char *sleepPowerTestVariantName()
 {
 	return sleepPowerTestInaOff ? "INA shutdown" : "INA continuous";
-}
-
-// ============================================================================
-// CSV OUTPUT
-// ============================================================================
-//
-// CSV is PRINTED through Serial.
-//
-// It is not stored as a CSV file inside the ESP32.
-//
-// Each data row contains experiment_id.
-//
-// That makes this safe:
-//
-//   CSV_DATA,1,1,...
-//   CSV_DATA,1,2,...
-//   CSV_DATA,1,3,...
-//
-//   RESET YES
-//
-//   CSV_DATA,2,1,...
-//   CSV_DATA,2,2,...
-//
-// Later we can simply select:
-//
-//   experiment_id == 2
-//
-// and know exactly which rows belong to that experiment.
-// ============================================================================
-
-void printCsvHeader()
-{
-	Serial.println();
-
-	Serial.println(
-			"[CSV] Machine-readable interval logging enabled.");
-
-	Serial.println(
-			"CSV_HEADER,"
-			"experiment_id,"
-			"interval,"
-			"elapsed_seconds,"
-			"voltage_V,"
-			"current_mA,"
-			"power_mW,"
-			"temperature_C,"
-			"interval_charge_mAh,"
-			"interval_energy_mWh,"
-			"average_current_mA,"
-			"average_power_mW,"
-			"running_charge_mAh,"
-			"running_energy_mWh");
-}
-
-// Explicit machine-readable event showing that a NEW experiment started.
-void printExperimentStartEvent()
-{
-	Serial.print("CSV_EVENT,EXPERIMENT_START,");
-	Serial.println(experimentId);
-}
-
-// Explicit machine-readable event showing that an existing experiment was
-// resumed after an ESP32 reboot.
-void printExperimentResumeEvent()
-{
-	Serial.print("CSV_EVENT,EXPERIMENT_RESUME,");
-	Serial.print(experimentId);
-	Serial.print(',');
-	Serial.println(completedInterval);
-}
-
-// Machine-readable markers for the deep-sleep power test.
-//
-// The host parser already treats everything after experiment_id as one
-// comma-joined detail field, so these need no change on the Python side.
-//
-// Durability caveat, and it is a real one:
-//
-//   SLEEP_TEST_SLEEP is emitted at the end of an awake phase, while the host
-//   is connected, so it is normally captured.
-//
-//   SLEEP_TEST_WAKE is emitted during setup(), before the host has finished
-//   rediscovering the re-enumerated USB device, so it is normally LOST. This
-//   is the same known limitation already documented for EXPERIMENT_RESUME and
-//   is one of the reasons the store-and-forward backlog item exists.
-void printSleepTestEvent(const char *eventType, uint32_t cycle)
-{
-	Serial.print("CSV_EVENT,");
-	Serial.print(eventType);
-	Serial.print(',');
-	Serial.print(experimentId);
-	Serial.print(',');
-	Serial.println(cycle);
-}
-
-void printCsvRow(
-		uint32_t interval,
-		double elapsedSeconds,
-		const SensorReading &reading,
-		double intervalCharge_mAh,
-		double intervalEnergy_mWh,
-		double averageCurrent_mA,
-		double averagePower_mW)
-{
-
-	Serial.print("CSV_DATA,");
-
-	Serial.print(experimentId);
-
-	Serial.print(',');
-	Serial.print(interval);
-
-	Serial.print(',');
-	Serial.print(elapsedSeconds, 3);
-
-	Serial.print(',');
-	Serial.print(reading.voltage_V, 6);
-
-	Serial.print(',');
-	Serial.print(reading.current_mA, 6);
-
-	Serial.print(',');
-	Serial.print(reading.power_mW, 6);
-
-	Serial.print(',');
-	Serial.print(reading.temperature_C, 4);
-
-	Serial.print(',');
-	Serial.print(intervalCharge_mAh, 9);
-
-	Serial.print(',');
-	Serial.print(intervalEnergy_mWh, 9);
-
-	Serial.print(',');
-	Serial.print(averageCurrent_mA, 6);
-
-	Serial.print(',');
-	Serial.print(averagePower_mW, 6);
-
-	Serial.print(',');
-	Serial.print(runningCharge_mAh, 9);
-
-	Serial.print(',');
-	Serial.println(runningEnergy_mWh, 9);
 }
 
 // ============================================================================
@@ -1562,8 +1403,9 @@ void enterSleepPowerTestDeepSleep()
 	Serial.println(" seconds...");
 
 	// Reports the cycle whose awake phase just finished.
-	printSleepTestEvent(
+	telemetryPrintSleepTestEvent(
 			sleepPowerTestInaOff ? "SLEEP_TEST_SLEEP_INA_OFF" : "SLEEP_TEST_SLEEP",
+			experimentId,
 			rtcSleepTestCycle);
 
 	esp_err_t timerResult =
@@ -1725,8 +1567,9 @@ bool armSleepPowerTest(bool inaOff)
 	// Wi-Fi must be off for the whole test, including this first awake phase.
 	disableWifi();
 
-	printSleepTestEvent(
+	telemetryPrintSleepTestEvent(
 			inaOff ? "SLEEP_TEST_ARMED_INA_OFF" : "SLEEP_TEST_ARMED",
+			experimentId,
 			rtcSleepTestCycle);
 
 	startSleepPowerTestAwakePhase();
@@ -1944,7 +1787,8 @@ bool stopAllPowerTests()
 
 	if (sleepTestWasActive)
 	{
-		printSleepTestEvent("SLEEP_TEST_STOPPED", rtcSleepTestCycle);
+		telemetryPrintSleepTestEvent("SLEEP_TEST_STOPPED", experimentId,
+																	rtcSleepTestCycle);
 
 		Serial.print("[POWER TEST] Completed sleep cycles this power-on: ");
 		Serial.println(rtcSleepTestCycle);
@@ -2394,9 +2238,9 @@ bool resetExperiment()
 			"============================================================");
 
 	// Machine-readable marker.
-	printExperimentStartEvent();
+	telemetryPrintExperimentStart(experimentId);
 
-	printCsvHeader();
+	telemetryPrintHeader();
 
 	return true;
 }
@@ -3197,14 +3041,26 @@ bool closeMeasurementInterval()
 	// Machine-readable CSV data.
 	// --------------------------------------------------------------------------
 
-	printCsvRow(
+	// The interval's numbers are final here: the averages are computed, and the
+	// running totals have already taken this interval in. The row is printed
+	// before the checkpoint below, so it is emitted whether or not NVS accepts
+	// the state it describes.
+	const TelemetryInterval row = {
+			experimentId,
 			completedInterval,
 			elapsedSeconds,
-			reading,
+			reading.voltage_V,
+			reading.current_mA,
+			reading.power_mW,
+			reading.temperature_C,
 			intervalCharge_mAh,
 			intervalEnergy_mWh,
 			averageCurrent_mA,
-			averagePower_mW);
+			averagePower_mW,
+			runningCharge_mAh,
+			runningEnergy_mWh};
+
+	telemetryPrintInterval(row);
 
 	// --------------------------------------------------------------------------
 	// Persist this completed interval.
@@ -6772,9 +6628,9 @@ void setup()
 	// This tells a CSV parser:
 	//
 	//   "The device rebooted, but this is still the same experiment."
-	printExperimentResumeEvent();
+	telemetryPrintExperimentResume(experimentId, completedInterval);
 
-	printCsvHeader();
+	telemetryPrintHeader();
 
 	printHelp();
 
@@ -6969,7 +6825,8 @@ void setup()
 				rtcSleepTestCycle = 0;
 			}
 
-			printSleepTestEvent("SLEEP_TEST_WAKE", rtcSleepTestCycle);
+			telemetryPrintSleepTestEvent("SLEEP_TEST_WAKE", experimentId,
+																	rtcSleepTestCycle);
 		}
 		else
 		{
@@ -6983,7 +6840,8 @@ void setup()
 			rtcSleepTestMagic = SLEEP_POWER_TEST_RTC_MAGIC;
 			rtcSleepTestCycle = 0;
 
-			printSleepTestEvent("SLEEP_TEST_RESUMED", rtcSleepTestCycle);
+			telemetryPrintSleepTestEvent("SLEEP_TEST_RESUMED", experimentId,
+																	rtcSleepTestCycle);
 		}
 
 		// setup() has already run configureIna228(), which writes and verifies
