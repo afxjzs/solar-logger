@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <Preferences.h>
 #include <WiFi.h>
 #include <LittleFS.h>
 #include "esp_sleep.h"
@@ -16,6 +15,10 @@
 // Which transport a host has claimed. Leases, sleep, and when autonomous mode
 // resumes stay in this file, which calls down into it.
 #include "connection.h"
+
+// ESP32 nonvolatile storage: the namespace, the keys, and the typed reads and
+// writes. WHEN a persisted value should change is decided in this file.
+#include "nvs_persistence.h"
 
 // ============================================================================
 // BMW SOLAR LOGGER
@@ -125,59 +128,16 @@ constexpr unsigned long HEARTBEAT_INTERVAL_MS = 5UL * 1000UL;
 constexpr uint32_t NVS_CHECKPOINT_EVERY_INTERVALS = 1;
 
 // ============================================================================
-// ESP32 NONVOLATILE STORAGE
+// EXPERIMENT STATE
 // ============================================================================
 //
-// Preferences is Arduino's friendly interface to ESP32 NVS.
+// The four values that make up one experiment. They are held here in RAM and
+// checkpointed to ESP32 nonvolatile storage after every completed interval.
 //
-// NVS = Nonvolatile Storage.
-//
-// It is flash memory inside the ESP32, so values survive:
-//   - reset
-//   - firmware restart
-//   - USB disconnection
-//   - complete power loss
-//
-// We use the namespace:
-//
-//   solarlog
-//
-// Think of a namespace as a small named folder containing key/value pairs.
-//
-// Schema 1 contained:
-//   schema
-//   interval
-//   charge
-//   energy
-//
-// Schema 2 adds:
-//   experiment
-//
-// We deliberately support reading the old schema 1 so flashing this firmware
-// does not destroy the state already stored on your ESP32.
+// The NVS namespace, the key names, the schema, and every typed read and write
+// live in nvs_persistence.h / .cpp. This file owns WHEN they change: closing an
+// interval, and RESET YES starting a new experiment. Nothing here names a key.
 // ============================================================================
-
-Preferences preferences;
-
-constexpr char NVS_NAMESPACE[] = "solarlog";
-
-// ESP32 NVS key names are limited to 15 usable characters. "wifi_test_armed"
-// is exactly 15. "sleep_test_armed" would be 16 and would be rejected, so the
-// deep-sleep test flag uses the shorter "sleep_test_arm".
-constexpr char NVS_WIFI_POWER_TEST_KEY[] = "wifi_test_armed";
-constexpr char NVS_SLEEP_POWER_TEST_KEY[] = "sleep_test_arm";
-
-// Variant selector for the deep-sleep test. It is only meaningful while
-// NVS_SLEEP_POWER_TEST_KEY is true.
-//
-//   false -> POWER TEST SLEEP           INA228 stays in continuous conversion
-//   true  -> POWER TEST SLEEP INA OFF   INA228 enters its own shutdown mode
-//
-// One armed flag plus one variant flag, rather than two independent armed
-// flags, is what makes "both variants armed at once" unrepresentable.
-constexpr char NVS_SLEEP_INA_OFF_KEY[] = "sleep_ina_off";
-
-constexpr uint32_t NVS_SCHEMA_VERSION = 2;
 
 // The experiment ID lets CSV rows remain distinguishable even if one Serial
 // capture file contains multiple experiments.
@@ -357,13 +317,21 @@ constexpr uint32_t AUTO_INTERVAL_SECONDS_DEFAULT = 60;
 constexpr uint32_t AUTO_INTERVAL_SECONDS_MIN = 10;
 constexpr uint32_t AUTO_INTERVAL_SECONDS_MAX = 3600;
 
-uint32_t autonomousIntervalSeconds = AUTO_INTERVAL_SECONDS_DEFAULT;
+// The one assumption the NVS extraction made, stated so it cannot lapse.
+//
+// Before the extraction, loadAutonomousSettings() returned early when the
+// namespace would not open, which SKIPPED the range check below it. The read
+// is now loadAutonomousConfig() in nvs_persistence.cpp, so that early return
+// comes back here and the range check runs on the default instead of being
+// skipped. Identical behavior only while the default is itself in range - and
+// it is the sort of thing a later cadence change would silently break, so it
+// fails the build rather than quietly printing "out of range" at every boot.
+static_assert(AUTO_INTERVAL_SECONDS_DEFAULT >= AUTO_INTERVAL_SECONDS_MIN &&
+									AUTO_INTERVAL_SECONDS_DEFAULT <= AUTO_INTERVAL_SECONDS_MAX,
+							"the default cadence must pass the range check in "
+							"loadAutonomousSettings(); see nvs_persistence.h");
 
-// NVS keys. The 15-character limit applies to all of these.
-constexpr char NVS_AUTO_TEST_KEY[] = "auto_test_arm";
-constexpr char NVS_AUTO_INTERVAL_KEY[] = "auto_int_s";
-constexpr char NVS_AUTO_SEQ_HW_KEY[] = "auto_seq_hw";
-constexpr char NVS_BOOT_ID_KEY[] = "boot_id";
+uint32_t autonomousIntervalSeconds = AUTO_INTERVAL_SECONDS_DEFAULT;
 
 constexpr char AUTO_LOG_PATH[] = "/auto.bin";
 constexpr char AUTO_LOG_TMP_PATH[] = "/auto.tmp";
@@ -832,7 +800,7 @@ bool writeProtocolLine(const String &line, uint32_t timeoutMs);
 // FORWARD DECLARATIONS
 // ============================================================================
 //
-// These seventeen functions are called above the line where they are defined.
+// These sixteen functions are called above the line where they are defined.
 // The build works without this block only because Arduino CLI synthesizes
 // prototypes into the generated .ino.cpp it actually compiles - which means
 // the file a person edits is not, by itself, a valid C++ translation unit.
@@ -865,7 +833,6 @@ void printDeprecatedCommand(const char *oldName, const char *newName);
 void printHostSessionStatus();
 bool printStorageInfo();
 void printUsbPresence(const char *label);
-bool saveAutonomousInterval(uint32_t seconds);
 void setAutoState(AutoState next, const char *reason);
 bool stopAllPowerTests();
 bool stopAutonomousTest();
@@ -980,467 +947,11 @@ void printLiveSample()
 	Serial.println(reading.temperature_C, 4);
 }
 
-// ============================================================================
-// SAVE CURRENT STATE TO NVS
-// ============================================================================
-
-bool saveCheckpoint()
-{
-	Serial.println();
-
-	Serial.print("[NVS] Writing checkpoint for experiment ");
-	Serial.print(experimentId);
-	Serial.print(", interval ");
-	Serial.println(completedInterval);
-
-	// false means open the namespace READ/WRITE.
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println(
-				"[ERROR] Could not open NVS namespace for writing.");
-		return false;
-	}
-
-	bool ok = true;
-
-	Serial.print("[NVS] Writing schema = ");
-	Serial.println(NVS_SCHEMA_VERSION);
-
-	if (preferences.putUInt(
-					"schema",
-					NVS_SCHEMA_VERSION) != sizeof(uint32_t))
-	{
-
-		Serial.println("[ERROR] Failed to write NVS key: schema");
-		ok = false;
-	}
-
-	Serial.print("[NVS] Writing experiment = ");
-	Serial.println(experimentId);
-
-	if (preferences.putUInt(
-					"experiment",
-					experimentId) != sizeof(uint32_t))
-	{
-
-		Serial.println("[ERROR] Failed to write NVS key: experiment");
-		ok = false;
-	}
-
-	Serial.print("[NVS] Writing interval = ");
-	Serial.println(completedInterval);
-
-	if (preferences.putUInt(
-					"interval",
-					completedInterval) != sizeof(uint32_t))
-	{
-
-		Serial.println("[ERROR] Failed to write NVS key: interval");
-		ok = false;
-	}
-
-	Serial.print("[NVS] Writing charge = ");
-	Serial.print(runningCharge_mAh, 6);
-	Serial.println(" mAh");
-
-	if (preferences.putDouble(
-					"charge",
-					runningCharge_mAh) != sizeof(double))
-	{
-
-		Serial.println("[ERROR] Failed to write NVS key: charge");
-		ok = false;
-	}
-
-	Serial.print("[NVS] Writing energy = ");
-	Serial.print(runningEnergy_mWh, 6);
-	Serial.println(" mWh");
-
-	if (preferences.putDouble(
-					"energy",
-					runningEnergy_mWh) != sizeof(double))
-	{
-
-		Serial.println("[ERROR] Failed to write NVS key: energy");
-		ok = false;
-	}
-
-	// Flush/close the Preferences namespace.
-	preferences.end();
-
-	if (ok)
-	{
-		Serial.println(
-				"*** NVS CHECKPOINT SAVED SUCCESSFULLY ***");
-	}
-	else
-	{
-		Serial.println(
-				"*** ERROR: NVS CHECKPOINT WAS NOT FULLY SAVED ***");
-	}
-
-	return ok;
-}
-
-// The Wi-Fi power-test flag is stored under its own key. It is deliberately
-// separate from the experiment checkpoint so arming or stopping this bench
-// test cannot alter experiment totals, interval numbers, or experiment IDs.
-bool saveWifiPowerTestArmed(bool armed)
-{
-	Serial.print("[NVS] Writing ");
-	Serial.print(NVS_WIFI_POWER_TEST_KEY);
-	Serial.print(" = ");
-	Serial.println(armed ? "true" : "false");
-
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println("[ERROR] Could not open NVS for Wi-Fi power-test flag.");
-		return false;
-	}
-
-	size_t written = preferences.putBool(NVS_WIFI_POWER_TEST_KEY, armed);
-	preferences.end();
-
-	if (written != sizeof(bool))
-	{
-		Serial.println("[ERROR] Failed to write Wi-Fi power-test NVS flag.");
-		return false;
-	}
-
-	Serial.println("[NVS] Wi-Fi power-test flag saved: ALL OK");
-	return true;
-}
-
-bool loadWifiPowerTestArmed()
-{
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		// The message below promises a value, so actually assign it. Leaving the
-		// global untouched here would make the printed claim depend on whatever
-		// the variable already held.
-		wifiPowerTestArmed = false;
-		Serial.println(
-				"[NVS] Wi-Fi power-test flag unavailable; defaulting to not armed.");
-		return true;
-	}
-
-	if (!preferences.isKey(NVS_WIFI_POWER_TEST_KEY))
-	{
-		preferences.end();
-		wifiPowerTestArmed = false;
-		Serial.println("[NVS] Wi-Fi power-test flag: not armed.");
-		return true;
-	}
-
-	wifiPowerTestArmed = preferences.getBool(NVS_WIFI_POWER_TEST_KEY, false);
-	preferences.end();
-
-	Serial.print("[NVS] Wi-Fi power-test flag: ");
-	Serial.println(wifiPowerTestArmed ? "armed" : "not armed");
-	return true;
-}
-
-// The deep-sleep power-test flag uses its own NVS key for the same reason the
-// Wi-Fi flag does: arming or stopping a bench test must never be able to
-// alter experiment totals, interval numbers, or the experiment ID.
-bool saveSleepPowerTestArmed(bool armed)
-{
-	Serial.print("[NVS] Writing ");
-	Serial.print(NVS_SLEEP_POWER_TEST_KEY);
-	Serial.print(" = ");
-	Serial.println(armed ? "true" : "false");
-
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println("[ERROR] Could not open NVS for deep-sleep test flag.");
-		return false;
-	}
-
-	size_t written = preferences.putBool(NVS_SLEEP_POWER_TEST_KEY, armed);
-	preferences.end();
-
-	if (written != sizeof(bool))
-	{
-		Serial.println("[ERROR] Failed to write deep-sleep test NVS flag.");
-		return false;
-	}
-
-	Serial.println("[NVS] Deep-sleep test flag saved: ALL OK");
-	return true;
-}
-
-bool loadSleepPowerTestArmed()
-{
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		sleepPowerTestArmed = false;
-		Serial.println(
-				"[NVS] Deep-sleep test flag unavailable; defaulting to not armed.");
-		return true;
-	}
-
-	if (!preferences.isKey(NVS_SLEEP_POWER_TEST_KEY))
-	{
-		preferences.end();
-		sleepPowerTestArmed = false;
-		Serial.println("[NVS] Deep-sleep test flag: not armed.");
-		return true;
-	}
-
-	sleepPowerTestArmed = preferences.getBool(NVS_SLEEP_POWER_TEST_KEY, false);
-	preferences.end();
-
-	Serial.print("[NVS] Deep-sleep test flag: ");
-	Serial.println(sleepPowerTestArmed ? "armed" : "not armed");
-	return true;
-}
-
-bool saveSleepPowerTestInaOff(bool inaOff)
-{
-	Serial.print("[NVS] Writing ");
-	Serial.print(NVS_SLEEP_INA_OFF_KEY);
-	Serial.print(" = ");
-	Serial.println(inaOff ? "true" : "false");
-
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println("[ERROR] Could not open NVS for deep-sleep variant flag.");
-		return false;
-	}
-
-	size_t written = preferences.putBool(NVS_SLEEP_INA_OFF_KEY, inaOff);
-	preferences.end();
-
-	if (written != sizeof(bool))
-	{
-		Serial.println("[ERROR] Failed to write deep-sleep variant NVS flag.");
-		return false;
-	}
-
-	Serial.println("[NVS] Deep-sleep variant flag saved: ALL OK");
-	return true;
-}
-
-bool loadSleepPowerTestInaOff()
-{
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		sleepPowerTestInaOff = false;
-		Serial.println(
-				"[NVS] Deep-sleep variant flag unavailable; defaulting to INA "
-				"continuous.");
-		return true;
-	}
-
-	if (!preferences.isKey(NVS_SLEEP_INA_OFF_KEY))
-	{
-		preferences.end();
-		sleepPowerTestInaOff = false;
-		Serial.println("[NVS] Deep-sleep variant flag: INA continuous.");
-		return true;
-	}
-
-	sleepPowerTestInaOff = preferences.getBool(NVS_SLEEP_INA_OFF_KEY, false);
-	preferences.end();
-
-	Serial.print("[NVS] Deep-sleep variant flag: ");
-	Serial.println(sleepPowerTestInaOff ? "INA shutdown" : "INA continuous");
-	return true;
-}
-
 // One place decides how a sleep-test variant is named, so the banner, STATUS,
 // and stop messages cannot drift apart.
 const char *sleepPowerTestVariantName()
 {
 	return sleepPowerTestInaOff ? "INA shutdown" : "INA continuous";
-}
-
-// ============================================================================
-// LOAD STATE FROM NVS
-// ============================================================================
-//
-// This understands BOTH:
-//
-//   schema 1
-//   schema 2
-//
-// Your currently stored data is schema 1.
-//
-// When schema 1 is encountered, we load its interval/charge/energy exactly as
-// before and assign:
-//
-//   experimentId = 0
-//
-// The first RESET YES after installing this version will therefore create:
-//
-//   experimentId = 1
-// ============================================================================
-
-bool loadCheckpoint()
-{
-	Serial.println();
-	Serial.println("[NVS] Beginning checkpoint load...");
-
-	Serial.print("[NVS] Opening namespace \"");
-	Serial.print(NVS_NAMESPACE);
-	Serial.println("\" in READ ONLY mode...");
-
-	// true = READ ONLY.
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		Serial.println(
-				"[WARNING] NVS namespace does not exist yet. Starting from zero.");
-
-		experimentId = 0;
-		completedInterval = 0;
-		runningCharge_mAh = 0.0;
-		runningEnergy_mWh = 0.0;
-
-		return true;
-	}
-
-	Serial.println("[NVS] Namespace opened.");
-
-	if (!preferences.isKey("schema"))
-	{
-		Serial.println(
-				"[WARNING] NVS contains no schema key. Starting from zero.");
-
-		preferences.end();
-
-		experimentId = 0;
-		completedInterval = 0;
-		runningCharge_mAh = 0.0;
-		runningEnergy_mWh = 0.0;
-
-		return true;
-	}
-
-	uint32_t schema =
-			preferences.getUInt("schema", 0);
-
-	Serial.print("[NVS] Stored schema = ");
-	Serial.println(schema);
-
-	// --------------------------------------------------------------------------
-	// LEGACY SCHEMA 1
-	// --------------------------------------------------------------------------
-
-	if (schema == 1)
-	{
-		Serial.println(
-				"[NVS] Legacy schema 1 detected.");
-
-		Serial.println(
-				"[NVS] Loading old interval/charge/energy values.");
-
-		Serial.println(
-				"[NVS] Legacy data will be treated as experiment 0.");
-
-		if (!preferences.isKey("interval") ||
-				!preferences.isKey("charge") ||
-				!preferences.isKey("energy"))
-		{
-
-			Serial.println(
-					"[ERROR] Schema 1 checkpoint is incomplete.");
-
-			preferences.end();
-			return false;
-		}
-
-		experimentId = 0;
-
-		completedInterval =
-				preferences.getUInt("interval", 0);
-
-		runningCharge_mAh =
-				preferences.getDouble("charge", 0.0);
-
-		runningEnergy_mWh =
-				preferences.getDouble("energy", 0.0);
-
-		preferences.end();
-
-		Serial.print("[NVS] experiment = ");
-		Serial.println(experimentId);
-
-		Serial.print("[NVS] interval = ");
-		Serial.println(completedInterval);
-
-		Serial.print("[NVS] charge = ");
-		Serial.print(runningCharge_mAh, 6);
-		Serial.println(" mAh");
-
-		Serial.print("[NVS] energy = ");
-		Serial.print(runningEnergy_mWh, 6);
-		Serial.println(" mWh");
-
-		Serial.println("[NVS] Legacy checkpoint load: OK");
-
-		return true;
-	}
-
-	// --------------------------------------------------------------------------
-	// CURRENT SCHEMA 2
-	// --------------------------------------------------------------------------
-
-	if (schema == NVS_SCHEMA_VERSION)
-	{
-		if (!preferences.isKey("experiment") ||
-				!preferences.isKey("interval") ||
-				!preferences.isKey("charge") ||
-				!preferences.isKey("energy"))
-		{
-
-			Serial.println(
-					"[ERROR] Schema 2 checkpoint is incomplete.");
-
-			preferences.end();
-			return false;
-		}
-
-		experimentId =
-				preferences.getUInt("experiment", 0);
-
-		completedInterval =
-				preferences.getUInt("interval", 0);
-
-		runningCharge_mAh =
-				preferences.getDouble("charge", 0.0);
-
-		runningEnergy_mWh =
-				preferences.getDouble("energy", 0.0);
-
-		preferences.end();
-
-		Serial.print("[NVS] experiment = ");
-		Serial.println(experimentId);
-
-		Serial.print("[NVS] interval = ");
-		Serial.println(completedInterval);
-
-		Serial.print("[NVS] charge = ");
-		Serial.print(runningCharge_mAh, 6);
-		Serial.println(" mAh");
-
-		Serial.print("[NVS] energy = ");
-		Serial.print(runningEnergy_mWh, 6);
-		Serial.println(" mWh");
-
-		Serial.println("[NVS] Namespace closed.");
-		Serial.println("[NVS] Checkpoint load: OK");
-
-		return true;
-	}
-
-	// Unknown schema means the firmware cannot safely interpret what is stored.
-	Serial.print("[ERROR] Unsupported NVS schema: ");
-	Serial.println(schema);
-
-	preferences.end();
-
-	return false;
 }
 
 // ============================================================================
@@ -2842,7 +2353,10 @@ bool resetExperiment()
 	//
 	// This means a power failure one second later still boots into the NEW
 	// experiment rather than bringing the previous experiment back.
-	if (!saveCheckpoint())
+	const LoggerCheckpoint newExperiment = {experimentId, completedInterval,
+																					runningCharge_mAh, runningEnergy_mWh};
+
+	if (!saveCheckpoint(newExperiment))
 	{
 		Serial.println(
 				"[ERROR] New experiment exists in RAM, but its zero checkpoint "
@@ -3701,7 +3215,10 @@ bool closeMeasurementInterval()
 	Serial.println(
 			"[NVS] CHECKPOINT REQUIRED");
 
-	if (!saveCheckpoint())
+	const LoggerCheckpoint checkpoint = {experimentId, completedInterval,
+																			 runningCharge_mAh, runningEnergy_mWh};
+
+	if (!saveCheckpoint(checkpoint))
 	{
 		Serial.println(
 				"[ERROR] Measurement succeeded, but NVS checkpoint failed.");
@@ -3715,129 +3232,33 @@ bool closeMeasurementInterval()
 }
 
 // ============================================================================
-// AUTONOMOUS BENCH TEST: NVS SETTINGS
+// AUTONOMOUS BENCH TEST: SETTINGS AND SEQUENCE POLICY
+// ============================================================================
+//
+// What these decide. The typed NVS reads and writes underneath them are in
+// nvs_persistence.cpp, which names the keys and knows nothing about cadence
+// limits, block widths, or which sequence authority wins.
 // ============================================================================
 
-// Read ONLY the experiment id, read-only and quiet.
+// Read the persisted autonomous settings and decide whether the stored cadence
+// is one this firmware will run at.
 //
-// The autonomous timer-wake path branches at the top of setup(), before
-// loadCheckpoint() has ever run, so the experimentId global is still its
-// startup value of zero. Records built there were stamped exp=0 while the
-// board was actually running experiment 2. Confirmed on hardware 2026-09-11
-// from the first 65 stored records.
-//
-// loadCheckpoint() cannot simply be called instead: it is loud enough to
-// distort the wake timings the bench test exists to measure, and it writes
-// four globals that belong to the host-tethered logger.
-//
-// Returns true when the id is KNOWN, false when it cannot be determined.
-// A false return must never be turned into experiment 0 by the caller.
-//
-// The schema handling below deliberately mirrors loadCheckpoint(). If that
-// function's rules change, this one has to change with it, or the same board
-// will report two different experiment ids depending on which path ran.
-bool loadExperimentIdOnly(uint32_t &outExperimentId)
-{
-	// true = READ ONLY. Nothing here writes NVS or touches I2C.
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		// This used to return true with an id of 0, on the reasoning that a
-		// read-only open fails when the namespace has never been created and that
-		// zero is therefore the real answer. That reasoning was wrong twice.
-		//
-		// First, a failed nvs_open covers every other reason the read could fail,
-		// and the Arduino Preferences API does not distinguish them - so the code
-		// was asserting something it could not know.
-		//
-		// Second, on the path that matters the benign case cannot occur. Arming is
-		// a prerequisite for any autonomous wake, and saveAutonomousTestArmed()
-		// opens the namespace read/write, which CREATES it. By the time a timer
-		// wake calls this function the namespace necessarily exists, so a failure
-		// here is a genuine fault and never a fresh board.
-		//
-		// D-024: when context cannot be loaded, the record is marked
-		// EXPERIMENT_UNKNOWN. It never writes a plausible default.
-		Serial.println(
-				"[NVS] ERROR: Could not open the namespace to read the experiment id.");
-		return false;
-	}
-
-	if (!preferences.isKey("schema"))
-	{
-		preferences.end();
-		outExperimentId = 0;
-		return true;
-	}
-
-	uint32_t schema = preferences.getUInt("schema", 0);
-
-	if (schema == 1)
-	{
-		// loadCheckpoint() treats legacy schema 1 data as experiment 0 by
-		// definition. Same answer here, for the same reason.
-		preferences.end();
-		outExperimentId = 0;
-		return true;
-	}
-
-	if (schema != NVS_SCHEMA_VERSION)
-	{
-		preferences.end();
-		return false;
-	}
-
-	if (!preferences.isKey("experiment"))
-	{
-		preferences.end();
-		return false;
-	}
-
-	outExperimentId = preferences.getUInt("experiment", 0);
-	preferences.end();
-	return true;
-}
-
-bool saveAutonomousTestArmed(bool armed)
-{
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println("[ERROR] Could not open NVS for autonomous test flag.");
-		return false;
-	}
-
-	size_t written = preferences.putBool(NVS_AUTO_TEST_KEY, armed);
-	preferences.end();
-
-	if (written != sizeof(bool))
-	{
-		Serial.println("[ERROR] Failed to write autonomous test NVS flag.");
-		return false;
-	}
-
-	return true;
-}
-
+// The read itself is loadAutonomousConfig() in nvs_persistence.cpp. The range
+// check stayed here, with AUTO_INTERVAL_SECONDS_MIN and _MAX: the supported
+// range is cadence policy (D-018), the LOGGER INTERVAL handler tests the same
+// two constants, and the persistence module has no business deciding which
+// stored cadence is acceptable.
 bool loadAutonomousSettings()
 {
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		autonomousTestArmed = false;
-		autonomousIntervalSeconds = AUTO_INTERVAL_SECONDS_DEFAULT;
-		return true;
-	}
-
-	autonomousTestArmed =
-			preferences.isKey(NVS_AUTO_TEST_KEY)
-					? preferences.getBool(NVS_AUTO_TEST_KEY, false)
-					: false;
-
-	autonomousIntervalSeconds =
-			preferences.isKey(NVS_AUTO_INTERVAL_KEY)
-					? preferences.getUInt(NVS_AUTO_INTERVAL_KEY,
-																AUTO_INTERVAL_SECONDS_DEFAULT)
-					: AUTO_INTERVAL_SECONDS_DEFAULT;
-
-	preferences.end();
+	// This cannot report failure today: a namespace that will not open still
+	// yields "not armed" and the default cadence, and still reports success.
+	// That is the defect recorded in docs/BACKLOG.md under "NVS load failures
+	// become plausible defaults with no signal", preserved across the move
+	// rather than fixed inside it. The return value is carried through so that
+	// fixing it later reaches both call sites.
+	const bool loaded = loadAutonomousConfig(autonomousTestArmed,
+																					 autonomousIntervalSeconds,
+																					 AUTO_INTERVAL_SECONDS_DEFAULT);
 
 	// A stored value outside the supported range would silently change the
 	// cadence the test believes it is running at.
@@ -3854,48 +3275,27 @@ bool loadAutonomousSettings()
 		autonomousIntervalSeconds = AUTO_INTERVAL_SECONDS_DEFAULT;
 	}
 
-	return true;
-}
-
-bool saveAutonomousInterval(uint32_t seconds)
-{
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println("[ERROR] Could not open NVS for autonomous interval.");
-		return false;
-	}
-
-	size_t written = preferences.putUInt(NVS_AUTO_INTERVAL_KEY, seconds);
-	preferences.end();
-
-	if (written != sizeof(uint32_t))
-	{
-		Serial.println("[ERROR] Failed to write autonomous interval to NVS.");
-		return false;
-	}
-
-	return true;
+	return loaded;
 }
 
 // Reserve a block of sequence numbers before using any of them. A crash
 // inside a reserved block abandons the block: the next boot starts past it,
 // producing a visible GAP rather than a silent REUSE.
+//
+// How wide a block is, and the RTC-retained mirror of the reservation, stay
+// here. saveSequenceHighWater() stores the number and reports whether the
+// store worked; which of the log tail and the reservation is authoritative is
+// D-023 policy and is decided in autoStorageRecover().
+//
+// The RTC mirror advances only after the NVS write succeeds, exactly as
+// before: a reservation that was not persisted must not raise the floor that
+// makes duplicate sequence numbers impossible.
 bool reserveSequenceBlock(uint32_t fromSeq)
 {
 	uint32_t newHighWater = fromSeq + AUTO_SEQ_BLOCK;
 
-	if (!preferences.begin(NVS_NAMESPACE, false))
+	if (!saveSequenceHighWater(newHighWater))
 	{
-		Serial.println("[ERROR] Could not open NVS to reserve a sequence block.");
-		return false;
-	}
-
-	size_t written = preferences.putUInt(NVS_AUTO_SEQ_HW_KEY, newHighWater);
-	preferences.end();
-
-	if (written != sizeof(uint32_t))
-	{
-		Serial.println("[ERROR] Failed to reserve a sequence block in NVS.");
 		return false;
 	}
 
@@ -3929,51 +3329,6 @@ bool ensureSequenceReservation(uint32_t nextSeq, bool announceNoOp)
 	}
 
 	return reserveSequenceBlock(nextSeq);
-}
-
-uint32_t loadSequenceHighWater()
-{
-	if (!preferences.begin(NVS_NAMESPACE, true))
-	{
-		return 0;
-	}
-
-	uint32_t value =
-			preferences.isKey(NVS_AUTO_SEQ_HW_KEY)
-					? preferences.getUInt(NVS_AUTO_SEQ_HW_KEY, 0)
-					: 0;
-
-	preferences.end();
-	return value;
-}
-
-// Boot id identifies one continuous power-on session. It increments on cold
-// boot only; a deep-sleep wake keeps the RTC-retained value.
-uint32_t nextBootId()
-{
-	if (!preferences.begin(NVS_NAMESPACE, false))
-	{
-		Serial.println(
-				"[ERROR] Could not open NVS for boot id. Using 0, which is not "
-				"unique.");
-		return 0;
-	}
-
-	uint32_t bootId =
-			preferences.isKey(NVS_BOOT_ID_KEY)
-					? preferences.getUInt(NVS_BOOT_ID_KEY, 0)
-					: 0;
-
-	bootId++;
-	size_t written = preferences.putUInt(NVS_BOOT_ID_KEY, bootId);
-	preferences.end();
-
-	if (written != sizeof(uint32_t))
-	{
-		Serial.println("[ERROR] Failed to persist boot id.");
-	}
-
-	return bootId;
 }
 
 // ============================================================================
@@ -7124,7 +6479,12 @@ void setup()
 	Serial.println(
 			"[BOOT] Loading persistent state from NVS...");
 
-	if (!loadCheckpoint())
+	// Zero-initialized because a false return leaves it untouched, and the
+	// experiment globals below are assigned only after a true one. Every
+	// successful path through loadCheckpoint() writes all four fields.
+	LoggerCheckpoint checkpoint = {};
+
+	if (!loadCheckpoint(checkpoint))
 	{
 		Serial.println(
 				"[FATAL] NVS load failed. Logger halted to avoid corrupting totals.");
@@ -7138,9 +6498,14 @@ void setup()
 		}
 	}
 
+	experimentId = checkpoint.experimentId;
+	completedInterval = checkpoint.completedInterval;
+	runningCharge_mAh = checkpoint.runningCharge_mAh;
+	runningEnergy_mWh = checkpoint.runningEnergy_mWh;
+
 	// The flag must survive a USB disconnect and reboot before battery power is
 	// applied, so load it independently from the experiment checkpoint.
-	if (!loadWifiPowerTestArmed())
+	if (!loadWifiPowerTestArmed(wifiPowerTestArmed))
 	{
 		Serial.println(
 				"[FATAL] Wi-Fi power-test state could not be loaded. Logger halted.");
@@ -7156,7 +6521,7 @@ void setup()
 
 	// Same reasoning for the deep-sleep test: the whole point is that arming it
 	// over USB survives the USB disconnect and the switch to AA battery power.
-	if (!loadSleepPowerTestArmed())
+	if (!loadSleepPowerTestArmed(sleepPowerTestArmed))
 	{
 		Serial.println(
 				"[FATAL] Deep-sleep test state could not be loaded. Logger halted.");
@@ -7178,7 +6543,7 @@ void setup()
 	// armed INA-OFF test would silently resume as the INA-continuous variant
 	// after every power cycle, and STATUS would report the wrong one while the
 	// DMM measured something else entirely.
-	if (!loadSleepPowerTestInaOff())
+	if (!loadSleepPowerTestInaOff(sleepPowerTestInaOff))
 	{
 		Serial.println(
 				"[FATAL] Deep-sleep test variant could not be loaded. Logger halted.");

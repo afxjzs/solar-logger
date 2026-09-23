@@ -6,6 +6,212 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-23: NVS persistence extracted into a module - NOT hardware validated
+
+**No hardware was touched.** Nothing was uploaded or committed, Experiment 3
+was not reset, storage was not cleared, and no serial port was opened. Every
+result below is a host test, a source audit, or a compile. **This image has not
+run on the board.**
+
+The third modularization stage, and stage 1 of the order in
+[BACKLOG.md](BACKLOG.md). The mechanics of ESP32 nonvolatile storage moved into
+`Arduino/solar-logger/nvs_persistence.h` and `nvs_persistence.cpp`. Runtime
+behavior is intended to be unchanged, and nothing below found a change.
+
+The module is named for NVS rather than "persistence" because this board has
+three durable stores with different promises - NVS, RTC-retained memory, and the
+LittleFS record log - and only the first one moved. The boundary is D-050.
+
+### What moved, and what deliberately did not
+
+Fifteen NVS responsibilities were found in the sketch. Thirteen functions moved
+whole. Two were split, because each mixed a typed NVS access with a decision
+that is not the module's to make:
+
+| Split | Moved to the module | Stayed in the sketch |
+| --- | --- | --- |
+| `loadAutonomousSettings()` | the two-key read, as `loadAutonomousConfig()` | the cadence range check, with `AUTO_INTERVAL_SECONDS_MIN` / `_MAX` (D-018) |
+| `reserveSequenceBlock()` | the write, as `saveSequenceHighWater()` | `AUTO_SEQ_BLOCK`, and the RTC mirror `rtcAutoSeqHighWater` |
+
+`ensureSequenceReservation()` stayed whole: it decides *whether* a reservation
+is needed. Nothing about which of the durable log tail and the NVS reservation
+is authoritative moved (D-023).
+
+### One semantic difference, found by the audit and guarded
+
+`loadAutonomousSettings()` used to `return true` early when the namespace would
+not open, which **skipped** the range check below it. That early return is now
+inside `loadAutonomousConfig()`, so it comes back to the caller and the range
+check runs on the default instead of being skipped.
+
+The two are identical only while the default cadence is itself in range. It is,
+60 against 10-3600, so no behavior changes - but a later cadence change could
+break it silently, printing "out of range" at every boot. A `static_assert` in
+the sketch now fails the build instead. This is the only place where the
+extraction is not behavior-preserving by construction.
+
+### Two known defects were preserved, not fixed
+
+Both are recorded in [BACKLOG.md](BACKLOG.md) under "NVS load failures become
+plausible defaults with no signal", and both are unchanged by this move:
+`loadAutonomousConfig()` still reports success after a failed open, and
+`loadSequenceHighWater()` still returns 0, which reads the same as "nothing was
+ever reserved". Fixing either changes behavior and needs its own change. They
+are now stated in `nvs_persistence.h` where a caller will see them.
+
+### The move was audited as a move
+
+Same method as the two earlier stages, over the tokenizer in
+`tests/firmware_source.py`, comments stripped:
+
+- The sketch's tokens equal `HEAD`'s with 2,215 tokens deleted in 17 runs and
+  90 inserted. Every insertion is an explicit argument or result at a former
+  hidden dependency, plus `#include "nvs_persistence.h"` and the
+  `static_assert` above.
+- **Eight functions have byte-for-byte identical bodies and parameter lists**:
+  `loadExperimentIdOnly`, `saveAutonomousTestArmed`, `saveAutonomousInterval`,
+  `loadSequenceHighWater`, `nextBootId`, and the three power-test savers.
+- **Five are identical after substituting the sketch global for its new out
+  parameter**, and nothing else: `saveCheckpoint`, `loadCheckpoint`, and the
+  three power-test loaders.
+- **Both split functions recompose exactly.** Inlining `saveSequenceHighWater()`
+  back into `reserveSequenceBlock()`, and `loadAutonomousConfig()` back into
+  `loadAutonomousSettings()`, reproduces each `HEAD` body token for token.
+- The namespace string, all seven key constants, `NVS_SCHEMA_VERSION` and the
+  `Preferences` object are identical, with `static` added.
+
+The audit script was a scratch file for this stint and is not in the repository.
+
+### The tests
+
+`tests/test_characterization_nvs.py`, 43 tests, freezing what is stored: the
+`solarlog` namespace, all twelve key names and the 15-character ESP32 limit,
+the five checkpoint keys with their writer, reader and checked width, the
+`LoggerCheckpoint` field types, failure propagation on both checkpoint paths,
+the power-test defaults, the sequence key, and the rule that the RTC floor
+rises only after the NVS write succeeded.
+
+Two of them are deliberately file-specific, because they are the boundary
+rather than the shape of a function: exactly one file may use `preferences`,
+and the sketch may not name a key, the namespace, or the object.
+
+Not duplicated: that a failed experiment-id read cannot become experiment 0.
+`tests/test_autonomous_accounting.py` already pins it (D-024), and it still
+passes unchanged after the move.
+
+**Nine mutations were applied one at a time and all nine were caught**: the
+namespace renamed, a checkpoint key renamed, `charge` written with `putUInt`
+instead of `putDouble`, a failed key write abandoning the remaining keys, an
+unsupported schema returning true, the RTC floor raised before the NVS write,
+the Wi-Fi flag defaulting to armed, the sketch naming a key again, and the
+reservation written to the `boot_id` key.
+
+**The existing suite was not edited.** 183 passed and 1 xfailed before the move
+and after it; the run with the new module is 226 passed, 1 xfailed. The xfail is
+the unrelated overrun defect.
+
+### The gate
+
+`tools/check.sh` reported ALL OK before the move and after it.
+
+```text
+pytest             226 passed, 1 xfailed        (183 + 43 new)
+pyright            0 errors, 0 warnings, 0 informations
+py_compile         PASS
+firmware compile   clean, --warnings all, no warnings
+intellisense       4 translation units, all verified
+shell syntax       PASS
+whitespace         PASS
+```
+
+**The editor found the new module by itself.** `nvs_persistence.cpp` got a
+verified entry with no edit to `tools/intellisense.py`, `tools/check.sh`, or any
+VS Code setting, which is the D-048 contract and the first time it has been
+exercised by a module created after it was written. `git diff tools/ .vscode/`
+is empty.
+
+```text
+[INTELLISENSE]   nvs_persistence.cpp: compiles cleanly: ALL OK
+                 (direct includes: nvs_persistence.h, Arduino.h, Preferences.h)
+```
+
+### Where the 820 bytes went
+
+Measured with `nm`, `size -A` and `objdump -h` on both images, and on the object
+files of both builds. Flash 1,101,517 -> 1,102,337. **Global variables are
+unchanged at 36,332 bytes**: the `Preferences` object is the same 8 bytes under
+a new name, `_ZL11preferences`.
+
+The whole delta is accounted for:
+
+| Section | Delta |
+| --- | ---: |
+| `.flash.text` | +248 |
+| `.flash.rodata` | +416 |
+| `.eh_frame` | +152 |
+| `.flash.init_array` | +4 |
+| **total** | **+820** |
+
+`.flash.text`, per symbol. This build has no LTO, so a call that used to be
+inside one translation unit can no longer be inlined:
+
+- The three checkpoint call sites carry the struct now: `setup()` +232,
+  `closeMeasurementInterval()` +58, `resetExperiment()` +14.
+- **The moved functions themselves got smaller**, because writing through a
+  reference beat writing four separate globals: `loadCheckpoint` 1,122 -> 1,034
+  and `saveCheckpoint` 618 -> 574. The three power-test loaders lost 2 bytes
+  each.
+- The two splits cost +54 and +16 for the extra call.
+- Static initialization is now emitted in two translation units instead of one,
+  +12.
+
+`.flash.rodata` +416 is the second object file's own read-only fragments and
+their alignment; at object level it is +459, so the linker's string merging
+reclaimed 43 of it. **No diagnostic string was duplicated** - the set of
+`[NVS]`, `[ERROR]` and `[AUTO]` literals in the two images is identical.
+`.eh_frame` +152 is unwind data for the new function set. The 4 bytes of
+`.flash.init_array` are one more static constructor slot.
+
+### Firmware identity unchanged
+
+```text
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+```
+
+A move changes no command, record, cadence rule or protocol, so the version
+policy calls for no bump. The revision that `tools/upload.sh` injects will
+differ, and that is what identifies this source.
+
+### Hardware acceptance - PENDING, nothing below has been run
+
+This stage touches the store that holds Experiment 3, so the first check is
+whether the board comes back as the same experiment. After a deliberate
+`tools/upload.sh`, send each command on its own and expect exit 0 from each.
+Everything after "PREDICTED" is read from the source, not observed.
+
+1. The smoke test in [BACKLOG.md](BACKLOG.md). PREDICTED: a real revision hash,
+   `Tail status: INTACT` with at least as many records as before, and
+   `CMD_RESULT,...,OK` for HOLD, KEEPALIVE and RELEASE.
+2. Stage 1's own check, and the one that matters most here: the boot log's
+   `[NVS]` block. PREDICTED: `Stored schema = 2`, `experiment = 3`, and the
+   same interval number and running charge/energy the board reported before the
+   upload. An `experiment = 0` or a zeroed interval means the checkpoint was
+   not read and the board must not be left running.
+3. `tools/send.sh LOGGER AUTONOMOUS STATUS`. PREDICTED: the same armed state and
+   the same 60-second cadence as before the upload, both read from NVS, and
+   `New records will carry experiment id: 3`.
+4. `tools/send.sh POWER TEST STATUS`. PREDICTED: both tests not armed, which is
+   the persisted state, and no `[NVS] ... unavailable` line at boot.
+5. One closed interval, tethered: PREDICTED `[NVS] CHECKPOINT REQUIRED` followed
+   by the five `[NVS] Writing` lines and
+   `*** NVS CHECKPOINT SAVED SUCCESSFULLY ***`, with the interval number one
+   higher than step 2 reported.
+6. A cold boot with autonomous mode armed. PREDICTED: `boot_id` increments by
+   one across the reboot, and `[STORAGE] Sequence reservation already covers
+   <n>` rather than a fresh block, since the existing reservation still covers
+   the next sequence.
+
 ## 2026-09-18: Connection bookkeeping extracted, and the editor database finds every module - NOT hardware validated
 
 **No hardware was touched.** Nothing was uploaded or committed, Experiment 3

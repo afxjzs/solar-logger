@@ -17,6 +17,7 @@ All paths below are relative to the repository root.
 - Firmware: `Arduino/solar-logger/solar-logger.ino`
 - INA228 driver module: `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp`
 - Connection module (which transport a host has claimed): `Arduino/solar-logger/connection.h`, `Arduino/solar-logger/connection.cpp`
+- NVS persistence module (the namespace, the keys, the typed reads and writes): `Arduino/solar-logger/nvs_persistence.h`, `Arduino/solar-logger/nvs_persistence.cpp`
 - Python logger: `app/solar_logger.py`
 - Current telemetry: `data/samples.csv`, `data/intervals.csv`, `data/events.csv`
 - Legacy/archive data: `logs/`
@@ -29,7 +30,7 @@ All paths below are relative to the repository root.
 
 The firmware reports its own identity at boot, on every autonomous wake, in `STATUS`, and on the `VERSION` command: a hand-edited version, the Git revision injected by `tools/upload.sh`, and the command-protocol build ID. An image built any other way prints `Revision: UNKNOWN` rather than a blank. See [DECISIONS.md](DECISIONS.md) D-038 and the version policy in [PROJECT.md](PROJECT.md).
 
-Firmware modularization has started. Two modules were extracted on 2026-09-18. The INA228 driver's hardware smoke test was reported later that day and is recorded, as reported, in [LAB_NOTES.md](LAB_NOTES.md). Connection bookkeeping is compiled and host-tested and has **not** yet been validated on hardware. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. A new module needs no editor configuration: the gate regenerates the IntelliSense database, which finds every module itself. See [DECISIONS.md](DECISIONS.md) D-043, D-047, D-048 and D-049, and the extraction plan in [BACKLOG.md](BACKLOG.md).
+Firmware modularization has started. Three modules exist: the INA228 driver and connection bookkeeping, extracted on 2026-09-18, and NVS persistence, extracted on 2026-09-23. The INA228 driver's hardware smoke test was reported on 2026-09-18 and is recorded, as reported, in [LAB_NOTES.md](LAB_NOTES.md). Connection bookkeeping and NVS persistence are compiled and host-tested and have **not** yet been validated on hardware. Every extraction stage is gated on `tools/check.sh` and the characterization tests that freeze the current firmware's behavior, then on a hardware smoke test. A new module needs no editor configuration: the gate regenerates the IntelliSense database, which finds every module itself — `nvs_persistence.cpp` was the first module created after that rule and needed no tooling change. See [DECISIONS.md](DECISIONS.md) D-043, D-047, D-048, D-049 and D-050, and the extraction plan in [BACKLOG.md](BACKLOG.md).
 
 `tools/send.sh` waits for the next USB rendezvous by default, because a sleeping board's absent USB device is the ordinary state. `LOGGER SESSION KEEPALIVE` and `LOGGER SESSION RELEASE` are excluded: they address a session that already exists, so they fail immediately instead of acting on a later one. See [DECISIONS.md](DECISIONS.md) D-040.
 

@@ -15,6 +15,7 @@ All paths in these documents are relative to the repository root.
 | Firmware | `Arduino/solar-logger/solar-logger.ino` |
 | INA228 driver module | `Arduino/solar-logger/ina228.h`, `Arduino/solar-logger/ina228.cpp` |
 | Connection module | `Arduino/solar-logger/connection.h`, `Arduino/solar-logger/connection.cpp` |
+| NVS persistence module | `Arduino/solar-logger/nvs_persistence.h`, `Arduino/solar-logger/nvs_persistence.cpp` |
 | Python logger | `app/solar_logger.py` |
 | Current sample telemetry | `data/samples.csv` |
 | Current interval telemetry | `data/intervals.csv` |
@@ -35,11 +36,17 @@ All paths in these documents are relative to the repository root.
 
 The firmware is being split out of `solar-logger.ino` into real `.h`/`.cpp` modules, one stage at a time. The plan and its order are in [BACKLOG.md](BACKLOG.md), and the boundary rules are [DECISIONS.md](DECISIONS.md) D-047.
 
-Two modules exist. Both were extracted on 2026-09-18 with no intended behavior change, and both are audited in [LAB_NOTES.md](LAB_NOTES.md).
+Three modules exist, all extracted with no intended behavior change, and each audited as a move in [LAB_NOTES.md](LAB_NOTES.md).
 
 **The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. A hardware smoke test of that image was reported later the same day and is recorded, as reported, in LAB_NOTES.
 
-**Connection bookkeeping**, `connection.h` and `connection.cpp`, answers one question: which transport has a host claimed? It holds the private transport bitmask, `connectionClaim()` and `connectionRelease()`, `anyHostConnected()`, and the `[CONNECTION]` lines. It does not know about leases, sleep, or autonomous mode; the session and autonomous code in `solar-logger.ino` decide those and call down into it. USB presence (`isPlugged()`, `isConnected()`) is not connection state and stayed in the sketch. The boundary is [DECISIONS.md](DECISIONS.md) D-049. It is compiled and host-tested but **not yet validated on hardware**.
+**Connection bookkeeping**, `connection.h` and `connection.cpp`, answers one question: which transport has a host claimed? It holds the private transport bitmask, `connectionClaim()` and `connectionRelease()`, `anyHostConnected()`, and the `[CONNECTION]` lines. It does not know about leases, sleep, or autonomous mode; the session and autonomous code in `solar-logger.ino` decide those and call down into it. USB presence (`isPlugged()`, `isConnected()`) is not connection state and stayed in the sketch. The boundary is [DECISIONS.md](DECISIONS.md) D-049. Extracted 2026-09-18. It is compiled and host-tested but **not yet validated on hardware**.
+
+**NVS persistence**, `nvs_persistence.h` and `nvs_persistence.cpp`, owns the mechanics of ESP32 nonvolatile storage: the single `Preferences` object, the `solarlog` namespace, all twelve key names, the schema version, and the typed reads and writes behind them. Nothing outside it names a key or opens the namespace. It knows *how* to store a value and never *when* one should change — arming, disarming, closing an interval, starting an experiment and reserving a sequence block are all decided in `solar-logger.ino`, which calls down into it. The experiment state itself stays in the sketch and travels through a `LoggerCheckpoint` struct.
+
+Two functions were split rather than moved whole, because each mixed a typed access with a decision: the autonomous cadence range check stayed with the cadence constants, and the sequence block width and its RTC mirror stayed with the autonomous state. The boundary is [DECISIONS.md](DECISIONS.md) D-050. Extracted 2026-09-23. It is compiled and host-tested but **not yet validated on hardware**, and its hardware check is the one that confirms the board still comes back as Experiment 3.
+
+It is also the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind.
 
 ## Development Workflow
 
@@ -95,10 +102,11 @@ Host-side tests. They touch no hardware and open no serial port.
 | `tests/test_characterization_policy.py` | refusals before state changes, including HOLD while a sleep is pending; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle | source |
 | `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation | source |
 | `tests/test_characterization_connection.py` | transport claim and release, run on the host with the exact `[CONNECTION]` wording; who claims, who releases, and that sleep policy asks `anyHostConnected()` | firmware code run on the host + source |
+| `tests/test_characterization_nvs.py` | what is stored: the `solarlog` namespace, every key name and the 15-character limit, the five checkpoint keys with their widths, failure propagation on both checkpoint paths, power-test defaults, the sequence floor's ordering, and the one-owner boundary | source |
 | `tests/test_intellisense.py` | a module added to, broken in, and deleted from a scratch copy of the sketch, through the real generator; every refusal of the database validator | real tooling + real host code |
 | `tests/firmware_source.py` | reads every sketch file as C++ tokens for the source tests | helper |
 
-The four `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
+The five `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
 
 A source test proves the code still has the shape a rule needs. It does not execute firmware. Two modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` does the same with the connection code, against a stand-in `Serial` that records what is printed. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
 
@@ -405,7 +413,7 @@ The XIAO ESP32-C3 has 4 MiB of flash. The build uses the stock `default` partiti
 | Name | Offset | Size | Used today |
 | --- | --- | ---: | --- |
 | bootloader + partition table | `0x000000` | 36,864 | yes |
-| `nvs` | `0x009000` | 20,480 | yes — experiment state and power-test flags |
+| `nvs` | `0x009000` | 20,480 | yes — experiment state, power-test flags, autonomous settings, sequence floor, boot id; all reached through `nvs_persistence.cpp` |
 | `otadata` | `0x00E000` | 8,192 | no |
 | `app0` | `0x010000` | 1,310,720 | yes — the firmware |
 | `app1` | `0x150000` | 1,310,720 | no — never used, no OTA |

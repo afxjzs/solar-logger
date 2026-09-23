@@ -1020,6 +1020,70 @@ on the host and runs it, and pins the call sites: HOLD is the only claim, every
 way out of a session releases USB, and `LOGGER AUTONOMOUS OFF` releases it only
 when no session is held (D-031).
 
+## D-050: The NVS module owns how a value is stored, never when it changes
+
+Set by the third modularization stage on 2026-09-23, which is stage 1 of the
+order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested; **not validated on
+hardware**.
+
+`nvs_persistence.h` / `.cpp` hold the single `Preferences` object, the
+`solarlog` namespace, every key name, `NVS_SCHEMA_VERSION`, and the typed reads
+and writes. They decide nothing about arming, disarming, closing an interval,
+starting an experiment, or reserving a sequence block. Those decisions stay in
+`solar-logger.ino` and call down (D-047).
+
+**The name says NVS, not "persistence".** This board has three durable stores
+and they keep different promises: NVS survives power loss, RTC-retained memory
+survives deep sleep only, and the LittleFS log is the durable record history.
+Only the first one moved, and the other two are later stages. A module called
+`persistence` that owned one third of it would be the kind of quietly wrong name
+this project treats as a defect rather than a cosmetic issue.
+
+**A split is the right answer when one function held both.** Two did, and each
+was cut at the line between the store and the decision:
+
+- `loadAutonomousSettings()` read two keys and then checked the cadence against
+  `AUTO_INTERVAL_SECONDS_MIN` and `_MAX`. The read is now
+  `loadAutonomousConfig()`; the range check stayed with the constants, which are
+  the cadence authority (D-018) and are also tested by the `LOGGER INTERVAL`
+  handler. A persistence module does not get to decide which stored cadence is
+  acceptable.
+- `reserveSequenceBlock()` computed a new high-water mark, wrote it, and then
+  advanced the RTC mirror. The write is now `saveSequenceHighWater()`.
+  `AUTO_SEQ_BLOCK` and `rtcAutoSeqHighWater` stayed, and so did every part of
+  D-023: which of the durable log tail and the NVS reservation is authoritative
+  is not a question this module can see.
+
+**The mirror still moves only after the write succeeds.** A reservation that was
+not persisted must not raise the floor that makes a duplicate sequence number
+impossible. That ordering survived the split and is pinned by a test.
+
+**A hidden dependency becomes a parameter, not an `extern`.** Five functions
+wrote sketch globals - the four experiment values and the three power-test
+flags. They take an out parameter or a `LoggerCheckpoint` now. No global was
+exported, and the experiment state itself did not move: it belongs to the
+`experiment` stage, which owns when those values change.
+
+`LoggerCheckpoint` is a plain struct of the four values, and deliberately does
+**not** carry the schema. The schema belongs to the stored format, and only this
+module may choose it.
+
+**Failure keeps reaching the caller.** Every function that can fail returns
+whether it did, the console keeps the same wording, and `saveCheckpoint()` still
+attempts every key so that one failure does not hide the others. Two known
+defects were **preserved rather than fixed**, because a behavior change must not
+ride along inside a move: `loadAutonomousConfig()` reports success after a
+failed open, and `loadSequenceHighWater()` returns 0 where a read failed. Both
+are in [BACKLOG.md](BACKLOG.md), and both are now stated in the header where a
+caller will see them.
+
+**One semantic difference was found by the audit and guarded at compile time.**
+The old early return on a failed open skipped the range check; it now returns to
+the caller, which runs the check on the default. The two agree only while the
+default cadence is in range, so a `static_assert` in the sketch fails the build
+if it ever stops being. Everything else in the stage recomposes token for token
+against `HEAD`.
+
 ## Project practice
 
 These documents are living engineering records. Record substantive changes, measurements, discovered bugs, mistakes and corrections, architecture decisions, and open questions here as part of the same work. Chat history is not the authoritative project record.

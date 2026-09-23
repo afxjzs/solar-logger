@@ -15,27 +15,33 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
-## Firmware modularization — TWO STAGES BUILT 2026-09-18
+## Firmware modularization — THREE STAGES BUILT, LATEST 2026-09-23
 
-`Arduino/solar-logger/solar-logger.ino` is 7,836 lines by `wc -l` after the
-connection extraction on 2026-09-18. It was 7,949 after the INA228 extraction
-the same day, 9,126 before that, and 8,436 when this plan was written. The
+`Arduino/solar-logger/solar-logger.ino` is 7,201 lines by `wc -l` after the NVS
+extraction on 2026-09-23. It was 7,836 after the connection extraction on
+2026-09-18, 7,949 after the INA228 extraction the same day, 9,126 before that,
+and 8,436 when this plan was written. The
 agreed direction is
 real `.h`/`.cpp` modules, **not** additional Arduino `.ino` tabs: extra tabs are
 concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-**Two modules exist**, both extracted on 2026-09-18 with no intended behavior
-change:
+**Three modules exist**, each extracted with no intended behavior change:
 
-- **The INA228 driver**, `ina228.h` and `ina228.cpp`. A hardware smoke test of
-  that image was reported later the same day; it is recorded, as reported, in
-  [LAB_NOTES.md](LAB_NOTES.md). The boundary rules it set are
+- **The INA228 driver**, `ina228.h` and `ina228.cpp`, 2026-09-18. A hardware
+  smoke test of that image was reported later the same day; it is recorded, as
+  reported, in [LAB_NOTES.md](LAB_NOTES.md). The boundary rules it set are
   [DECISIONS.md](DECISIONS.md) D-047.
-- **Connection bookkeeping**, `connection.h` and `connection.cpp`: which
-  transport a host has claimed. Compiled and host-tested; it has **not** run on
-  hardware. Its boundary is D-049.
+- **Connection bookkeeping**, `connection.h` and `connection.cpp`, 2026-09-18:
+  which transport a host has claimed. Compiled and host-tested; it has **not**
+  run on hardware. Its boundary is D-049.
+- **NVS persistence**, `nvs_persistence.h` and `nvs_persistence.cpp`,
+  2026-09-23: the `Preferences` object, the namespace, every key, and the typed
+  reads and writes. Compiled and host-tested; it has **not** run on hardware.
+  Its boundary is D-050. This is the `nvs_rtc` row of the module table below,
+  **NVS only** — the RTC-retained state that row also names did not move and
+  belongs to `auto_state`.
 
 The audits and hardware checks are in [LAB_NOTES.md](LAB_NOTES.md). The gate
 every stage passes was built earlier the same day, and since the connection
@@ -116,7 +122,7 @@ forced them.
 
 | Module | Owns | Depends on |
 | --- | --- | --- |
-| `nvs_rtc` | the single `Preferences` object and every typed get/put | Arduino |
+| `nvs_rtc` | **NVS HALF BUILT 2026-09-23** as `nvs_persistence.h` / `.cpp`: the single `Preferences` object, the namespace, every key and every typed get/put. The name in this row is misleading and the split was made deliberately (D-050): RTC-retained state is a different store with a different lifetime, and it stays for `auto_state` | Arduino |
 | `connection` | **BUILT 2026-09-18** as `connection.h` / `connection.cpp`: `activeTransports`, `anyHostConnected()`, claim/release, `printActiveTransports()`. The USB presence diagnostics stayed in the sketch, because presence is not a claim (D-049) | Arduino |
 | `auto_state` | `AutoState`, the ten `rtcAuto*` RTC globals, `setAutoState()`, `autonomousOwnsBoard()`, LittleFS mount, 72-byte record encode/CRC/append, tail scan, sequence reservation | `nvs_rtc` |
 | `ina228_regs` | **Merged into `ina228`, built 2026-09-18.** I2C register read/write, sign extension | Arduino, `Wire` |
@@ -291,7 +297,7 @@ calls. Each stage compiles and uploads on its own. **Do not batch them.**
 
 | Stage | Move | Why it is safe | Hardware check afterwards |
 | ---: | --- | --- | --- |
-| 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls | reboot; `experiment_id` and interval number survive |
+| 1 | `nvs_rtc` | true leaf — zero outgoing cross-module calls. **BUILT 2026-09-23** as `nvs_persistence`, NVS only | reboot; `experiment_id` and interval number survive. **PENDING** |
 | 2 | `connection` | the other true leaf; 1 global, 5 functions. **BUILT 2026-09-18**, as planned: exactly that global and those five functions | `LOGGER SESSION STATUS` reports the same transports. **PENDING** |
 | 3 | `ina228_regs` | leaf but for the bus; no globals | `STATUS` reports live V/I/P/temperature |
 | 4 | `ina228` | above stage 3; no globals, since `inaShutdownActive` stayed in the sketch (D-047) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
@@ -314,7 +320,16 @@ direction of that stint's brief and recorded here so neither is silent:
 exactly what the row above says. One departure from the module table is
 recorded in D-049: `printUsbPresence()` stayed in the sketch.
 
-The remaining order is unchanged: 1, 5, 6, 7, 8, 9, 10, 11.
+**Stage 1 is BUILT, 2026-09-23, and its hardware check is PENDING.** One
+departure from the module table, recorded in D-050: the row's RTC half did not
+move, so the module is `nvs_persistence` rather than `nvs_rtc`. Two functions
+were split instead of moved whole, `loadAutonomousSettings()` and
+`reserveSequenceBlock()`, each because it mixed a typed NVS access with a
+decision the caller owns. Its hardware check is the sharpest of the three so
+far: the board must come back as Experiment 3 with the same interval number and
+running totals.
+
+The remaining order is unchanged: 5, 6, 7, 8, 9, 10, 11.
 | 6 | `auto_state` | **the split. Read-only first, append last.** Carries the ten `rtcAuto*` RTC globals | `LOGGER STORAGE INFO` and `LOGGER STORAGE DUMP` decode the existing log with the same record count and an intact tail |
 | 7 | `experiment` | 8 globals; everything it calls has moved | a full 60-second interval closes with the same running totals |
 | 8 | `power_test` | self-contained; nothing else calls into it | arm and stop each variant; confirm the refusal to arm two |
@@ -457,9 +472,10 @@ the RELEASE/HOLD correctness fixes the same day it reported 101 passed and 0
 xfailed: the xfail became a passing test (D-044). After the scheduler fix, also
 the same day, it reported 153 passed, 1 xfailed. The new xfail records the
 overrun defect found in that stint, below. The connection stage, still the same
-day, added the connection and IntelliSense tests: **183 passed, 1 xfailed**,
-the same xfail. The full local gate, including the warning-free ESP32 compile
-and the editor database, is:
+day, added the connection and IntelliSense tests: 183 passed, 1 xfailed, the
+same xfail. The NVS stage on 2026-09-23 added 43 tests of what is stored:
+**226 passed, 1 xfailed**, still the same xfail. The full local gate, including
+the warning-free ESP32 compile and the editor database, is:
 
 ```text
 tools/check.sh
@@ -479,6 +495,7 @@ plan.
 | `tests/test_characterization_policy.py` | the defect 4 and defect 6 refusals, and HOLD's refusal while a sleep is pending, all happening before any state change; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle (one arm, one cancel, stop cancels first) | source |
 | `tests/test_characterization_record.py` | `AutoRecord` field order, width, signedness and packing; CRC coverage; CRC computed last; validation rule; record constants | source |
 | `tests/test_characterization_connection.py` | added 2026-09-18, before the connection move, and unchanged by it: claim, release and the transport bits run on the host, with the exact `[CONNECTION]` wording; HOLD as the only claim; every way out of a session releasing USB; sleep policy asking `anyHostConnected()` and never `isPlugged()` / `isConnected()` | firmware code run on the host + source |
+| `tests/test_characterization_nvs.py` | added 2026-09-23 with the NVS move: the namespace, every key name and the 15-character limit, the five checkpoint keys with writer, reader and checked width, `LoggerCheckpoint` field types, failure propagation on both checkpoint paths, power-test defaults, the sequence key and the RTC floor's ordering, and the one-owner boundary | source |
 | `tests/test_intellisense.py` | added 2026-09-18 (D-048): a module added to, broken in and deleted from a scratch copy of the sketch, through the real generator and Arduino CLI; every refusal of the database validator, one defect at a time | real tooling + real host code |
 | `tests/firmware_source.py` | reads every sketch file as C++ tokens, so source tests survive file moves and reformatting | helper |
 | `tests/fake_serial.py` | a scripted stand-in for a pyserial port | helper |
@@ -1255,6 +1272,17 @@ The power-test loaders in the same file get this right: they print an explicit
 read". A failed high-water read must not be allowed to lower the floor; keeping
 the previous RTC value or refusing to allocate a sequence are both better than
 returning 0.
+
+**STILL OPEN after the NVS extraction of 2026-09-23.** Both functions now live
+in `Arduino/solar-logger/nvs_persistence.cpp`; the line references above are to
+the pre-extraction sketch. `loadAutonomousSettings()`'s read half is
+`loadAutonomousConfig()` there, and `loadSequenceHighWater()` kept its name and
+its body. Neither was fixed, deliberately: a behavior change must not ride along
+inside a move. Both are now stated at the top of `nvs_persistence.h`, so a
+caller reading the header is told rather than having to find this entry. The fix
+is cheap now that one file owns the reads — it needs a way to say "could not
+read" that the callers then have to handle, which is the behavior change that
+needs its own stint.
 
 ### `rtcAutoMagic` is set before the expression that tests it
 
