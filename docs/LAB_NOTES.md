@@ -6,6 +6,237 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-24: Hardware validation addendum — clean record format and working-tree recovery
+
+**OBSERVED, as supplied by the user:** the results below record two completed
+board runs. This documentation reconciliation inspected current source/tests;
+it did not build, upload, access serial, rerun `tools/check.sh`, or perform a new
+hardware test. Older entries retain their status at the time of each stint;
+this addendum supersedes their pending-hardware status, within the limits below.
+
+### Clean record-format image — eba3b5d
+
+`tools/upload.sh` successfully built and uploaded clean revision **`eba3b5d`**.
+Firmware reported version **`0.3.0-dev`**, revision **`eba3b5d`**, and build ID
+**`solar-logger-protocol-ack-v3`**. Experiment 3 survived. Historical records
+decoded and new autonomous records appended with valid CRCs. AutoRecord stayed
+**72 bytes, version 1**, with no format change or migration.
+
+The earlier extraction gate was **387 passed, 1 xfailed**. Its deployed golden
+Experiment 3 fixture (`seq=4445`, CRC `0xFB25DA73`) establishes CRC coverage of
+bytes 0–67, CRC at offset 68, and the `esp_rom_crc32_le(0, ...)` / IEEE-zlib
+convention. That host fixture and the post-upload records are separate evidence.
+
+Storage progressed from **4,528 valid records / newest sequence 5939** to
+**4,530 / 5941** after two autonomous wakes. The subsequent dump included:
+
+| Sequence | Boot | Experiment | Interval (ms) | Flags | CRC |
+| ---: | ---: | ---: | ---: | --- | --- |
+| 5940 | 32 | 3 | 60004 | `0x4[FIRST_AFTER_BOOT]` | `0x57D6B79C` |
+| 5941 | 32 | 3 | 60004 | `0x0[none]` | `0x8E93D0A2` |
+| 5942 | 32 | 3 | 60004 | `0x0[none]` | `0x1E771662` |
+
+Final dump: **Records read: 4531; invalid: 0**. Trailing bytes were **0** and
+tail status **INTACT**. These successive snapshots are not conflicting totals:
+another record was appended before the final dump.
+
+**Record format is IMPLEMENTED, SOFTWARE-TESTED and HARDWARE-VALIDATED.** The
+smoke covers old-record compatibility, ESP32 CRC/validation, new record creation
+and append, sequence progression, FIRST_AFTER_BOOT set then cleared, and
+Experiment 3/log integrity. Telemetry also ran in this smoke-validated image;
+the supplied evidence does not claim an exhaustive comparison of all CSV forms.
+
+### Storage-recovery working-tree image — eba3b5d-dirty
+
+The subsequent upload contained the uncommitted recovery fix and reported
+**`eba3b5d-dirty`**. This is a **storage-recovery working-tree build based on
+`eba3b5d`**, not a clean commit containing that fix. Version and build ID remain
+`0.3.0-dev` / `solar-logger-protocol-ack-v3`.
+
+| Observation | Record size | Valid records | Oldest sequence | Newest sequence | Trailing bytes | Tail status |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Immediately after upload | 72 bytes | 4644 | 1412 | 6055 | 0 | INTACT |
+| After additional autonomous wakes | 72 bytes | 4649 | — | 6060 | 0 | INTACT |
+
+Final dump included **6057, 6058, 6059, 6060 and 6061**, all with **boot=33,
+exp=3, interval_ms=60004**, valid CRCs and normal flags. Its summary was
+**Records read: 4650; invalid: 0**. Existing records continued decoding, new
+records continued appending, Experiment 3 remained intact, and the tail stayed
+INTACT. No corruption was injected into the live log.
+
+**Recovery is corrected, software-tested and NORMAL-PATH HARDWARE-SMOKE
+VALIDATED.** The smoke exercised a healthy log only. Torn-tail repair,
+complete-invalid-tail repair, mid-file corruption refusal and read-error
+refusal remain **host/synthetic tested, not exercised on physical hardware**.
+Any later destructive/recovery hardware test requires a disposable/test log;
+do not inject corruption into Experiment 3.
+
+### Latest reported software gate and remaining boundaries
+
+The latest coding-agent gate after recovery, **not rerun by this doc stint**:
+
+| Check | Reported result |
+| --- | --- |
+| pytest | **429 passed, 1 xfailed** |
+| pyright | clean |
+| py_compile | pass |
+| Arduino clean compile, `--warnings all` | pass |
+| IntelliSense | **6/6 project translation units** |
+| Shell syntax | pass |
+| `git diff --check` | pass |
+
+The six units are `connection.cpp`, `ina228.cpp`, `nvs_persistence.cpp`,
+`record_format.cpp`, `telemetry.cpp`, and `solar-logger.ino`. Discovery remains
+automatic. The one xfail is the existing **OPEN short-cadence autonomous overrun
+defect**, not a regression or a fix.
+
+Recovery added **42 tests**, without changing pre-existing tests, executing the
+firmware scan/recover/truncate/info functions against a file-backed LittleFS
+harness and linking real `record_format.cpp`. The coding agent reported mutation
+failures of **12** tests for restoring the first-invalid `break`, **8** for
+removing destructive-repair refusal, and **3** for removing read-error handling.
+Reported flash: **1,102,453 → 1,103,995 bytes (+1,542)**; globals **36,332 bytes,
+unchanged**. These are that gate's build figures, not new measurements here.
+
+DIAG_ALRT ordering is fixed, source/regression-tested and hardware-smoke
+validated: validate INA → DIAG_ALRT → CHARGE → ENERGY. **A real accumulator
+overflow has not been induced; INA_ACCUM_OF has not been observed SET from one.**
+The hardware smoke does not validate that overflow branch. Pre-fix records are
+not retroactively qualified; tethered overflow qualification and MATHOF interval
+semantics remain open.
+
+There is still no operator mid-file repair/quarantine command, no resync after
+non-record-sized mid-file insertion (such as `[10][8 junk bytes][11]`), and no
+physical read-error observation. CURRENT/CHARGE remain signed; POWER/ENERGY are
+unsigned magnitudes, so running energy is not a signed/net energy balance.
+
+The previous correctness blocker before LittleFS extraction is resolved within
+the stated limits. **Next structural candidate: extract LittleFS/durable-storage
+mechanics**, preserving D-057 and its remaining edge cases. It has not been
+extracted. Sync/ACK/reclamation, storage-full policy, time sync, BLE/iOS/server,
+manual SYNC circuitry and IBS integration remain unimplemented; current wiring,
+future regulator design and open BMW trunk topology are unchanged.
+
+## 2026-09-24: One corrupt record no longer discards the valid records after it - NOT hardware validated
+
+A correctness fix to durable-log boot recovery. Nothing was uploaded, no serial
+port was opened, and no board was touched. The live Experiment 3 log was never
+read, written or used as a test fixture: every damaged log in this work is
+synthetic and lives in a pytest temporary directory.
+
+**This is not a hardware result.** The image was compiled and the host tests were
+run. The DIAG_ALRT reorder from 2026-09-23 and the record-format extraction from
+earlier on 2026-09-24 still owe their own hardware checks, and this stint does
+not supply them or establish a newer board state.
+
+### The defect, measured rather than inferred
+
+`autoStorageScan()` walked the log forward and stopped at the first record that
+failed validation. `scan.trailingBytes` then became every byte from there to end
+of file, and `autoStorageRecover()` handed that to `autoStorageTruncateToValid()`
+at every cold boot and every RTC-loss wake.
+
+For a torn tail that is correct, which is why it never showed on hardware. For a
+bit flip in the middle of the log it deletes every good record after the damage.
+
+A host harness was built that compiles the firmware's own
+`autoStorageMount/Scan/TruncateToValid/Recover` and `printStorageInfo` out of the
+sketch and runs them against a LittleFS made of real files, linking the real
+`record_format.cpp` so `autoRecordValid()` is the actual validator. Run against
+the **pre-fix** code:
+
+| Log laid down | Bytes in | Bytes out | Sequences surviving |
+| --- | ---: | ---: | --- |
+| `[seq 10][seq 11][seq 12]` | 216 | 216 | 10, 11, 12 |
+| `[seq 10][seq 11][40 loose bytes]` | 184 | 144 | 10, 11 |
+| `[seq 10][seq 11][bad seq 12]` | 216 | 144 | 10, 11 |
+| **`[seq 10][bad seq 11][seq 12][seq 13]`** | **288** | **72** | **10** |
+| **`[seq 10][bad seq 11][seq 12][bad seq 13]`** | **288** | **72** | **10** |
+
+The first three rows are the intended behavior. The last two are the defect:
+sequences 12 and 13 were complete, CRC-correct records, and boot recovery deleted
+them. `LOGGER STORAGE INFO` on the same log reported **1** valid record when
+three existed, and `Tail status: INVALID RECORD DETECTED`, so an operator
+deciding what to do was told less good data was at stake than actually was.
+
+The loss was counted and printed. It was still automatic, irreversible, and it
+happened before anyone read the message.
+
+### What changed
+
+Recovery now distinguishes four damage cases instead of collapsing them, and
+`printStorageInfo()` reports them separately. The rule and its reasoning are
+D-057; Section 11 of STORAGE_SYNC_DESIGN.md has been reconciled with the code.
+
+- `autoStorageScan()` scans the whole file, counting every invalid record, the
+  first one's offset, and how many valid records are stranded past it.
+- `trailingBytes` now means what an automatic repair would discard — the unbroken
+  run of invalid records at the end, plus a partial remainder — and `keepBytes`
+  what it would keep.
+- A valid record after an invalid one means nothing is discarded. The refusal is
+  enforced inside `autoStorageTruncateToValid()` as well as in its caller.
+- A short read while scanning sets `readError` and repairs nothing. An I/O fault
+  is not a torn tail, and it is the one case where what is damaged is not even
+  known. It is staged in the tests by telling the firmware the log is 72 bytes
+  longer than it is, which is the only way to make a real file read short.
+
+Re-run after the fix, the same five logs:
+
+| Log laid down | Bytes in | Bytes out | Sequences surviving |
+| --- | ---: | ---: | --- |
+| `[seq 10][seq 11][seq 12]` | 216 | 216 | 10, 11, 12 |
+| `[seq 10][seq 11][40 loose bytes]` | 184 | 144 | 10, 11 |
+| `[seq 10][seq 11][bad seq 12]` | 216 | 144 | 10, 11 |
+| `[seq 10][bad seq 11][seq 12][seq 13]` | 288 | **288** | 10, 11, 12, 13 |
+| `[seq 10][bad seq 11][seq 12][bad seq 13]` | 288 | **288** | 10, 11, 12, 13 |
+
+The first three are byte-identical to before. The last two discard nothing and
+say so.
+
+### Sequence authority
+
+`logIntact` already required `invalidRecords == 0`, so a preserved mid-file
+corruption keeps the NVS reservation floor in force, unchanged from D-023. The
+log's own candidate is now one past the last valid record in the whole file: for
+the fourth row above it is 14, where the pre-fix code returned 11 while deleting
+the records that had used 12 and 13.
+
+### Evidence and its limits
+
+`tests/test_characterization_storage_recovery.py`, 42 tests, all executing the
+firmware's own compiled functions. The gate is green:
+**429 passed, 1 xfailed** (387 + 1 before this work; the xfail is the unrelated
+short-cadence autonomous overrun defect). Flash went from 1,102,453 to 1,103,995
+bytes, **+1,542**, both 84% of `app0`. Global variables are unchanged at 36,332
+bytes: `AutoLogScan` is a stack local, and the five fields added to it cost no
+static memory.
+
+The tests were confirmed to fail against the behavior they replace. Restoring the
+scan's `break` at the first invalid record turns **12** of them red; keeping the
+full scan but removing the refusal and the trailing-run arithmetic turns **8**
+red. They are load-bearing in both directions.
+
+**What this does not show.** No board has run this code. The only hardware
+evidence about recovery remains the 2026-09-23 `d017f7d` snapshot of an
+*undamaged* log, and no corrupt record has ever been observed on this hardware.
+When hardware validation is requested it should confirm normal valid-log
+behavior only — an intact Experiment 3 log scanning, decoding and appending as
+before — unless a separate disposable log or isolated storage is created first.
+Corruption must not be injected into the live log.
+
+### Left unsolved, deliberately
+
+Damage that is not a whole number of records throws every later record off the
+72-byte grid, so nothing after it validates, no valid suffix is detectable, and
+it is discarded as a torn tail. `[seq 10][8 junk bytes][seq 11]` goes in at 152
+bytes and comes out at 72, before and after this fix alike. Recovering it needs a
+resynchronization policy this project does not have; it is recorded in BACKLOG.md
+and pinned as-is by a test that says so.
+
+There is also no operator command to repair mid-file damage once it is reported.
+Adding one changes the command protocol and its build ID, so it was kept out of a
+correctness fix.
+
 ## 2026-09-24: Record format extracted into a module - NOT hardware validated
 
 Structural extraction only. The deployed 72-byte durable record and its CRC

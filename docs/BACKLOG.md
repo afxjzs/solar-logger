@@ -144,14 +144,14 @@ nothing, and keep the file that a person edits from being valid C++ on its own
 
 - **Telemetry**, `telemetry.h` and `telemetry.cpp`, 2026-09-23: how each
   machine-readable CSV line is spelled, and nothing about when one is emitted.
-  Compiled and host-tested; it has **not** run on hardware. Its boundary is
-  D-051. This is the `telemetry` row of the module table below, built as that
+  Compiled and host-tested; it ran in the smoke-validated `eba3b5d` image
+  (not an exhaustive CSV comparison). Its boundary is D-051. This is the `telemetry` row of the module table below, built as that
   row describes.
 - **Record format**, `record_format.h` and `record_format.cpp`, 2026-09-24: the
   deployed 72-byte version-1 record, its flag bit values and sentinels, and its
   CRC and structural validation. Compiled and host-tested, with
   `record_format.cpp` itself compiled on the host and run against the real
-  Experiment 3 record; it has **not** run on hardware. Its boundary is D-056.
+  Experiment 3 record; **hardware validation passed on clean `eba3b5d`**. Its boundary is D-056.
   This is the `Record format / CRC` row of the module table below, built as that
   row describes. Record version is still 1 and no byte of the layout changed.
 
@@ -244,9 +244,9 @@ filenames or completed extractions**.
 | `nvs_persistence` | Preferences namespace, keys and typed reads/writes | Extracted; caller decides when to change values; no RTC ownership (D-050) |
 | `connection` | Transport claims and queries | Extracted; does not own leases, BLE radio behavior or sleep policy (D-049) |
 | `ina228` | Register access, device configuration and sensor/accumulator operations | Extracted; callers own measurement timing and accounting (D-047) |
-| `telemetry` | CSV formatting/emission mechanics | Extracted and host-tested; hardware validation pending (D-051) |
-| Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested, **not hardware validated** |
-| LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Planned; use the record contract; expose log facts without deciding sequence authority, reclamation or corruption policy during a move |
+| `telemetry` | CSV formatting/emission mechanics | Extracted, host-tested and running in the smoke-validated `eba3b5d` image; exhaustive CSV comparison not claimed (D-051) |
+| Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested and **HARDWARE-VALIDATED on clean `eba3b5d`** |
+| LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Planned; use the record contract; expose log facts without deciding sequence authority, reclamation or corruption policy during a move. Corruption policy was settled in source on 2026-09-24 (four damage cases, no automatic mid-file repair) and is the behavior to preserve |
 | Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | Separate concept; consumes storage results and NVS access; RTC holds retained values, not this decision policy. Future placement/API not chosen |
 | RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
 | Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
@@ -258,9 +258,9 @@ filenames or completed extractions**.
 The `record_format` extraction was stopped before it began when the DIAG_ALRT
 correctness issue was confirmed, and was then performed on 2026-09-24 as a
 structural move with that correctness change already in source. The reorder
-itself is source-tested and remains **not uploaded or hardware validated**;
-the extraction did not touch it and the tests that pin `DIAG_ALRT` before
-CHARGE and ENERGY are unchanged and still green. Record version is still 1. The
+is source/regression-tested and hardware-smoke validated on `eba3b5d`;
+the extraction did not touch it. DIAG_ALRT-before-CHARGE/ENERGY is settled,
+while a real induced overflow has not been observed setting INA_ACCUM_OF. Record version is still 1. The
 golden record establishes 72 packed bytes, coverage 0–67 and CRC at 68; it does
 not validate overflow behavior, and the extraction does not either.
 
@@ -434,7 +434,7 @@ smoke tests remain deliberate follow-up work, not automatic uploads.
 | 2 | `connection` | the other true leaf; 1 global, 5 functions. **BUILT 2026-09-18**, as planned: exactly that global and those five functions | `LOGGER SESSION STATUS` reports the same transports. **OBSERVED on 8776ba0** |
 | 3 | `ina228_regs` | leaf but for the bus; no globals | `STATUS` reports live V/I/P/temperature |
 | 4 | `ina228` | above stage 3; no globals, since `inaShutdownActive` stayed in the sketch (D-047) | `POWER TEST STATUS` reports the real INA mode; heartbeat sane |
-| 5 | `telemetry` | formatting only, no state. **BUILT 2026-09-23**, as planned: no state moved, and globals are unchanged at 36,332 bytes | one `CSV_SAMPLE` and one `CSV_DATA` row reach the logger unchanged. **PENDING** |
+| 5 | `telemetry` | formatting only, no state. **BUILT 2026-09-23**, as planned: no state moved, and globals are unchanged at 36,332 bytes | Telemetry ran in smoke-validated `eba3b5d`; supplied evidence does not assert an exhaustive CSV comparison |
 
 **Stages 3 and 4 are BUILT, 2026-09-18, as one module, `ina228`, ahead of
 stages 1 and 2.** A hardware smoke test covering their checks was reported
@@ -462,7 +462,7 @@ decision the caller owns. Its hardware check is the sharpest of the three so
 far: the board must come back as Experiment 3 with the same interval number and
 running totals.
 
-**Plan stage 5 is BUILT, 2026-09-23, and its hardware check is PENDING.** It
+**Plan stage 5 is BUILT, 2026-09-23, and ran in the smoke-validated `eba3b5d` image on 2026-09-24.** It
 moved exactly what the row above says, with one addition recorded in D-051:
 `CSV_HEADER` moved with `CSV_DATA` because it names that row's fields. One
 function was split rather than moved whole, `printLiveSample()`, because it
@@ -473,17 +473,21 @@ globals became one explicit struct.
 
 ### Remaining extraction plan — concepts, not filenames
 
-The DIAG_ALRT change still owes its own hardware validation of the overflow path;
-no hardware result is claimed here. Record format/CRC is **BUILT** (D-056); the
-version-1 byte/CRC contract and the golden record are unchanged, and no behavior
-fix was folded into the move. LittleFS storage mechanics is the next scoped
-candidate, and it has to carry the known corrupt-record/tail defect as an
-explicit correctness change rather than absorbing it into a move.
+Record format/CRC is **extracted and hardware-validated on clean `eba3b5d`**
+(D-056). DIAG_ALRT ordering is fixed and hardware-smoke validated; observing
+INA_ACCUM_OF set by a real induced overflow remains separate, unperformed work.
+The destructive recovery defect is corrected, host-tested and **normal-path
+hardware-smoke validated on `eba3b5d-dirty`**, a working-tree image based on
+`eba3b5d`. That resolves the prior blocker before extraction. **The next
+structural candidate is LittleFS/durable-storage mechanics**, not yet extracted.
+Preserve D-057, the four recovery cases and remaining limits: no operator
+repair/quarantine command, no resync after non-record-sized insertion, and no
+damaged-log/read-error hardware exercise. Details: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
 | Future boundary | What must remain separate | Validation focus when undertaken |
 | --- | --- | --- |
 | ~~Record format / CRC~~ **BUILT 2026-09-24** | Nothing else moved: no LittleFS, RTC, sequence allocation or scheduling | Done as stated: exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics, now also asserted per field at compile time |
-| LittleFS mechanics | No sequence-authority or storage-full policy decision | Preserve append/read/recovery behavior; handle the known corrupt-record/tail issue as an explicit correctness change, not silent cleanup |
+| LittleFS mechanics | No sequence-authority or storage-full policy decision | Preserve append/read/recovery behavior, including the 2026-09-24 four-case recovery policy and its refusal to repair mid-file damage; `tests/test_characterization_storage_recovery.py` already executes that behavior and will follow the code |
 | Sequence authority / reservation | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases, NVS write failure and duplicate avoidance; reclamation must revisit authority explicitly |
 | RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
 | Autonomous scheduling / policy | Consume mechanics/state through explicit boundaries | Existing deadline, handoff and command-pump contracts; preserve the known overrun xfail until its own fix |
@@ -632,8 +636,12 @@ same xfail. The NVS stage on 2026-09-23 added 43 tests of what is stored:
 226 passed, 1 xfailed, still the same xfail. The telemetry stage and the
 DIAG_ALRT correctness work brought it to 333 passed, 1 xfailed. The record
 format stage on 2026-09-24 added 54 tests of the module boundary and of the
-module's own source compiled on the host: **387 passed, 1 xfailed**, still the
-same xfail. The full local gate, including
+module's own source compiled on the host: 387 passed, 1 xfailed. The subsequent
+recovery correctness stint added 42 tests: **latest reported gate 429 passed,
+1 xfailed**, still the OPEN short-cadence overrun defect. The coding agent also
+reported pyright clean, py_compile/clean warning-free Arduino compile/shell
+syntax/whitespace passed, and IntelliSense 6/6 project units. This documentation
+stint did not rerun that gate. The full local gate, including
 the warning-free ESP32 compile and the editor database, is:
 
 ```text
@@ -653,6 +661,7 @@ plan.
 | `tests/test_characterization_protocol.py` | `tools/send.sh` exit status and report for 17 wire transcripts (11 at first; 6 added 2026-09-18 for D-044 and D-045); ACK-once and RESULT-once in the dispatcher; RELEASE's completion rule; every handler's result reaching `CMD_RESULT`; the frozen command set and status vocabulary; firmware identity | real host code + source |
 | `tests/test_characterization_policy.py` | the defect 4 and defect 6 refusals, and HOLD's refusal while a sleep is pending, all happening before any state change; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle (one arm, one cancel, stop cancels first) | source |
 | `tests/test_characterization_record.py` | `AutoRecord` field order, width, signedness and packing; CRC coverage; CRC computed last; validation rule; record constants | source |
+| `tests/test_characterization_storage_recovery.py` | added 2026-09-24 with the recovery fix: the sketch's own `autoStorageMount/Scan/TruncateToValid/Recover` and `printStorageInfo` compiled against a file-backed LittleFS and run on synthetic damaged logs — torn tail, invalid tail, mid-file damage, multiple failures, empty, short, wrong magic/version, sequence gaps and backward steps; the refusal to repair mid-file damage, including when the destroying function is called directly; next-sequence and NVS-floor behavior; the operator transcript | firmware code run on the host |
 | `tests/test_characterization_connection.py` | added 2026-09-18, before the connection move, and unchanged by it: claim, release and the transport bits run on the host, with the exact `[CONNECTION]` wording; HOLD as the only claim; every way out of a session releasing USB; sleep policy asking `anyHostConnected()` and never `isPlugged()` / `isConnected()` | firmware code run on the host + source |
 | `tests/test_characterization_nvs.py` | added 2026-09-23 with the NVS move: the namespace, every key name and the 15-character limit, the five checkpoint keys with writer, reader and checked width, `LoggerCheckpoint` field types, failure propagation on both checkpoint paths, power-test defaults, the sequence key and the RTC floor's ordering, and the one-owner boundary | source |
 | `tests/test_intellisense.py` | added 2026-09-18 (D-048): a module added to, broken in and deleted from a scratch copy of the sketch, through the real generator and Arduino CLI; every refusal of the database validator, one defect at a time | real tooling + real host code |
@@ -1347,11 +1356,11 @@ already records that instant as `intervalStartMs`.
 
 ## SHOULD FIX DURING MODULARIZATION
 
-### DIAG_ALRT was read after the accumulators, destroying overflow evidence — FIXED IN SOURCE 2026-09-23, NOT YET HARDWARE VALIDATED
+### DIAG_ALRT was read after the accumulators, destroying overflow evidence — FIXED, HARDWARE-SMOKE VALIDATED; induced overflow still untested
 
 Raised 2026-09-23 as an open ordering question, confirmed the same day against the
-datasheet, and fixed the same day. **The source fix is in; the flag has still
-never been seen to fire on hardware.**
+datasheet, and fixed the same day. **The order is source/regression-tested and hardware-smoke validated on
+`eba3b5d`; the flag has still never been observed SET from a real overflow.**
 
 **What was wrong.** `runAutonomousWakeCycle()` read CHARGE and ENERGY and only
 then read `DIAG_ALRT`. SLYS021A Table 7-16 states verbatim that ENERGYOF "Clears
@@ -1383,8 +1392,8 @@ opposite order. And the `[TIMING] INA validate+accum read` bucket became
 bucket, so those two timing numbers are not comparable across this change. The
 label was updated rather than left to mean something different than it says.
 
-**Records already written are not retroactively qualified.** Experiment 3's stored
-records still carry `INA_ACCUM_OF = 0` from the broken path, and that zero means
+**Records already written are not retroactively qualified.** Experiment 3 records written by the pre-fix
+image carry `INA_ACCUM_OF = 0` from the broken path, and that zero means
 "not measured", not "no overflow". Their charge and energy values are unaffected —
 accumulators were always read correctly and before any reset (D-020), and the
 40-bit registers are nowhere near overflow at roughly 1.5 mAh per minute — but the
@@ -1472,33 +1481,91 @@ the same change as the ordering fix, since both want the flag read before the
 accumulators. Whether tethered rows should carry the qualification is a schema
 decision and is not assumed here.
 
-### One corrupt record discards every valid record after it
+### One corrupt record discards every valid record after it — FIXED 2026-09-24, NORMAL-PATH HARDWARE-SMOKE VALIDATED
 
-`autoStorageScan()`
-[solar-logger.ino:5208](../Arduino/solar-logger/solar-logger.ino#L5208) and
-`autoStorageTruncateToValid()`
-[:5240](../Arduino/solar-logger/solar-logger.ino#L5240).
+`autoStorageScan()`, `autoStorageTruncateToValid()`, `autoStorageRecover()` and
+`printStorageInfo()`, all still in
+[solar-logger.ino](../Arduino/solar-logger/solar-logger.ino).
 
-The scan walks **forward** and breaks at the first record that fails validation.
-`trailingBytes` is then everything from that point to end of file, and
-`autoStorageRecover()` rewrites the log to the valid prefix automatically at
-boot. A single corrupted record in the middle therefore destroys every good
-record after it.
+The `eba3b5d-dirty` working-tree build passed a healthy-log-only hardware smoke:
+Experiment 3 intact, final dump 4,650 records through 6061, invalid 0, zero
+trailing bytes and INTACT tail. No corruption was injected. Tail repairs,
+mid-file refusal and read-error refusal remain host/synthetic tested only;
+physical read-error behavior has not been observed. See [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
-STORAGE_SYNC_DESIGN.md Section 11 specifies the opposite: read the final record,
+**The defect, as it was.** The scan walked forward and broke at the first record
+that failed validation. `trailingBytes` was then everything from that point to
+end of file, and `autoStorageRecover()` rewrote the log to that prefix
+automatically at boot. A single corrupted record in the middle destroyed every
+good record after it.
+
+It is measured, not inferred. The host harness in
+`tests/test_characterization_storage_recovery.py` was run against the pre-fix
+code with a four-record log damaged in slot 1: **288 bytes in, 72 bytes out**,
+sequences 12 and 13 deleted, at boot, before an operator could read the message
+saying so. The same harness shows `LOGGER STORAGE INFO` reporting **one** valid
+record when three existed, so the operator was told less good data was at stake
+than actually was.
+
+STORAGE_SYNC_DESIGN.md Section 11 specified the opposite: read the final record,
 and "walk backwards one record at a time until a valid record is found". For the
-power-loss partial tail the two are identical, which is why this has never
-shown. For a flash bit-flip they are not, and the implementation is the
-destructive one.
+power-loss partial tail the two are identical, which is why this never showed on
+hardware.
 
-The loss is counted and printed, so it is not silent — but it is automatic,
-irreversible, and happens before an operator sees the message.
+**What was changed.** The damage cases are now distinguished rather than
+collapsed:
 
-**Direction:** keep scanning past an invalid record to establish how much good
-data lies beyond it, and truncate only a genuinely trailing run of bad records.
-If valid records exist after an invalid one, report it and refuse to rewrite
-without an explicit operator command. Reconcile the code and Section 11 so one
-of them stops being wrong.
+| Case | Example | Automatic action |
+| --- | --- | --- |
+| Torn tail | whole records + 1..71 bytes | discard the remainder, counted |
+| Invalid tail | trailing run of bad records | discard that run, counted |
+| Mid-file | good records after a bad one | **discard nothing; report and refuse** |
+| Unreadable | a short read before end of file | **discard nothing; report and refuse** |
+
+- `autoStorageScan()` scans the whole file instead of stopping. It counts every
+  invalid record, records the first one's offset, and counts how many valid
+  records are stranded past it (`validAfterInvalidRecords`).
+- `trailingBytes` now means what an automatic repair would discard — the
+  unbroken run of invalid records at the end plus a partial remainder — and
+  `keepBytes` what it would keep. For tail-only damage these are the same
+  numbers the old arithmetic produced, so cases A/B/C are byte-identical.
+- `autoStorageTruncateToValid()` refuses outright when a valid record lies past
+  an invalid one. The check is in the function as well as in its caller: it is
+  the only code in the firmware that deletes stored records.
+- A short read while scanning no longer truncates the remainder. It is an I/O
+  fault, not a torn tail, so it sets `readError`, discards nothing, and says so.
+- `printStorageInfo()` no longer lets mid-file damage read as a clean log. The
+  tail status still describes the tail, and the invalid-record count, the first
+  invalid offset and a `MID-FILE DAMAGE` warning are reported alongside it.
+
+**Sequence authority.** `logIntact` now also requires `!readError`; it already
+required `invalidRecords == 0`, so a
+preserved mid-file corruption keeps the NVS reservation floor in force — the
+conservative side, unchanged from D-023. One thing did improve: `fromLog` is now
+one past the last valid record in the *whole* file rather than the last one
+before the damage. Pre-fix it returned 11 for the example above while deleting
+records 12 and 13; preserving them and still handing out 11 would have been the
+duplicate D-018 forbids.
+
+**Still open, deliberately.** There is no operator command to repair mid-file
+damage. `LOGGER STORAGE CLEAR YES` erases everything, which is not the same
+thing. Adding a repair command changes the command protocol and its build ID, so
+it was left out of a correctness fix; until it exists the log keeps the corrupt
+record and reports it at every boot, which loses nothing.
+
+### Damage that is not a whole number of records cannot be resynchronized
+
+Splice eight junk bytes into the middle of the log and every record after them
+is off the 72-byte grid, so none validates and no valid suffix is detectable.
+What follows the damage is then indistinguishable from a torn tail and is
+discarded as one, including the bytes of records an explicit resynchronization
+policy could in principle recover.
+
+This behavior is identical before and after the 2026-09-24 fix above, and is
+pinned as-is by `test_misaligned_damage_throws_every_later_record_out_of_frame`.
+Resolving it needs a framing/resync policy — scan for the magic at every byte
+offset, decide what a re-found record proves, decide what to do with the gap —
+which is a design decision, not a patch.
 
 ### The claimed-rendezvous path reconfigures the INA228 and rebases the interval clock
 

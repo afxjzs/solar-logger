@@ -172,7 +172,7 @@ The decision this adds, and the reason it is recorded here rather than only as a
 
 `MATHOF` is exempt — a read does not clear it — and is cleared by the next conversion instead, so in continuous mode it qualifies approximately the latest conversion rather than the interval. That is an open question, not a settled part of this decision.
 
-**Ordering fixed in source 2026-09-23**: `DIAG_ALRT` is now read before both accumulators, the flag logic is unchanged, and `test_characterization_record.py` pins the order so a later extraction cannot silently restore it. **Not yet hardware validated** — an overflow has never been induced, so the corrected path has never been observed to set the flag, and stored Experiment 3 records still carry a `0` that means "not measured" rather than "no overflow". `closeMeasurementInterval()` still performs no overflow check at all. Both tracked in [BACKLOG.md](BACKLOG.md).
+**Ordering fixed in source 2026-09-23 and hardware-smoke validated on `eba3b5d` (2026-09-24)**: DIAG_ALRT is read before CHARGE and ENERGY; flag logic is unchanged and regression tests pin the order. This is no longer an open ordering question. **No real accumulator overflow has been induced, and INA_ACCUM_OF has not been observed SET from one.** Pre-fix stored records are not retroactively qualified: their zero is not evidence of no overflow. `closeMeasurementInterval()` still performs no overflow check. MATHOF interval semantics and induced-overflow validation remain open in BACKLOG. See [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
 A wake must not reconfigure an INA228 that is already configured and already converting. Writing the `ADC_CONFIG` MODE bits interrupts and restarts a conversion in progress, discarding accumulation that had not yet been committed. Reconfiguration belongs on cold boot, where the device state is genuinely unknown.
 
@@ -1123,8 +1123,10 @@ against `HEAD`.
 ## D-051: Telemetry owns how a line is spelled, never when it is emitted
 
 Set by the fourth modularization stage on 2026-09-23, which is stage 5 of the
-order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested; **not validated on
-hardware**.
+order in [BACKLOG.md](BACKLOG.md). Compiled and host-tested; telemetry has now
+run in the smoke-validated `eba3b5d` image (2026-09-24). The supplied evidence
+does not assert an exhaustive comparison of all CSV forms; see the LAB_NOTES
+hardware addendum.
 
 `telemetry.h` / `.cpp` hold the machine-readable CSV lines: `CSV_HEADER`,
 `CSV_SAMPLE`, `CSV_DATA`, and the three `CSV_EVENT` shapes. They own the prefix,
@@ -1297,16 +1299,22 @@ uses these lower-level results without making them own autonomous policy.
 The planned interface direction must be checked against the code when each
 extraction is scoped; the old call-graph counts are historical, not a proof of
 the revised design. Exact future filenames/APIs and later extraction order
-remain to be decided. The `record_format` extraction has not started; its
-72-byte/version-1 contract and the Experiment 3 golden record must survive it.
+remain to be decided. At this decision's 2026-09-23 date, record format was
+unextracted; D-056 below records its subsequent extraction and hardware validation.
+Its 72-byte/version-1 contract and Experiment 3 golden record remain unchanged.
 
 **Superseded in part by D-056 on 2026-09-24:** the `record_format` extraction is
-now BUILT. The rest of this decision's boundaries remain unextracted plans.
+now BUILT and hardware-validated on clean `eba3b5d`. The remaining boundaries
+still await extraction; D-057 settles the recovery behavior to preserve.
 
 ## D-056: Record format owns what a record is, never when one is written
 
 Set by the fifth modularization stage on 2026-09-24, the first of the boundaries
-D-055 separated. Compiled and host-tested; **not validated on hardware**.
+D-055 separated. Compiled, host-tested and **HARDWARE-VALIDATED on clean
+`eba3b5d`**, as recorded in the 2026-09-24 hardware addendum in LAB_NOTES. Old
+records decoded and new records through 5942 validated; final dump 4,531 records,
+invalid 0. The original extraction gate was 387 passed, 1 xfailed; the later
+recovery gate is 429 passed, 1 xfailed.
 
 `record_format.h` / `record_format.cpp` hold the deployed version-1 durable
 record: the packed 72-byte `AutoRecord`, `AUTO_RECORD_MAGIC`,
@@ -1379,6 +1387,74 @@ The distance is the same in both, so this is a GNU ld RISC-V relaxation outcome
 following the new section placement, not a code change. Global variables are
 unchanged at 36,332 bytes, which is what "owns no state" looks like in the link
 map.
+
+## D-057: Only tail damage is repaired automatically; mid-file damage is reported and preserved
+
+Accepted 2026-09-24. Implemented and host-tested; **normal-path hardware-smoke
+validated on `eba3b5d-dirty`**, a working-tree build based on clean `eba3b5d`.
+The healthy Experiment 3 log remained intact through sequence 6061, with 4,650
+records read and invalid 0. Tail repairs, mid-file refusal and read-error refusal
+remain host/synthetic tested only; no live corruption was injected. See [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
+
+Recovery distinguishes four cases (the shape of damage does not prove its physical cause):
+
+- a **torn tail** — whole records followed by 1 to 71 leftover bytes, which is a
+  write that did not finish;
+- an **invalid tail** — an unbroken run of complete records at the end that fail
+  magic, version or CRC, which is a write that landed wrong;
+- **mid-file damage** — a bad record with valid records after it, which is not a
+  trailing-write failure;
+- a **read error** — the file cannot be read to its reported end, so the unread
+  remainder is unknown and must not be discarded.
+
+For tail-only damage recognized on the 72-byte record grid, the trailing bad
+run and partial remainder are discarded automatically. This does not solve
+byte-misaligned mid-file damage; the limitation below remains open.
+
+The third is different in kind, and the implementation used to treat it as the
+same thing: `autoStorageScan()` stopped at the first record that failed
+validation, called everything past it trailing, and `autoStorageRecover()`
+rewrote the log to that prefix at boot. Measured on the host harness, a
+four-record log damaged in its second slot went in at 288 bytes and came out at
+72. The loss was counted and printed, so it was not silent — but it was
+automatic, irreversible, and it happened before any human read the message.
+
+**The rule.** When a valid record lies after an invalid one, the extent of the
+damage is not known, and nothing is deleted. The firmware reports how many good
+records are stranded, states plainly that nothing was discarded, and leaves the
+log alone. The same applies when the log cannot be read to the end: an I/O fault
+is not a torn tail. Repairing mid-file damage is an operator decision, and there
+is deliberately no command for it yet — `LOGGER STORAGE CLEAR YES` erases
+everything, which is not the same thing, and adding a repair command changes the
+command protocol.
+
+Detected mid-file corruption is retained until an operator can address it. `LOGGER STORAGE DUMP` already decodes every
+record and names the invalid ones, so a host is never handed a corrupt record as
+if it were good, and appending continues normally.
+
+The check lives in `autoStorageTruncateToValid()` as well as in its caller,
+because that function is the only code in the firmware that deletes stored
+records. No amount of accurate reporting makes a deletion recoverable afterwards,
+so the decision is enforced where the damage would be done rather than only
+where it is decided.
+
+**Sequence authority follows D-023.** `logIntact` now includes `!readError`.
+Any invalid record anywhere also means the log is not provably intact, so the
+NVS reservation floor still applies in either case. One thing improved: the log's own candidate is now one past the last
+valid record in the whole file rather than the last one before the damage. The
+old code returned 11 for the example above while deleting records 12 and 13;
+preserving them and still issuing 11 would be the duplicate D-018 forbids.
+
+**Not resolved.** Damage that is not a whole number of records throws every
+later record out of frame, so nothing after it validates, no valid suffix is
+detectable, and it is discarded as a torn tail. Recovering that needs an explicit
+resynchronization policy, which is a design decision and not part of a
+correctness fix. Recorded in [BACKLOG.md](BACKLOG.md).
+
+The firmware's own scan and recovery functions are compiled and run against
+synthetic damaged logs in `tests/test_characterization_storage_recovery.py`. Those synthetic tests never use the live Experiment 3 log. The separate
+hardware smoke used only its healthy normal path; physical read-error testing
+remains open.
 
 ## Project practice
 

@@ -123,44 +123,68 @@ Two functions were split rather than moved whole, because each mixed a typed acc
 
 **Telemetry**, `telemetry.h` and `telemetry.cpp`, owns the machine-readable CSV lines and only their spelling: the `CSV_HEADER`, `CSV_SAMPLE`, `CSV_DATA` and `CSV_EVENT` prefixes, which fields each line carries, their order, their per-field precision, and the commas between them. It holds no mutable state, reads no global, and depends on nothing in the project but Arduino — everything it prints arrives as a parameter, in a `TelemetrySample` or `TelemetryInterval` whose members are in wire order.
 
-What it deliberately does not own is when a line is emitted or what is in it. The deep-sleep test's suppression of `CSV_SAMPLE` (D-012), the `readSensor()` call, the derivation of `elapsed_seconds`, the interval close that produces a `CSV_DATA` row, and the experiment lifecycle that produces the events all stayed in `solar-logger.ino`. `CSV_HEADER` moved with `CSV_DATA` because the header names that row's fields. `CMD_ACK` and `CMD_RESULT` are the command protocol rather than telemetry, and neither they nor the bounded protocol writer moved (D-036). The boundary is [DECISIONS.md](DECISIONS.md) D-051. Extracted 2026-09-23. It is compiled and host-tested and has **not** yet been validated on hardware.
+What it deliberately does not own is when a line is emitted or what is in it. The deep-sleep test's suppression of `CSV_SAMPLE` (D-012), the `readSensor()` call, the derivation of `elapsed_seconds`, the interval close that produces a `CSV_DATA` row, and the experiment lifecycle that produces the events all stayed in `solar-logger.ino`. `CSV_HEADER` moved with `CSV_DATA` because the header names that row's fields. `CMD_ACK` and `CMD_RESULT` are the command protocol rather than telemetry, and neither they nor the bounded protocol writer moved (D-036). The boundary is [DECISIONS.md](DECISIONS.md) D-051. Extracted 2026-09-23. It is compiled and host-tested and has run in the smoke-validated `eba3b5d` image. The supplied smoke is not an exhaustive comparison of all CSV output forms.
 
 **Record format**, `record_format.h` and `record_format.cpp`, owns the deployed 72-byte durable record representation and its CRC validation, and nothing else. That is the packed `AutoRecord` struct, `AUTO_RECORD_MAGIC` and `AUTO_RECORD_VERSION`, `AUTO_RECORD_SIZE`, the eight record flag bit values, the `AUTO_EXPERIMENT_UNKNOWN` and snapshot-unread sentinels, and `autoRecordCrc()`, `autoRecordValid()` and `autoRecordSnapshotUnread()`.
 
 A flag's bit value is intrinsic to the format; deciding that a given record carries it is not. Every `flags |=` stayed in the wake cycle, along with the time-quality state, so no policy moved. Nor did any I/O or retained state: LittleFS mount, append, scan, truncation and tail recovery, the `RTC_DATA_ATTR` variables, sequence reservation and the NVS high-water mark, the autonomous scheduler, and host session logic are all still in `solar-logger.ino`. `printAutoRecord()` stayed too — it interleaves flag interpretation with `Serial` formatting and comma bookkeeping for the `LOGGER STORAGE DUMP` transcript, which is an output format rather than the record format, so moving it would have been a formatting rewrite inside a structural move.
 
-The 72-byte layout is a deployed binary contract: Experiment 3's log holds thousands of records written by it. Record version stays **1**, no migration exists, and the move changed no byte. The header now asserts every field's offset, width and signedness at compile time, which `sizeof(AutoRecord) == 72` alone could not do — that assertion cannot see two same-width fields swap places or a signed field turn unsigned. The boundary is [DECISIONS.md](DECISIONS.md) D-056. Extracted 2026-09-24. It is compiled and host-tested and has **not** been validated on hardware.
+The 72-byte layout is a deployed binary contract: Experiment 3's log holds thousands of records written by it. Record version stays **1**, no migration exists, and the move changed no byte. The header now asserts every field's offset, width and signedness at compile time, which `sizeof(AutoRecord) == 72` alone could not do — that assertion cannot see two same-width fields swap places or a signed field turn unsigned. The boundary is [DECISIONS.md](DECISIONS.md) D-056. Extracted 2026-09-24. It is compiled, host-tested and **hardware-validated on clean revision `eba3b5d`**; see the 2026-09-24 hardware addendum in LAB_NOTES.
 
 NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second and record format the third, and neither needed one either.
 
-**Current source versus observed hardware, 2026-09-23:** telemetry was extracted
-in `f30b62c` and remains host-tested, not hardware-validated in the recorded
-results. The subsequent DIAG_ALRT correctness change reads the diagnostic flags
-before CHARGE/ENERGY; regression tests and the full gate passed in the coding
-agent's report (333 passed, 1 expected xfail), but that change had not been
-uploaded or hardware validated. This documentation stint does not rerun that
-gate or establish a newer board state.
+### Current validation baseline — 2026-09-24
 
-**Record format extraction, 2026-09-24:** the 72-byte representation and its CRC
-helpers moved out of `solar-logger.ino` into `record_format.h`/`.cpp` with no
-intended behavior change. The gate was green before and after (333 passed and 1
-xfail before; 387 passed and the same 1 xfail after, the difference being 54
-added tests). The audit is in [LAB_NOTES.md](LAB_NOTES.md). **Not uploaded and
-not hardware validated**, and it does not establish a newer board state either:
-the DIAG_ALRT reorder above is still awaiting its own hardware check of the
-overflow path.
+Five extracted modules plus the sketch make six project translation units:
+`connection.cpp`, `ina228.cpp`, `nvs_persistence.cpp`, `record_format.cpp`,
+`telemetry.cpp`, and `solar-logger.ino`. IntelliSense discovers them automatically.
 
-The deployed Experiment 3 golden record (`seq=4445`, CRC `0xFB25DA73`) confirms
-72 packed bytes, CRC coverage of bytes 0–67, and CRC stored at offset 68; the
-captured record matches standard IEEE/zlib CRC-32 for
-`esp_rom_crc32_le(0, ...)`. This validates the deployed record format, not the
-new DIAG_ALRT order. Record version remains 1 and the `record_format` module
-has **not** been extracted. The sharper remaining boundaries—record format/CRC,
-LittleFS mechanics, sequence authority, RTC-retained state and autonomous
-scheduling/policy—are planned separately in BACKLOG (D-055); they still reside
-in the sketch. Tethered overflow qualification, MATHOF interval semantics,
-signed-charge versus magnitude-energy/net-energy semantics, corrupt-tail
-recovery and storage-full policy remain open.
+**Latest coding-agent gate, not rerun by this documentation stint:** pytest
+**429 passed, 1 xfailed**; pyright clean; py_compile, Arduino clean compile with
+`--warnings all`, shell syntax and `git diff --check` passed; IntelliSense **6/6**.
+The one xfail remains the OPEN short-cadence autonomous overrun defect.
+The extraction's earlier 387/1 result is historical, before 42 recovery tests.
+
+**Clean `eba3b5d`: record_format is extracted, software-tested and
+hardware-validated.** Experiment 3 survived, historical records decoded, new
+records advanced through 5942, FIRST_AFTER_BOOT was set for 5940 and cleared for
+5941/5942, and the final dump read 4,531 records with invalid 0. The format stays
+version 1, 72 bytes, CRC coverage 0–67 with CRC at offset 68; the deployed golden
+fixture is `seq=4445`, CRC `0xFB25DA73`. Telemetry ran in this smoke-validated
+image, without a claim of exhaustive CSV comparison.
+
+**Latest supplied hardware: `eba3b5d-dirty`**, the storage-recovery working-tree
+build based on `eba3b5d`, containing uncommitted recovery changes. It is not a
+clean commit containing the fix. Version is `0.3.0-dev`; build ID remains
+`solar-logger-protocol-ack-v3`. The healthy-log smoke progressed from 4,644 valid
+records/newest 6055 to 4,649/6060, with zero trailing bytes and INTACT tail;
+the final dump read 4,650 records, invalid 0, through 6061. Experiment 3 remained
+intact. These are supplied observations, not a new board query.
+
+Recovery now scans the full log. Tail-only partial/invalid records may be
+repaired automatically; detected mid-file damage or a read error preserves the
+file and refuses repair, including inside `autoStorageTruncateToValid()`.
+`logIntact` includes `!readError`; `fromLog` uses the last valid record in the
+whole scan under the existing D-023 authority rules. The fix is host-tested and
+**normal-path hardware-smoke validated**. No live corruption was injected:
+tail repair, mid-file refusal and read-error refusal remain host/synthetic
+tested only.
+
+The autonomous DIAG_ALRT-before-CHARGE/ENERGY ordering is fixed,
+regression-tested and hardware-smoke validated. **No real accumulator overflow
+has been induced, and INA_ACCUM_OF has not been observed SET from one.**
+The golden fixture does not establish that flag behavior.
+
+**Next structural candidate: LittleFS/durable-storage mechanics extraction**,
+preserving D-057 and its remaining edge cases. LittleFS, sequence authority,
+RTC-retained state and autonomous policy remain in the sketch. Still open:
+operator mid-file repair/quarantine, resynchronization after non-record-sized
+insertion, physical read-error testing, tethered overflow qualification,
+MATHOF interval semantics, signed-charge versus magnitude-energy semantics,
+and storage-full policy. Running energy is not a signed/net energy balance.
+Sync/ACK/reclamation and time synchronization remain unimplemented.
+
+Full observations and limits: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
 ## Development Workflow
 
@@ -237,11 +261,11 @@ The suite has one expected failure: `test_after_an_overrun_the_next_record_cover
 
 ```text
 [FIRMWARE] Version:  0.3.0-dev
-[FIRMWARE] Revision: d017f7d
+[FIRMWARE] Revision: eba3b5d-dirty
 [FIRMWARE] Build ID: solar-logger-protocol-ack-v3
 ```
 
-These values were observed in the 2026-09-23 hardware transcript; the revision is a dated observation, not a permanent identity. They appear at boot, on every autonomous wake, inside `STATUS`, and on the `VERSION` command, which exists so the question can be answered inside a short rendezvous window without printing a whole status block.
+These values identify the supplied 2026-09-24 storage-recovery hardware smoke: a working-tree build based on clean `eba3b5d`, not a clean recovery-fix commit. They are dated observations, not a permanent identity. They appear at boot, on every autonomous wake, inside `STATUS`, and on the `VERSION` command, which exists so the question can be answered inside a short rendezvous window without printing a whole status block.
 
 **Version** is edited by hand. While pre-1.0:
 
@@ -573,7 +597,7 @@ Each cycle wakes on the timer, validates the INA228 **by reading only**, reads `
 
 **`DIAG_ALRT` before the accumulators is load-bearing, and was fixed on 2026-09-23.** Datasheet SLYS021A Table 7-16: ENERGYOF "Clears when the ENERGY register is read" and CHARGEOF "Clears when the CHARGE register is read". The firmware previously read it afterwards, which made `INA_ACCUM_OF` unreachable and made every autonomous record report no accumulator overflow regardless of what happened. Reading it in the same wake is not sufficient. `MATHOF` was always fine, because a read does not clear it.
 
-**Not yet hardware validated:** an overflow has never been induced, so the flag has never been observed to set. Records written before the fix carry a `0` that means "not measured" rather than "no overflow"; their charge and energy values are unaffected. The tethered interval close still reads no overflow flag at all. See [BACKLOG.md](BACKLOG.md) and D-020.
+**The corrected ordering is source/regression-tested and hardware-smoke validated. Actual overflow detection remains untested on hardware:** an overflow has never been induced, so INA_ACCUM_OF has never been observed to set from one. Records written before the fix carry a `0` that means "not measured" rather than "no overflow"; their charge and energy values are unaffected. The tethered interval close still reads no overflow flag at all. See [BACKLOG.md](BACKLOG.md) and D-020.
 
 The timer-wake path branches at the top of `setup()`, before any cold-boot initialization, and skips the 1500 ms USB enumeration delay and the 2000 ms ADC settle. The INA228 never stopped converting, and USB discovery is served by the rendezvous after the measurement. Cold-boot behavior is unchanged.
 

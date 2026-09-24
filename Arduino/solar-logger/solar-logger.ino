@@ -498,6 +498,21 @@ struct AutoSleepPlan
 // prototypes ahead of the first function definition, so any type named in a
 // prototype must already exist by then. AutoRecord itself no longer needs this
 // treatment; it arrives from record_format.h with the includes.
+//
+// THE DAMAGE CASES ARE NOT ONE CASE. A torn tail (leftover bytes), an invalid
+// record at the end, an invalid record with good records after it, and a log
+// that cannot be read to the end are different problems with different safe
+// answers, so they are counted separately here rather than collapsed into
+// "the log is bad".
+//
+//   trailingBytes              what an automatic repair would DISCARD: the
+//                              contiguous run of invalid records at the end,
+//                              plus any partial-record remainder
+//   keepBytes                  what it would KEEP, always a whole number of
+//                              records and always entirely valid ones
+//   validAfterInvalidRecords   good records stranded PAST damage. Non-zero
+//                              means no automatic repair may run at all: see
+//                              autoStorageRecover().
 struct AutoLogScan
 {
 	bool mounted;
@@ -506,10 +521,15 @@ struct AutoLogScan
 	uint32_t firstSeq;
 	uint32_t lastSeq;
 	size_t fileBytes;
-	size_t validBytes;
-	size_t trailingBytes;		 // bytes past the last valid record
-	uint32_t invalidRecords; // whole-sized records that failed validation
-	bool partialTail;				 // file size is not a whole number of records
+	size_t validBytes;                 // bytes held by valid records, anywhere
+	size_t trailingBytes;              // bytes an automatic repair would discard
+	size_t keepBytes;                  // bytes an automatic repair would keep
+	size_t firstInvalidOffset;         // byte offset of the first bad record
+	uint32_t invalidRecords;           // whole-sized records that failed
+	uint32_t trailingInvalidRecords;   // of those, the unbroken run at the end
+	uint32_t validAfterInvalidRecords; // valid records past the first bad one
+	bool partialTail;                  // size is not a whole number of records
+	bool readError;                    // the log could not be read to the end
 	bool seqOutOfOrder;
 	int64_t lastRunChargeUAh;
 	int64_t lastRunEnergyUWh;
@@ -3327,6 +3347,10 @@ AutoLogScan autoStorageScan()
 	uint32_t previousSeq = 0;
 	AutoRecord record;
 
+	// Invalid records seen since the last valid one. At end of file this is the
+	// trailing run, which is the only damage an automatic repair may remove.
+	uint32_t runOfInvalid = 0;
+
 	while (true)
 	{
 		size_t offset = file.position();
@@ -3341,19 +3365,40 @@ AutoLogScan autoStorageScan()
 
 		if (got != AUTO_RECORD_SIZE)
 		{
+			// Not a torn tail: the file says these bytes exist and the filesystem
+			// would not hand them over. What is past here is unknown, so it is
+			// never automatically discarded. autoStorageRecover() refuses to
+			// rewrite while this is set.
 			Serial.println(
-					"[STORAGE] ERROR: Short read while scanning the log. Treating the "
-					"remainder as an invalid tail.");
+					"[STORAGE] ERROR: Short read while scanning the log. The rest of "
+					"the log could not be read, so nothing will be repaired "
+					"automatically.");
+			scan.readError = true;
 			break;
 		}
 
 		if (!autoRecordValid(record))
 		{
-			// Everything from here on is untrusted. Do not keep scanning past a
-			// bad record and pretend later ones are fine.
+			// Counted, and the scan KEEPS GOING. Stopping here and calling the
+			// remainder "trailing" is what destroyed every good record after a
+			// single bit flip; how much good data lies beyond the damage is
+			// exactly the fact the caller needs in order to refuse.
+			if (scan.invalidRecords == 0)
+			{
+				scan.firstInvalidOffset = offset;
+			}
+
 			scan.invalidRecords++;
-			break;
+			runOfInvalid++;
+			continue;
 		}
+
+		if (scan.invalidRecords > 0)
+		{
+			scan.validAfterInvalidRecords++;
+		}
+
+		runOfInvalid = 0;
 
 		if (scan.validRecords == 0)
 		{
@@ -3374,19 +3419,43 @@ AutoLogScan autoStorageScan()
 
 	file.close();
 
-	scan.trailingBytes = scan.fileBytes - scan.validBytes;
+	// Only the tail is repairable, so only the tail is counted as discardable:
+	// the unbroken run of invalid records at the end, plus a partial record.
+	// For a log damaged only at its tail this is the same number the old
+	// "everything past the first bad record" arithmetic produced.
+	scan.trailingInvalidRecords = runOfInvalid;
+	scan.trailingBytes =
+			static_cast<size_t>(runOfInvalid) * AUTO_RECORD_SIZE +
+			(scan.fileBytes % AUTO_RECORD_SIZE);
+	scan.keepBytes = scan.fileBytes - scan.trailingBytes;
+
 	return scan;
 }
 
-// Rewrite the log to exactly its valid prefix.
+// Rewrite the log to exactly its valid prefix, discarding only tail damage.
 //
-// The Arduino File API exposes no truncate, so this copies the valid prefix
-// to a temporary file and renames it. That is O(file size), but it only runs
-// when a corrupt tail was actually found, which should be rare.
+// The Arduino File API exposes no truncate, so this copies the prefix the scan
+// said to keep to a temporary file and renames it. That is O(file size), but it
+// only runs when a damaged tail was actually found, which should be rare.
+//
+// IT REFUSES TO RUN ON DAMAGE IT CANNOT SAFELY REPAIR. This is the one function
+// in the firmware that deletes stored records, so the check lives here as well
+// as in its caller: a valid record after an invalid one, or a log that could
+// not be read to the end, means the boundary between "damaged" and "good" is
+// not known, and no amount of accurate reporting makes deleting the remainder
+// recoverable afterwards.
 bool autoStorageTruncateToValid(const AutoLogScan &scan)
 {
+	if (scan.validAfterInvalidRecords > 0 || scan.readError)
+	{
+		Serial.println(
+				"[STORAGE] ERROR: Refusing to rewrite the log. The damage is not "
+				"confined to the tail, so a rewrite would discard good records.");
+		return false;
+	}
+
 	Serial.print("[STORAGE] Rewriting the log to its valid prefix: ");
-	Serial.print(static_cast<unsigned long>(scan.validBytes));
+	Serial.print(static_cast<unsigned long>(scan.keepBytes));
 	Serial.print(" of ");
 	Serial.print(static_cast<unsigned long>(scan.fileBytes));
 	Serial.println(" bytes.");
@@ -3413,7 +3482,7 @@ bool autoStorageTruncateToValid(const AutoLogScan &scan)
 	size_t copied = 0;
 	bool ok = true;
 
-	while (copied < scan.validBytes)
+	while (copied < scan.keepBytes)
 	{
 		size_t got = source.read(buffer, AUTO_RECORD_SIZE);
 
@@ -3513,17 +3582,51 @@ uint32_t autoStorageRecover()
 
 	if (scan.invalidRecords > 0)
 	{
-		Serial.print(
-				"[STORAGE] WARNING: Found an invalid record at offset ");
-		Serial.print(static_cast<unsigned long>(scan.validBytes));
+		Serial.print("[STORAGE] WARNING: ");
+		Serial.print(scan.invalidRecords);
+		Serial.print(" record(s) failed validation, the first at offset ");
+		Serial.print(static_cast<unsigned long>(scan.firstInvalidOffset));
 		Serial.println(". Magic, version, or CRC did not match.");
 	}
 
-	if (scan.trailingBytes > 0)
+	// Which damage case this is, and therefore what may be done
+	// about it without an operator. Said out loud in every case, because a
+	// repair that ran and a repair that was refused must never look alike.
+	if (scan.readError)
+	{
+		Serial.println(
+				"[STORAGE] The log could not be read to the end, so what lies past "
+				"the failed read is unknown. NOTHING WAS DISCARDED. Read the log with "
+				"LOGGER STORAGE DUMP before deciding.");
+	}
+	else if (scan.validAfterInvalidRecords > 0)
+	{
+		// The defect this branch exists to prevent: the old code called every
+		// byte past the first bad record "trailing" and deleted it at boot,
+		// destroying good data before anyone saw the message.
+		Serial.print("[STORAGE] WARNING: ");
+		Serial.print(scan.validAfterInvalidRecords);
+		Serial.println(
+				" valid record(s) lie AFTER an invalid one. This is mid-file damage, "
+				"not a torn tail.");
+		Serial.println(
+				"[STORAGE] NOTHING WAS DISCARDED. Repairing this automatically would "
+				"delete those good records, so it is an operator decision. Read the "
+				"log with LOGGER STORAGE DUMP, which reports every record including "
+				"the invalid ones.");
+		Serial.println(
+				"[STORAGE] Appending continues normally, and the NVS reservation "
+				"floor applies because the tail is not provably intact.");
+	}
+	else if (scan.trailingBytes > 0)
 	{
 		Serial.print("[STORAGE] Discarding ");
 		Serial.print(static_cast<unsigned long>(scan.trailingBytes));
-		Serial.println(" trailing bytes that could not be validated.");
+		Serial.print(" trailing bytes that could not be validated (");
+		Serial.print(scan.trailingInvalidRecords);
+		Serial.print(" whole record(s) plus ");
+		Serial.print(static_cast<unsigned long>(scan.fileBytes % AUTO_RECORD_SIZE));
+		Serial.println(" partial byte(s)).");
 
 		if (!autoStorageTruncateToValid(scan))
 		{
@@ -3557,9 +3660,15 @@ uint32_t autoStorageRecover()
 	// NOTE for when pruning is implemented: a pruned log no longer holds the
 	// highest sequence ever used, so "log is intact" will stop being sufficient
 	// and the NVS floor will have to apply unconditionally again.
+	//
+	// `invalidRecords == 0` now covers mid-file damage as well as a bad tail,
+	// because the scan no longer stops at the first bad record. A log with a
+	// preserved mid-file corruption is therefore NOT intact, and the NVS floor
+	// applies to it, which is the conservative side.
 	const bool logIntact = scan.fileExists && scan.validRecords > 0 &&
 												 !scan.partialTail && !scan.seqOutOfOrder &&
-												 scan.invalidRecords == 0 && scan.trailingBytes == 0;
+												 !scan.readError && scan.invalidRecords == 0 &&
+												 scan.trailingBytes == 0;
 
 	uint32_t fromLog = (scan.validRecords > 0) ? scan.lastSeq + 1 : 1;
 
@@ -5794,7 +5903,11 @@ bool printStorageInfo()
 
 	Serial.print("[STORAGE] Tail status:      ");
 
-	if (scan.trailingBytes == 0)
+	if (scan.readError)
+	{
+		Serial.println("UNREADABLE");
+	}
+	else if (scan.trailingBytes == 0)
 	{
 		Serial.println("INTACT");
 	}
@@ -5805,6 +5918,28 @@ bool printStorageInfo()
 	else
 	{
 		Serial.println("INVALID RECORD DETECTED");
+	}
+
+	// Tail status describes the TAIL. A log whose damage sits in the middle has
+	// an intact tail and is still damaged, so it is reported separately rather
+	// than left to read as a clean log.
+	if (scan.invalidRecords > 0)
+	{
+		Serial.print("[STORAGE] Invalid records:  ");
+		Serial.println(scan.invalidRecords);
+
+		Serial.print("[STORAGE] First invalid at: offset ");
+		Serial.println(static_cast<unsigned long>(scan.firstInvalidOffset));
+	}
+
+	if (scan.validAfterInvalidRecords > 0)
+	{
+		Serial.print("[STORAGE] WARNING: MID-FILE DAMAGE. ");
+		Serial.print(scan.validAfterInvalidRecords);
+		Serial.println(
+				" valid record(s) lie after an invalid one. Boot recovery will not "
+				"discard them and will not repair the log; LOGGER STORAGE DUMP shows "
+				"every record, valid or not.");
 	}
 
 	if (scan.seqOutOfOrder)
