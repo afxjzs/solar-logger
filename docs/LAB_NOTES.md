@@ -6,6 +6,197 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-24: Record format extracted into a module - NOT hardware validated
+
+Structural extraction only. The deployed 72-byte durable record and its CRC
+helpers moved out of `solar-logger.ino` into `record_format.h` and
+`record_format.cpp`. No behavior change was intended and none was found. Nothing
+was uploaded, no serial port was opened, and no board was touched.
+
+**This is not a hardware result.** The image was compiled and the host tests
+were run. The DIAG_ALRT reorder from 2026-09-23 still owes its own hardware check
+of the overflow path, and this stint does not supply it or establish a newer
+board state.
+
+### What moved
+
+Into `record_format.h`: `AUTO_RECORD_MAGIC`, `AUTO_RECORD_VERSION`, the eight
+record flag bit values and the time-quality mask, `AUTO_EXPERIMENT_UNKNOWN`, the
+two snapshot-unread sentinels, the packed `AutoRecord` struct, its
+`static_assert(sizeof(AutoRecord) == 72)` and `AUTO_RECORD_SIZE`.
+
+Into `record_format.cpp`: `autoRecordCrc()`, `autoRecordValid()` and
+`autoRecordSnapshotUnread()`, with `#include "esp_rom_crc.h"`, which the sketch
+no longer needs because `autoRecordCrc()` was its only user.
+
+### What deliberately did not move
+
+`printAutoRecord()` and `autoTimeQualityName()`. They interleave flag
+interpretation with `Serial` formatting and comma bookkeeping for the
+`LOGGER STORAGE DUMP` transcript, which is an output format rather than the
+record format; moving them would have made this a formatting rewrite. Both are
+token-identical to `HEAD` and still in the sketch.
+
+Also unmoved, and verified as such: LittleFS mount, append, scan, truncation and
+tail recovery; the twelve `RTC_DATA_ATTR` declarations; `reserveSequenceBlock()`
+and the NVS sequence high-water mark; `AUTO_SEQ_BLOCK`; `AUTO_LOG_PATH`; the
+autonomous scheduler and wake cycle; host session logic. A test asserts the
+module names no `LittleFS`, `Preferences`, `Serial`, `RTC_DATA_ATTR`, `millis`,
+`esp_sleep`, `AUTO_SEQ_BLOCK` or `AUTO_LOG_PATH`, and contains no `flags |=`.
+
+### The move audit (D-047)
+
+Run as a scratch script over the tokenizer in `tests/firmware_source.py`, the
+same way earlier stages did. Three claims, each checked:
+
+- **Reconstruction.** Deleting 132 lines from `HEAD`'s sketch and inserting one
+  `#include "record_format.h"` reproduces the new sketch **token for token**:
+  18,371 tokens to 18,080, and 7,088 lines to 6,963.
+- **Nothing lost.** All 292 tokens that left the sketch are present in the two
+  new files, counted as a multiset.
+- **Nothing rewritten.** The three moved function definitions, the struct's
+  members and its packed head are token-identical to `HEAD`. So are the two
+  functions that stayed.
+
+The moved regions were also diffed as raw bytes against the originals, and are
+byte-identical including indentation and comments.
+
+**One comment was edited, stated here because the token audit strips comments and
+cannot see it.** The note beside `AutoLogScan` said it was declared "next to the
+record", which the move made false. The substantive half of that comment — that
+the Arduino preprocessor emits generated prototypes ahead of the first function
+definition, so a type named in a prototype must exist by then — is unchanged.
+
+### What was strengthened, and why that is not scope creep
+
+`sizeof(AutoRecord) == 72` moved unchanged, but on its own it cannot see two
+same-width fields swap places, a signed field turn unsigned, or a widened field
+paid for by a narrowed neighbor. All three keep the size at 72, and all three
+make Experiment 3's log unreadable. A file move is exactly when those mistakes
+happen, so the header now asserts every field's `offsetof`, width and signedness,
+and that `crc32` is the last field so the sealed range really is bytes 0–67.
+
+Both additions were verified by construction rather than assumed:
+
+| Injected fault | `sizeof == 72` | New assertions |
+| --- | --- | --- |
+| `int32_t avg_current_uA` to `uint32_t` | passes | 3 failures |
+| `boot_id` swapped with `session_elapsed_ms` | passes | 6 failures |
+
+### Tests
+
+54 added, all in `tests/test_characterization_record.py`. **No existing test was
+changed.** `firmware_source.py` reads every sketch file as one, so the 86 record
+tests written before the move kept passing across it without an edit, which is
+what that design is for.
+
+The new tests fall in three groups:
+
+- **The boundary.** The helpers are defined in `record_format.cpp` and nowhere
+  else; the struct and every frozen constant are in `record_format.h` and not in
+  the sketch; each frozen constant is defined **exactly once** across all sketch
+  files; the printing helpers stayed in the sketch; the module holds no policy,
+  state or I/O; every field's compile-time offset and signedness assertion is
+  present in source.
+- **The module's own code, compiled and run.** `record_format.cpp` itself — not
+  an extracted copy — is compiled on the host and run against the real
+  Experiment 3 record. It reproduces `0xFB25DA73`, accepts that record, rejects a
+  wrong magic and a wrong version **even after the CRC is recomputed over the
+  corrupted bytes** (so the checks are proved individually rather than hidden
+  behind a failing checksum), rejects all 72 single-byte corruptions, and
+  recognizes the snapshot-unread sentinels.
+- **`printAutoRecord()`, which had no test at all before.** It now reproduces the
+  verbatim `LOGGER STORAGE DUMP` tail the board printed for `seq=4445`, decodes
+  all six flag names with their comma bookkeeping, names each of the four
+  time-quality values including the unassigned `RESERVED`, and names an unread
+  snapshot instead of printing 4294.967295 V.
+
+**One substitution, stated rather than buried.** `esp_rom_crc32_le()` lives in
+the ESP32 mask ROM and cannot be linked on the host, so the harness supplies its
+own. On its own that would prove nothing. It is asserted equal to the CRC the
+**board** stored for `seq=4445`, so the chain is stub = zlib = what the ROM did on
+hardware. What the substitution does not weaken: the struct's layout on a real
+compiler, the 68-byte covered range, the CRC offset, the magic and version
+checks, and every byte of the transcript line.
+
+### Gate
+
+`tools/check.sh`, before and after.
+
+| | Before | After |
+| --- | --- | --- |
+| pytest | 333 passed, 1 xfailed | **387 passed, 1 xfailed** |
+| pyright | 0 errors | 0 errors |
+| py_compile | pass | pass |
+| ESP32 compile, `--clean --warnings all` | pass, no warnings | pass, no warnings |
+| IntelliSense translation units | 5 | **6** |
+| shell syntax | pass | pass |
+| whitespace | pass | pass |
+| | `ALL OK` | `ALL OK` |
+
+The xfail is the same one: the short-cadence autonomous overrun defect. It was
+not touched, suppressed or converted.
+
+`record_format.cpp` needed **no** change to `tools/` or `.vscode/`. The gate
+discovered it and verified its editor entry by compiling it with exactly those
+flags (D-048), which is the third module in a row for which that held.
+
+### Flash and globals, with the 2 bytes accounted for
+
+| | Before | After |
+| --- | ---: | ---: |
+| Program storage | 1,102,455 | 1,102,453 |
+| Global variables | 36,332 | 36,332 |
+
+Both images were rebuilt from clean into separate build paths, and the before
+figure reproduced `HEAD`'s exactly. A per-symbol comparison of the two ELFs finds
+**one** symbol changed size: `autoRecordValid()`, 96 bytes to 94.
+
+Its instruction sequence is identical. The single difference is the call to
+`autoRecordCrc()`, an 84-byte backward jump in both images, encoded as a 4-byte
+`jal` in the old layout and a 2-byte compressed `c.jal` in the new one. The
+distance did not change, so this is GNU ld's RISC-V relaxation reaching a
+different fixed point after the new section placement, not a code change. The
+other two call sites of `autoRecordCrc()` are far away and stayed 4-byte `jal` in
+both.
+
+Globals unchanged is the measurement that matters for the boundary: the module
+owns no state.
+
+### Recommended hardware smoke test
+
+Unchanged behavior means the check is that nothing regressed, and the sharpest
+available evidence is that the existing log stays readable:
+
+1. `tools/upload.sh`
+2. During the 15-second cold-boot maintenance window: `LOGGER STORAGE STATUS`.
+   Expect Experiment 3 preserved, the same record count as before the upload plus
+   any new autonomous records, `0` invalid records, trailing bytes `0` and tail
+   status `INTACT`.
+3. `LOGGER STORAGE DUMP`. Every pre-existing record must still validate and print
+   as before; a layout or CRC regression would show as invalid records rather
+   than as a crash.
+4. Let one autonomous wake complete and confirm a new record appends and
+   validates, with `seq` continuing to advance.
+
+A real INA accumulator overflow is still not induced by this, so
+`INA_ACCUM_OF` remains unobserved on hardware.
+
+## 2026-09-24: Current bench wiring documented — no new hardware measurement
+
+[HARDWARE_WIRING.md](HARDWARE_WIRING.md) now owns the user-reported current
+logic wiring and Mermaid diagram. USB powers the XIAO; its 3V3 powers INA228
+logic. The loose VUSB jumper has no connected far end and should be removed.
+Source inspection confirms D4/SDA, D5/SCL and 400 kHz, not physical routing.
+
+No existing canonical diagram was found. Exact SUNER/shunt/battery polarity
+routing remains OPEN pending physical setup/photo capture, so no complete
+measurement-path schematic or SVG was added. Earlier AA/VUSB power tests
+retain their dated conditions; PROJECT now labels their reproduction
+procedure explicitly as historical. Future regulator design and BMW trunk
+topology remain unresolved. This stint changed documentation only, with no
+build, upload, serial access or new hardware validation.
+
 ## 2026-09-23: Installed architecture decisions and modularization-plan correction — documentation only
 
 Recorded from the user's architecture brief, not from a hardware experiment.

@@ -35,9 +35,10 @@ semantics.
 regression tests and a reported green gate, but was not uploaded or hardware
 validated at the coding-agent report. The deployed Experiment 3 golden record
 confirms the existing 72-byte/version-1 layout and IEEE/zlib CRC convention,
-not the new read order. The record-format module has not been extracted. See
-the dated LAB_NOTES entry; this documentation update performs no new code or
-hardware validation.
+not the new read order. The record-format module **was** extracted on 2026-09-24
+as a structural move (D-056): the layout, version and CRC convention are
+unchanged, the extraction is host-tested and not hardware validated, and it does
+not validate the new read order either. See the dated LAB_NOTES entries.
 
 ## The problem
 
@@ -259,6 +260,12 @@ The autonomous implementation should print the CONFIG readback after a reset so 
 ## 5. Record format — IMPLEMENTED layout, semantics qualified below
 
 Fixed-width, little-endian, versioned, CRC-protected. Binary, not CSV — the host converts.
+
+**Owned since 2026-09-24 by `Arduino/solar-logger/record_format.h` and
+`record_format.cpp`** (D-056): the table below, the flag bit values, the
+sentinels, and the CRC and validity helpers. Which flags a given record carries,
+and when one is written or stored, are decided in `solar-logger.ino`. The
+extraction changed no byte of the layout and record version is still 1.
 
 | Offset | Field | Type | Bytes | Units / notes |
 | ---: | --- | --- | ---: | --- |
@@ -613,7 +620,7 @@ These are the things this design could not settle by reading, and each one could
 
 ## 12a. Bench prototype — IMPLEMENTED, storage CONFIRMED on hardware
 
-Local sleep/read/store exists and has run on hardware. It graduated to persistent `LOGGER AUTONOMOUS` mode on 2026-09-11 (D-031); deployment in the car remains unvalidated. INA228, connection and NVS are now separate modules; timer-wake policy, RTC state, sessions and LittleFS remain in the sketch at audited revision `d017f7d`.
+Local sleep/read/store exists and has run on hardware. It graduated to persistent `LOGGER AUTONOMOUS` mode on 2026-09-11 (D-031); deployment in the car remains unvalidated. INA228, connection, NVS, telemetry and record format are now separate modules; timer-wake policy, RTC state, sequence authority, sessions and LittleFS remain in the sketch. The module inventory is current as of 2026-09-24; the audited hardware revision is still `d017f7d`.
 
 **Storage is confirmed.** The first run on 2026-09-11 produced eight 72-byte records, a 576-byte log, sequences 1 through 8, and an intact tail on a later cold boot. Read-before-reset ordering, durable append, CRC and tail validation, experiment/storage isolation, and the refusal to auto-format all held.
 

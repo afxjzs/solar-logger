@@ -1300,6 +1300,86 @@ the revised design. Exact future filenames/APIs and later extraction order
 remain to be decided. The `record_format` extraction has not started; its
 72-byte/version-1 contract and the Experiment 3 golden record must survive it.
 
+**Superseded in part by D-056 on 2026-09-24:** the `record_format` extraction is
+now BUILT. The rest of this decision's boundaries remain unextracted plans.
+
+## D-056: Record format owns what a record is, never when one is written
+
+Set by the fifth modularization stage on 2026-09-24, the first of the boundaries
+D-055 separated. Compiled and host-tested; **not validated on hardware**.
+
+`record_format.h` / `record_format.cpp` hold the deployed version-1 durable
+record: the packed 72-byte `AutoRecord`, `AUTO_RECORD_MAGIC`,
+`AUTO_RECORD_VERSION`, `AUTO_RECORD_SIZE`, the eight flag bit values, the
+`AUTO_EXPERIMENT_UNKNOWN` and snapshot-unread sentinels, and `autoRecordCrc()`,
+`autoRecordValid()` and `autoRecordSnapshotUnread()`. They answer WHAT a durable
+record is and HOW its structural validity is checked, and nothing else.
+
+**A bit's value is intrinsic; setting it is policy.** `AUTO_FLAG_INA_ACCUM_OF` is
+`0x40` because every stored record says so, and that fact belongs in the module.
+Whether a given record carries it is decided by the wake cycle, which reads
+`DIAG_ALRT` and judges the interval. Every `flags |=` stayed in
+`solar-logger.ino`, as did the time-quality state, and a test asserts the module
+contains no `flags |=` at all. This is the line D-055 drew, applied.
+
+**Nothing else followed the format in.** LittleFS mount, append, scan,
+truncation and tail recovery; the `RTC_DATA_ATTR` retained state; sequence
+reservation and the NVS high-water mark; the autonomous scheduler; host session
+logic — all unchanged and still in the sketch. The module names no `LittleFS`,
+`Preferences`, `Serial`, `RTC_DATA_ATTR`, `millis` or log path, and a test
+asserts each absence rather than trusting the review.
+
+**`printAutoRecord()` deliberately did not move.** It interleaves flag
+interpretation with `Serial` formatting and comma bookkeeping for the
+`LOGGER STORAGE DUMP` transcript, which is an output format rather than the
+record format. Moving it would have turned a structural extraction into a
+formatting rewrite. It reads the moved constants through the header, which makes
+it the one consumer that would notice a renumbered bit — so it is now pinned
+against the real transcript line the board printed for `seq=4445`, which it had
+no test at all before.
+
+**The layout is a deployed binary contract, and the compile-time guard was
+strengthened rather than moved.** `sizeof(AutoRecord) == 72` cannot see two
+same-width fields swap places, a signed field turn unsigned, or a widened field
+paid for by a narrowed neighbor; all three keep the size at 72 and all three make
+Experiment 3's log unreadable. The header now asserts every field's `offsetof`,
+width and signedness, and that `crc32` is last so the sealed range really is
+bytes 0–67. Both additions were verified by construction: flipping
+`avg_current_uA` to unsigned fails 3 assertions and swapping `boot_id` with
+`session_elapsed_ms` fails 6, where the size assertion alone caught neither.
+
+**Record version stays 1.** Moving code between files is not a semantic change.
+No migration was written, no byte changed, and the firmware version and build ID
+are unchanged.
+
+**The module's real source is compiled and run on the host.**
+`tests/test_characterization_record.py` compiles `record_format.cpp` itself, not
+an extracted copy, and runs it against the deployed `seq=4445` record. One
+substitution is unavoidable: `esp_rom_crc32_le()` lives in the ESP32 mask ROM.
+It is supplied by the harness and asserted equal to the CRC the board actually
+stored, so it cannot decay into a test of itself. The substitution leaves the
+struct's layout on a real compiler, the covered range, the CRC offset, the magic
+and version checks and every byte of the transcript line all genuinely executed.
+
+**The move was audited as a mechanical one (D-047).** Deleting 132 lines from
+`HEAD`'s sketch and inserting one `#include` reproduces the new sketch token for
+token; all 292 tokens that left it are present in the two new files; and the
+three moved definitions, the struct's members and its packed head are
+token-identical to `HEAD`. One comment was edited, and is stated rather than
+hidden by the token audit that cannot see comments: the note beside
+`AutoLogScan` said it was declared "next to the record", which the move made
+false.
+
+**Flash fell by 2 bytes, and the 2 bytes are accounted for.** Every symbol in
+the image is identical in size except `autoRecordValid()`, at 94 bytes instead of
+96, and its instruction sequence is unchanged. The single difference is the call
+to `autoRecordCrc()`: an 84-byte backward jump that the linker encoded as a
+4-byte `jal` in the old layout and a 2-byte compressed `c.jal` in the new one.
+The distance is the same in both, so this is a GNU ld RISC-V relaxation outcome
+following the new section placement, not a code change. Global variables are
+unchanged at 36,332 bytes, which is what "owns no state" looks like in the link
+map.
+
 ## Project practice
 
 These documents are living engineering records. Record substantive changes, measurements, discovered bugs, mistakes and corrections, architecture decisions, and open questions here as part of the same work. Chat history is not the authoritative project record.

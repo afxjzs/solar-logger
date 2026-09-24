@@ -6,6 +6,14 @@ The BMW Solar Logger measures an INA228-powered solar measurement path with an X
 
 The firmware supports autonomous sleep/wake logging to LittleFS as well as host-tethered CSV telemetry. Autonomous records survive without the Python logger; one-second CSV samples and serial events still require a connected host. Later synchronization, storage ACKs, reclamation, and a storage-full policy remain unimplemented; see [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
 
+## Current bench wiring
+
+The XIAO is currently USB-powered from the Mac; INA228 logic power comes from
+XIAO 3V3, and the VUSB / 5V header has no external circuit connected. See
+[HARDWARE_WIRING.md](HARDWARE_WIRING.md) for the canonical pin table and Mermaid
+diagram. Exact SUNER/shunt/battery routing still needs physical capture;
+vehicle-powered regulation/protection remains future design work.
+
 ## Installed system architecture — planned, not installed or validated
 
 The current measured system remains the desk/window bench rig. The following
@@ -82,6 +90,7 @@ All paths in these documents are relative to the repository root.
 | Connection module | `Arduino/solar-logger/connection.h`, `Arduino/solar-logger/connection.cpp` |
 | NVS persistence module | `Arduino/solar-logger/nvs_persistence.h`, `Arduino/solar-logger/nvs_persistence.cpp` |
 | Telemetry module | `Arduino/solar-logger/telemetry.h`, `Arduino/solar-logger/telemetry.cpp` |
+| Record format module | `Arduino/solar-logger/record_format.h`, `Arduino/solar-logger/record_format.cpp` |
 | Python logger | `app/solar_logger.py` |
 | Current sample telemetry | `data/samples.csv` |
 | Current interval telemetry | `data/intervals.csv` |
@@ -102,7 +111,7 @@ All paths in these documents are relative to the repository root.
 
 The firmware is being split out of `solar-logger.ino` into real `.h`/`.cpp` modules, one stage at a time. The plan and its order are in [BACKLOG.md](BACKLOG.md), and the boundary rules are [DECISIONS.md](DECISIONS.md) D-047.
 
-Four modules exist, all extracted with no intended behavior change, and each audited as a move in [LAB_NOTES.md](LAB_NOTES.md).
+Five modules exist, all extracted with no intended behavior change, and each audited as a move in [LAB_NOTES.md](LAB_NOTES.md).
 
 **The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. A hardware smoke test of that image was reported later the same day and is recorded, as reported, in LAB_NOTES.
 
@@ -116,7 +125,13 @@ Two functions were split rather than moved whole, because each mixed a typed acc
 
 What it deliberately does not own is when a line is emitted or what is in it. The deep-sleep test's suppression of `CSV_SAMPLE` (D-012), the `readSensor()` call, the derivation of `elapsed_seconds`, the interval close that produces a `CSV_DATA` row, and the experiment lifecycle that produces the events all stayed in `solar-logger.ino`. `CSV_HEADER` moved with `CSV_DATA` because the header names that row's fields. `CMD_ACK` and `CMD_RESULT` are the command protocol rather than telemetry, and neither they nor the bounded protocol writer moved (D-036). The boundary is [DECISIONS.md](DECISIONS.md) D-051. Extracted 2026-09-23. It is compiled and host-tested and has **not** yet been validated on hardware.
 
-NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second, and needed none either.
+**Record format**, `record_format.h` and `record_format.cpp`, owns the deployed 72-byte durable record representation and its CRC validation, and nothing else. That is the packed `AutoRecord` struct, `AUTO_RECORD_MAGIC` and `AUTO_RECORD_VERSION`, `AUTO_RECORD_SIZE`, the eight record flag bit values, the `AUTO_EXPERIMENT_UNKNOWN` and snapshot-unread sentinels, and `autoRecordCrc()`, `autoRecordValid()` and `autoRecordSnapshotUnread()`.
+
+A flag's bit value is intrinsic to the format; deciding that a given record carries it is not. Every `flags |=` stayed in the wake cycle, along with the time-quality state, so no policy moved. Nor did any I/O or retained state: LittleFS mount, append, scan, truncation and tail recovery, the `RTC_DATA_ATTR` variables, sequence reservation and the NVS high-water mark, the autonomous scheduler, and host session logic are all still in `solar-logger.ino`. `printAutoRecord()` stayed too — it interleaves flag interpretation with `Serial` formatting and comma bookkeeping for the `LOGGER STORAGE DUMP` transcript, which is an output format rather than the record format, so moving it would have been a formatting rewrite inside a structural move.
+
+The 72-byte layout is a deployed binary contract: Experiment 3's log holds thousands of records written by it. Record version stays **1**, no migration exists, and the move changed no byte. The header now asserts every field's offset, width and signedness at compile time, which `sizeof(AutoRecord) == 72` alone could not do — that assertion cannot see two same-width fields swap places or a signed field turn unsigned. The boundary is [DECISIONS.md](DECISIONS.md) D-056. Extracted 2026-09-24. It is compiled and host-tested and has **not** been validated on hardware.
+
+NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second and record format the third, and neither needed one either.
 
 **Current source versus observed hardware, 2026-09-23:** telemetry was extracted
 in `f30b62c` and remains host-tested, not hardware-validated in the recorded
@@ -125,6 +140,15 @@ before CHARGE/ENERGY; regression tests and the full gate passed in the coding
 agent's report (333 passed, 1 expected xfail), but that change had not been
 uploaded or hardware validated. This documentation stint does not rerun that
 gate or establish a newer board state.
+
+**Record format extraction, 2026-09-24:** the 72-byte representation and its CRC
+helpers moved out of `solar-logger.ino` into `record_format.h`/`.cpp` with no
+intended behavior change. The gate was green before and after (333 passed and 1
+xfail before; 387 passed and the same 1 xfail after, the difference being 54
+added tests). The audit is in [LAB_NOTES.md](LAB_NOTES.md). **Not uploaded and
+not hardware validated**, and it does not establish a newer board state either:
+the DIAG_ALRT reorder above is still awaiting its own hardware check of the
+overflow path.
 
 The deployed Experiment 3 golden record (`seq=4445`, CRC `0xFB25DA73`) confirms
 72 packed bytes, CRC coverage of bytes 0–67, and CRC stored at offset 68; the
@@ -190,7 +214,7 @@ Host-side tests. They touch no hardware and open no serial port.
 | `tests/test_autonomous_schedule.py` | the deadline scheduler: its three pure timing functions for every sleep path, handoffs, long sessions, overruns and rollover; how the scheduler and the handoff call them; one strict `xfail` | firmware code run on the host + source |
 | `tests/test_characterization_protocol.py` | `tools/send.sh` exit status for every wire outcome; the firmware dispatcher's ACK/RESULT contract, command set and identity markers | real host code + source |
 | `tests/test_characterization_policy.py` | refusals before state changes, including HOLD while a sleep is pending; RELEASE and lease expiry resuming autonomous mode without disarming; the deferred-sleep lifecycle | source |
-| `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation; plus a **real Experiment 3 record** (`seq=4445`, `crc=0xFB25DA73`) rebuilt byte-for-byte and checked against the CRC the board stored, each of the 68 covered bytes mutated individually | source + real deployed record bytes |
+| `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation; a **real Experiment 3 record** (`seq=4445`, `crc=0xFB25DA73`) rebuilt byte-for-byte and checked against the CRC the board stored, each of the 68 covered bytes mutated individually; the `record_format` boundary, its per-field compile-time assertions, and its real `record_format.cpp` compiled and run against those bytes, including `printAutoRecord()` reproducing the transcript line the board printed | firmware code run on the host + source + real deployed record bytes |
 | `tests/test_characterization_connection.py` | transport claim and release, run on the host with the exact `[CONNECTION]` wording; who claims, who releases, and that sleep policy asks `anyHostConnected()` | firmware code run on the host + source |
 | `tests/test_characterization_nvs.py` | what is stored: the `solarlog` namespace, every key name and the 15-character limit, the five checkpoint keys with their widths, failure propagation on both checkpoint paths, power-test defaults, the sequence floor's ordering, and the one-owner boundary | source |
 | `tests/test_characterization_telemetry.py` | the machine-readable wire format: the exact `CSV_HEADER`, `CSV_SAMPLE`, `CSV_DATA` and `CSV_EVENT` bytes for known inputs, each field's precision, and the host's own parsers reading those same lines | firmware code run on the host + real host code + source |
@@ -199,7 +223,7 @@ Host-side tests. They touch no hardware and open no serial port.
 
 The six `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
 
-A source test proves the code still has the shape a rule needs. It does not execute firmware. Two modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` and `test_characterization_telemetry.py` do the same with the connection and telemetry code, against a stand-in `Serial` that records what is printed. The telemetry stand-in carries a copy of the ESP32 core's own `Print::printFloat`, because Arduino does not format a double the way `printf` does and the test asserts exact bytes. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+A source test proves the code still has the shape a rule needs. It does not execute firmware. Several modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` and `test_characterization_telemetry.py` do the same with the connection and telemetry code, against a stand-in `Serial` that records what is printed. `test_characterization_record.py` compiles `record_format.cpp` itself rather than an extracted copy, and supplies only `esp_rom_crc32_le()`, which lives in the ESP32 mask ROM; that one substitution is asserted equal to the CRC the board actually stored for `seq=4445`, so it cannot silently become a test of itself. The telemetry stand-in carries a copy of the ESP32 core's own `Print::printFloat`, because Arduino does not format a double the way `printf` does and the test asserts exact bytes. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
 
 `tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source.
 
@@ -680,6 +704,9 @@ These are real limitations of running a 60-second accounting interval across rep
 `POWER TEST STOP` clears the persisted flag, ensures Wi-Fi is off, clears the INA228 accumulators, restarts the interval timer, and resumes normal continuous logging. If the accumulators cannot be cleared, accounting deliberately stays suspended and says so, because folding an unaccounted window of unknown length into the next interval would produce a wrong average current and average power that look exactly like right ones.
 
 #### Reproduction procedure
+
+This reproduces the historical AA-powered test, not the current USB-powered
+bench setup in [HARDWARE_WIRING.md](HARDWARE_WIRING.md).
 
 1. Connect the INA228 normally and power the XIAO through VUSB from the 3xAA holder, with the DMM in series.
 2. Keep USB connected only long enough to send `POWER TEST SLEEP`.

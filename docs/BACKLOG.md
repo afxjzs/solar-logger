@@ -124,7 +124,7 @@ concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-**Four modules exist**, each extracted with no intended behavior change:
+**Five modules exist**, each extracted with no intended behavior change:
 
 - **The INA228 driver**, `ina228.h` and `ina228.cpp`, 2026-09-18. A hardware
   smoke test of that image was reported later the same day; it is recorded, as
@@ -147,10 +147,19 @@ nothing, and keep the file that a person edits from being valid C++ on its own
   Compiled and host-tested; it has **not** run on hardware. Its boundary is
   D-051. This is the `telemetry` row of the module table below, built as that
   row describes.
+- **Record format**, `record_format.h` and `record_format.cpp`, 2026-09-24: the
+  deployed 72-byte version-1 record, its flag bit values and sentinels, and its
+  CRC and structural validation. Compiled and host-tested, with
+  `record_format.cpp` itself compiled on the host and run against the real
+  Experiment 3 record; it has **not** run on hardware. Its boundary is D-056.
+  This is the `Record format / CRC` row of the module table below, built as that
+  row describes. Record version is still 1 and no byte of the layout changed.
 
 Telemetry was the fourth stage chronologically and is numbered 5 in the
 original table below, because that table split the INA228 work into two rows.
-Those plan numbers are not the chronological stage numbers.
+Those plan numbers are not the chronological stage numbers. Record format was
+the fifth and has no number in that table at all: it is the first of the
+boundaries D-055 separated out of the old `auto_state` proposal.
 
 The audits and hardware checks are in [LAB_NOTES.md](LAB_NOTES.md). The gate
 every stage passes was built on 2026-09-18, and since the connection
@@ -236,7 +245,7 @@ filenames or completed extractions**.
 | `connection` | Transport claims and queries | Extracted; does not own leases, BLE radio behavior or sleep policy (D-049) |
 | `ina228` | Register access, device configuration and sensor/accumulator operations | Extracted; callers own measurement timing and accounting (D-047) |
 | `telemetry` | CSV formatting/emission mechanics | Extracted and host-tested; hardware validation pending (D-051) |
-| Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Planned, extraction not started; preserve the real Experiment 3 golden bytes; no filesystem, RTC, sequence allocation or scheduler |
+| Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested, **not hardware validated** |
 | LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Planned; use the record contract; expose log facts without deciding sequence authority, reclamation or corruption policy during a move |
 | Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | Separate concept; consumes storage results and NVS access; RTC holds retained values, not this decision policy. Future placement/API not chosen |
 | RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
@@ -247,11 +256,13 @@ filenames or completed extractions**.
 | Command protocol / composition | Parse and dispatch, bounded ACK/RESULT writer, boot/loop ordering and command-pump wiring | Planned later; command protocol stays distinct from CSV and future storage ACKs |
 
 The `record_format` extraction was stopped before it began when the DIAG_ALRT
-correctness issue was confirmed. The subsequent reorder is source-tested and
-the coding agent reports a green gate, **not uploaded or hardware validated**.
-That correctness change is separate from a future structural move. Record
-version is still 1. The golden record establishes 72 packed bytes, coverage
-0–67 and CRC at 68; it does not validate overflow behavior.
+correctness issue was confirmed, and was then performed on 2026-09-24 as a
+structural move with that correctness change already in source. The reorder
+itself is source-tested and remains **not uploaded or hardware validated**;
+the extraction did not touch it and the tests that pin `DIAG_ALRT` before
+CHARGE and ENERGY are unchanged and still green. Record version is still 1. The
+golden record establishes 72 packed bytes, coverage 0–67 and CRC at 68; it does
+not validate overflow behavior, and the extraction does not either.
 
 The old `ina228_regs` / `ina228` rows were deliberately built as one module in
 September 2026. No separate register module is required by this revised plan.
@@ -462,14 +473,16 @@ globals became one explicit struct.
 
 ### Remaining extraction plan — concepts, not filenames
 
-First complete the DIAG_ALRT change's separate validation/reporting cycle; no
-hardware result is claimed here. Record format/CRC is the next scoped candidate,
-but has **not** been extracted. Keep the version-1 byte/CRC contract and golden
-record unchanged. Do not fold a behavior fix into that move.
+The DIAG_ALRT change still owes its own hardware validation of the overflow path;
+no hardware result is claimed here. Record format/CRC is **BUILT** (D-056); the
+version-1 byte/CRC contract and the golden record are unchanged, and no behavior
+fix was folded into the move. LittleFS storage mechanics is the next scoped
+candidate, and it has to carry the known corrupt-record/tail defect as an
+explicit correctness change rather than absorbing it into a move.
 
 | Future boundary | What must remain separate | Validation focus when undertaken |
 | --- | --- | --- |
-| Record format / CRC | No LittleFS, RTC, sequence allocation or scheduling | Exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics |
+| ~~Record format / CRC~~ **BUILT 2026-09-24** | Nothing else moved: no LittleFS, RTC, sequence allocation or scheduling | Done as stated: exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics, now also asserted per field at compile time |
 | LittleFS mechanics | No sequence-authority or storage-full policy decision | Preserve append/read/recovery behavior; handle the known corrupt-record/tail issue as an explicit correctness change, not silent cleanup |
 | Sequence authority / reservation | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases, NVS write failure and duplicate avoidance; reclamation must revisit authority explicitly |
 | RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
@@ -616,7 +629,11 @@ the same day, it reported 153 passed, 1 xfailed. The new xfail records the
 overrun defect found in that stint, below. The connection stage, still the same
 day, added the connection and IntelliSense tests: 183 passed, 1 xfailed, the
 same xfail. The NVS stage on 2026-09-23 added 43 tests of what is stored:
-**226 passed, 1 xfailed**, still the same xfail. The full local gate, including
+226 passed, 1 xfailed, still the same xfail. The telemetry stage and the
+DIAG_ALRT correctness work brought it to 333 passed, 1 xfailed. The record
+format stage on 2026-09-24 added 54 tests of the module boundary and of the
+module's own source compiled on the host: **387 passed, 1 xfailed**, still the
+same xfail. The full local gate, including
 the warning-free ESP32 compile and the editor database, is:
 
 ```text

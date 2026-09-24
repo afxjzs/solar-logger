@@ -2,7 +2,6 @@
 #include <WiFi.h>
 #include <LittleFS.h>
 #include "esp_sleep.h"
-#include "esp_rom_crc.h"
 
 // Version, source revision, and protocol build ID. See the header for what
 // each one answers and why they are three separate things.
@@ -23,6 +22,12 @@
 // The machine-readable CSV lines: how each one is spelled. WHAT happened, WHEN
 // to emit a line, and which values it carries are decided in this file.
 #include "telemetry.h"
+
+// The durable autonomous record: its 72 packed bytes, the flag bit values and
+// sentinels that give them meaning, and the CRC that seals them. WHEN a record
+// is written, WHICH flags it carries, and WHERE it is stored are decided in this
+// file.
+#include "record_format.h"
 
 // ============================================================================
 // BMW SOLAR LOGGER
@@ -340,70 +345,10 @@ uint32_t autonomousIntervalSeconds = AUTO_INTERVAL_SECONDS_DEFAULT;
 constexpr char AUTO_LOG_PATH[] = "/auto.bin";
 constexpr char AUTO_LOG_TMP_PATH[] = "/auto.tmp";
 
-constexpr uint16_t AUTO_RECORD_MAGIC = 0xB5A5;
-constexpr uint8_t AUTO_RECORD_VERSION = 1;
-
 // Sequence numbers are reserved from NVS in blocks so that a crash costs a
 // gap rather than a reuse. Gaps are visible and harmless; duplicates would
 // silently corrupt a host's record of what happened.
 constexpr uint32_t AUTO_SEQ_BLOCK = 64;
-
-// Record flag bits. Layout from docs/STORAGE_SYNC_DESIGN.md Section 5.
-constexpr uint8_t AUTO_FLAG_TIME_QUALITY_MASK = 0x03;
-constexpr uint8_t AUTO_TIME_UNKNOWN = 0;
-constexpr uint8_t AUTO_TIME_SYNCHRONIZED = 1;
-constexpr uint8_t AUTO_TIME_HOLDOVER = 2;
-
-constexpr uint8_t AUTO_FLAG_FIRST_AFTER_BOOT = 0x04;
-constexpr uint8_t AUTO_FLAG_ACCUM_SUSPECT = 0x08;
-constexpr uint8_t AUTO_FLAG_INTERVAL_ODD = 0x10;
-constexpr uint8_t AUTO_FLAG_INA_MATHOF = 0x20;
-constexpr uint8_t AUTO_FLAG_INA_ACCUM_OF = 0x40;
-
-// Bit 7 was proposed as SEQ_GAP. It was never implemented and never set, and a
-// sequence gap is already directly visible by comparing consecutive seq values
-// in the log, so the bit was redundant. It now carries something that cannot be
-// recovered any other way: whether the experiment attribution is trustworthy.
-//
-// No stored record has bit 7 set, so no existing record changes meaning. See
-// docs/STORAGE_SYNC_DESIGN.md Section 5.
-constexpr uint8_t AUTO_FLAG_EXPERIMENT_UNKNOWN = 0x80;
-
-// Written into experiment_id when the id could not be determined. The FLAG is
-// authoritative; this sentinel exists so a record that slips past a host's flag
-// check still cannot be silently counted as experiment 0.
-constexpr uint32_t AUTO_EXPERIMENT_UNKNOWN = UINT32_MAX;
-
-// ----------------------------------------------------------------------------
-// SNAPSHOT-UNREAD SENTINELS
-// ----------------------------------------------------------------------------
-//
-// Written into the four instantaneous snapshot fields when readSensor() fails
-// during a wake. The interval CHARGE and ENERGY are read earlier and separately,
-// so a failed snapshot does not invalidate them: the record is still stored,
-// because discarding a good interval integral to avoid reporting a bad
-// instantaneous sample would lose the more valuable half.
-//
-// WHY A SENTINEL AND NOT A FLAG BIT. All eight bits of `flags` are assigned
-// (docs/STORAGE_SYNC_DESIGN.md Section 5) and the 72-byte layout is frozen, so
-// there is no bit available for a ninth condition and adding one is a record
-// schema change that needs a decision rather than a patch. These values are
-// chosen to be physically impossible instead:
-//
-//   bus_uV        UINT32_MAX = 4294.97 V   against an 85 V part maximum
-//   avg_current   INT32_MIN  = -2147 A
-//   avg_power     INT32_MIN  = -2147 kW
-//   temp_mC       INT32_MIN  = -2147483 C
-//
-// No real reading can produce any of them, so a host cannot mistake one for a
-// measurement. LOGGER STORAGE DUMP decodes them by name as SNAPSHOT_UNREAD, so
-// the condition is visible without the table.
-//
-// Reusing AUTO_FLAG_ACCUM_SUSPECT here was considered and rejected: it means
-// "the accumulators may not cover the full interval", which is a different and
-// in this case untrue claim.
-constexpr uint32_t AUTO_SNAPSHOT_BUS_UV_UNREAD = UINT32_MAX;
-constexpr int32_t AUTO_SNAPSHOT_SIGNED_UNREAD = INT32_MIN;
 
 // ----------------------------------------------------------------------------
 // Cold-boot maintenance window
@@ -548,42 +493,11 @@ struct AutoSleepPlan
 	bool overran;
 };
 
-// The durable record. Field order and offsets are exactly as specified in
-// docs/STORAGE_SYNC_DESIGN.md Section 5: every 4-byte field is 4-aligned and
-// both 64-bit fields are 8-aligned, so the packed layout needs no padding.
-struct __attribute__((packed)) AutoRecord
-{
-	uint16_t magic;							 // 0
-	uint8_t version;						 // 2
-	uint8_t flags;							 // 3
-	uint32_t seq;								 // 4
-	int64_t running_charge_uAh;	 // 8   TEST-LOCAL, not experiment totals
-	int64_t running_energy_uWh;	 // 16  TEST-LOCAL, not experiment totals
-	uint32_t experiment_id;			 // 24  read-only context
-	uint32_t boot_id;						 // 28
-	uint32_t session_elapsed_ms; // 32
-	uint32_t epoch_s;						 // 36
-	uint32_t interval_ms;				 // 40
-	uint32_t bus_uV;						 // 44
-	int32_t avg_current_uA;			 // 48
-	int32_t avg_power_uW;				 // 52
-	int32_t temp_mC;						 // 56
-	int32_t interval_charge_uAh; // 60
-	int32_t interval_energy_uWh; // 64
-	uint32_t crc32;							 // 68
-}; // 72
-
-// If this ever fails, the on-disk format has silently changed and every
-// stored record becomes unreadable. Fail at compile time instead.
-static_assert(sizeof(AutoRecord) == 72,
-							"AutoRecord must be exactly 72 bytes; see STORAGE_SYNC_DESIGN.md");
-
-constexpr size_t AUTO_RECORD_SIZE = sizeof(AutoRecord);
-
-// Result of one full scan of the durable log. Declared here, next to the
-// record, rather than beside the scan function: the Arduino sketch
-// preprocessor emits generated prototypes ahead of the first function
-// definition, so any type named in a prototype must already exist by then.
+// Result of one full scan of the durable log. Declared up here rather than
+// beside the scan function: the Arduino sketch preprocessor emits generated
+// prototypes ahead of the first function definition, so any type named in a
+// prototype must already exist by then. AutoRecord itself no longer needs this
+// treatment; it arrives from record_format.h with the includes.
 struct AutoLogScan
 {
 	bool mounted;
@@ -3190,45 +3104,6 @@ bool ensureSequenceReservation(uint32_t nextSeq, bool announceNoOp)
 // ============================================================================
 // AUTONOMOUS BENCH TEST: RECORD HELPERS
 // ============================================================================
-
-uint32_t autoRecordCrc(const AutoRecord &record)
-{
-	// CRC covers every byte except the trailing crc32 field itself.
-	return esp_rom_crc32_le(
-			0,
-			reinterpret_cast<const uint8_t *>(&record),
-			AUTO_RECORD_SIZE - sizeof(uint32_t));
-}
-
-bool autoRecordValid(const AutoRecord &record)
-{
-	if (record.magic != AUTO_RECORD_MAGIC)
-	{
-		return false;
-	}
-
-	if (record.version != AUTO_RECORD_VERSION)
-	{
-		return false;
-	}
-
-	return record.crc32 == autoRecordCrc(record);
-}
-
-// True when this record's wake could not read the instantaneous snapshot.
-//
-// Recognized by the impossible sentinel rather than by a flag bit, because all
-// eight flag bits are assigned and the 72-byte layout is frozen. Testing
-// bus_uV alone is enough - the four fields are written together - but all four
-// are checked so a partially-written record from some future path cannot read
-// as a valid snapshot.
-bool autoRecordSnapshotUnread(const AutoRecord &record)
-{
-	return record.bus_uV == AUTO_SNAPSHOT_BUS_UV_UNREAD &&
-				 record.avg_current_uA == AUTO_SNAPSHOT_SIGNED_UNREAD &&
-				 record.avg_power_uW == AUTO_SNAPSHOT_SIGNED_UNREAD &&
-				 record.temp_mC == AUTO_SNAPSHOT_SIGNED_UNREAD;
-}
 
 const char *autoTimeQualityName(uint8_t flags)
 {

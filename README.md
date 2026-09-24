@@ -10,6 +10,10 @@ The measured system is a solar panel maintaining a 12 V lead-acid battery. On th
 - TI INA228 current/voltage/power monitor at I2C address `0x40`, on `D4` (SDA) and `D5` (SCL)
 - Shunt calibrated to **15.62 mΩ**, not the 15 mΩ nominally printed on the breakout — the difference came out of DMM measurement and matters for every current reading
 
+Current bench connections and the logic/I2C diagram are in
+[HARDWARE_WIRING.md](docs/HARDWARE_WIRING.md), with measurement-path unknowns
+and future vehicle-power wiring kept separate.
+
 ## What it does
 
 The firmware supports autonomous sleep/wake logging to LittleFS and awake, host-tethered telemetry. In tethered operation it emits three kinds of machine-readable line over serial, alongside human-readable diagnostics:
