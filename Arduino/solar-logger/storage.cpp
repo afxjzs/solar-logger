@@ -128,7 +128,26 @@ AutoLogScan autoStorageScan()
 
 	if (!file)
 	{
-		Serial.println("[STORAGE] ERROR: Could not open the log for scanning.");
+		// NOT AN EMPTY LOG, AND NOT A CLEAN ONE. The file is there and nothing
+		// below this point ran, so every count in `scan` is zero because it was
+		// never measured. Until 2026-09-29 the error above was the only trace of
+		// that and `readError` stayed false, so the zeros read as measurements:
+		// autoStorageScanAndRepair() fell through to "Log tail is intact: ALL OK"
+		// and LOGGER STORAGE INFO printed INTACT and answered OK, for a log not
+		// one byte of which had been looked at.
+		//
+		// `readError` is what the refusals are keyed on - the rewrite's own guard
+		// below, and `logIntact` in autoStorageRecover() - so setting it is what
+		// makes an unopened log keep the D-023 reservation floor and keeps the
+		// only record-deleting function in the firmware away from it.
+		// `openFailed` carries the part `readError` cannot: a short read has real
+		// partial counts, and this has none at all.
+		Serial.println(
+				"[STORAGE] ERROR: Could not open the log for scanning. The log exists "
+				"and none of it was read, so nothing is known about its contents and "
+				"nothing will be repaired automatically.");
+		scan.openFailed = true;
+		scan.readError = true;
 		return scan;
 	}
 
@@ -235,6 +254,16 @@ AutoLogScan autoStorageScan()
 // not be read to the end, means the boundary between "damaged" and "good" is
 // not known, and no amount of accurate reporting makes deleting the remainder
 // recoverable afterwards.
+//
+// A LOG THAT WOULD NOT OPEN REACHES THAT REFUSAL THROUGH `readError` since
+// 2026-09-29, and the reason it has to is measured. Driven directly against
+// one before that, this function announced "Rewriting the log to its valid
+// prefix: 0 of 0 bytes" and went ahead; the only thing that stopped it was its
+// own source open failing for the same reason the scan's had. A fault that
+// cleared in between - the scan's open failing and this one succeeding - would
+// have copied `keepBytes`, zero, into the temporary file, removed the log and
+// renamed the empty file over it. The caller cannot reach this branch for an
+// unopened log, which is exactly why the guard cannot be left to the caller.
 //
 // IT IS DELIBERATELY NOT `static`, although autoStorageScanAndRepair() below is
 // its only caller. Measured on 2026-09-24: with internal linkage GCC inlined it
@@ -354,6 +383,14 @@ AutoLogScan autoStorageScanAndRepair()
 	{
 		Serial.println("[STORAGE] No log file yet; it will be created.");
 	}
+	else if (scan.openFailed)
+	{
+		// The counts below would all be zero, and every one of them would be a
+		// number nothing measured. Say what is actually known instead.
+		Serial.println(
+				"[STORAGE] The log exists but could not be opened. Its size, record "
+				"count and sequence range are UNKNOWN, not zero.");
+	}
 	else
 	{
 		Serial.print("[STORAGE] File bytes:     ");
@@ -399,7 +436,20 @@ AutoLogScan autoStorageScanAndRepair()
 	// Which damage case this is, and therefore what may be done
 	// about it without an operator. Said out loud in every case, because a
 	// repair that ran and a repair that was refused must never look alike.
-	if (scan.readError)
+	if (scan.openFailed)
+	{
+		// Before the readError branch, because "could not be read to the end"
+		// understates this: none of it was read at all, and the DUMP that branch
+		// recommends opens the same file and will fail the same way.
+		Serial.println(
+				"[STORAGE] The log was never read, so its tail is neither intact nor "
+				"damaged: it is UNREAD. NOTHING WAS DISCARDED, and nothing will be "
+				"repaired automatically while this persists.");
+		Serial.println(
+				"[STORAGE] Appending continues normally, and the NVS reservation "
+				"floor decides the next sequence because the log proved nothing.");
+	}
+	else if (scan.readError)
 	{
 		Serial.println(
 				"[STORAGE] The log could not be read to the end, so what lies past "

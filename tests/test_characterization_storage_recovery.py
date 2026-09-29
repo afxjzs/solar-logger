@@ -42,9 +42,12 @@ Four kinds of damage look alike from a distance and are not the same problem:
                   version or CRC. Also a write that did not land, but framed.
   MID-FILE        a bad record with good records after it. Not a torn write at
                   all: a bit flip, or a bad block, in already-settled data.
-  UNREADABLE      a read that comes up short before end of file. An I/O fault,
-                  and the only one of the four where what is damaged is not
-                  even known.
+  UNREADABLE      a read that comes up short before end of file, or a log that
+                  cannot be opened at all. An I/O fault, and the only one of
+                  the four where what is damaged is not even known. A failed
+                  open is its extreme: not one byte was read, so every count a
+                  scan reports for it is zero because nothing was measured,
+                  which is not the same fact as a log that is empty.
 
 Until 2026-09-24 `autoStorageScan()` stopped at the first record that failed
 validation and called every byte past it "trailing", and `autoStorageRecover()`
@@ -66,7 +69,8 @@ it") and docs/STORAGE_SYNC_DESIGN.md Section 11:
     partial-record remainder
   - if any valid record survives after an invalid one, report it and REFUSE to
     rewrite; that is an operator decision, not a boot-path one
-  - if the log cannot be read to the end, repair nothing at all
+  - if the log cannot be read to the end, or cannot be opened at all, repair
+    nothing at all and never call its tail intact
   - never hand a corrupt record to a host as if it were good
   - count and print everything discarded, and never let a refused repair and a
     performed repair read alike
@@ -290,6 +294,13 @@ static std::filesystem::path g_root;
 // the one that exercises that path.
 static size_t g_phantomBytes = 0;
 
+// Fail every read-open of the log, leaving the file itself untouched. A real
+// open failure is a filesystem fault and cannot be staged with an ordinary
+// readable file either, so this stages one the same way: LittleFS.exists()
+// keeps saying the log is there, and LittleFS.open() hands back nothing. False
+// in every test but the ones that exercise that path.
+static bool g_denyLogOpen = false;
+
 static std::filesystem::path rebased(const char *path)
 {
 	const char *relative = (path[0] == '/') ? path + 1 : path;
@@ -353,6 +364,15 @@ public:
 
 	File open(const char *path, const char *mode)
 	{
+		// The staged open failure. Scoped to reading the log so that mounting,
+		// the repair's temporary file and an append are all unaffected, and so a
+		// test can prove the log's bytes were never touched.
+		if (g_denyLogOpen && std::strcmp(path, "/auto.bin") == 0 &&
+				std::strcmp(mode, FILE_READ) == 0)
+		{
+			return File();
+		}
+
 		std::filesystem::path full = rebased(path);
 		std::FILE *handle = std::fopen(full.c_str(), mode);
 
@@ -434,6 +454,7 @@ static void reportScan(const AutoLogScan &scan)
 							(unsigned long long)scan.firstInvalidOffset);
 	std::printf("partialTail=%d\n", scan.partialTail ? 1 : 0);
 	std::printf("readError=%d\n", scan.readError ? 1 : 0);
+	std::printf("openFailed=%d\n", scan.openFailed ? 1 : 0);
 	std::printf("seqOutOfOrder=%d\n", scan.seqOutOfOrder ? 1 : 0);
 	std::printf("lastRunChargeUAh=%lld\n", (long long)scan.lastRunChargeUAh);
 	std::printf("lastRunEnergyUWh=%lld\n", (long long)scan.lastRunEnergyUWh);
@@ -443,9 +464,11 @@ int main(int argc, char **argv)
 {
 	if (argc < 3)
 	{
-		std::fprintf(stderr,
-								 "usage: %s scan|recover|info|force-truncate <root> [highWater]\n",
-								 argv[0]);
+		std::fprintf(
+				stderr,
+				"usage: %s scan|recover|info|force-truncate <root> [highWater] "
+				"[phantomBytes] [denyLogOpen]\n",
+				argv[0]);
 		return 2;
 	}
 
@@ -453,6 +476,7 @@ int main(int argc, char **argv)
 	g_root = std::filesystem::path(argv[2]);
 	g_highWater = (argc > 3) ? (uint32_t)std::strtoul(argv[3], nullptr, 10) : 0;
 	g_phantomBytes = (argc > 4) ? (size_t)std::strtoul(argv[4], nullptr, 10) : 0;
+	g_denyLogOpen = (argc > 5) && std::strtoul(argv[5], nullptr, 10) != 0;
 
 	if (!autoStorageMount(true))
 	{
@@ -581,17 +605,22 @@ class Storage:
 
         return Result(fields, serial)
 
-    def scan(self, phantom_bytes: int = 0) -> Result:
-        return self._run("scan", 0, phantom_bytes)
+    def scan(self, phantom_bytes: int = 0, deny_log_open: bool = False) -> Result:
+        return self._run("scan", 0, phantom_bytes, int(deny_log_open))
 
-    def recover(self, high_water: int = 0, phantom_bytes: int = 0) -> Result:
-        return self._run("recover", high_water, phantom_bytes)
+    def recover(
+        self,
+        high_water: int = 0,
+        phantom_bytes: int = 0,
+        deny_log_open: bool = False,
+    ) -> Result:
+        return self._run("recover", high_water, phantom_bytes, int(deny_log_open))
 
-    def info(self) -> Result:
-        return self._run("info")
+    def info(self, deny_log_open: bool = False) -> Result:
+        return self._run("info", 0, 0, int(deny_log_open))
 
-    def force_truncate(self) -> Result:
-        return self._run("force-truncate")
+    def force_truncate(self, deny_log_open: bool = False) -> Result:
+        return self._run("force-truncate", 0, 0, int(deny_log_open))
 
 
 @pytest.fixture(scope="module")
@@ -1140,6 +1169,177 @@ def test_storage_info_calls_an_unreadable_log_unreadable(storage: Storage):
     result = storage.scan(phantom_bytes=RECORD_SIZE)
 
     assert result["readError"] == 1
+
+
+# ============================================================================
+# A log that exists and cannot be OPENED at all
+# ============================================================================
+#
+# Found 2026-09-29 and pre-existing in 43c3baf, so the storage extraction
+# preserved it rather than introducing it. The open failed, an error was
+# printed, and a zero-initialized scan came back with `readError` still false.
+# Every count in it was zero because nothing had been read, and the callers
+# read those zeros as measurements: autoStorageScanAndRepair() fell through to
+# "Log tail is intact: ALL OK" and LOGGER STORAGE INFO printed
+# "Tail status:      INTACT" and answered CMD_RESULT OK, for a log not one byte
+# of which had been looked at.
+#
+# The staged failure is the same kind of device as the short read above: the
+# file is real and untouched, and only the open is refused.
+
+
+def test_a_log_that_cannot_be_opened_is_reported_unreadable_not_scanned(
+    storage: Storage,
+):
+    """The scan must say the log exists and that it learned nothing about it.
+
+    `openFailed` carries the distinction the zeros cannot: an unopened log and
+    an empty one produce the same counts and are not the same fact.
+    """
+
+    storage.write_log(*(record_bytes(seq) for seq in (10, 11, 12)))
+
+    result = storage.scan(deny_log_open=True)
+
+    assert result["fileExists"] == 1
+    assert result["openFailed"] == 1
+    assert result["readError"] == 1, (
+        "readError is what autoStorageTruncateToValid() and logIntact are keyed "
+        "on; an open failure must set it or those refusals never see this case"
+    )
+    assert result["validRecords"] == 0
+    assert result["trailingBytes"] == 0
+    assert "Could not open the log for scanning" in result.serial
+
+
+def test_a_log_that_cannot_be_opened_is_never_called_intact(storage: Storage):
+    """The defect itself: boot recovery announced an intact tail for an unread
+    log, which is the reassuring half of a summary nothing measured."""
+
+    before = b"".join(record_bytes(seq) for seq in (10, 11, 12))
+    storage.write_log(before)
+
+    result = storage.recover(deny_log_open=True)
+
+    assert "Log tail is intact" not in result.serial
+    assert "ALL OK" not in result.serial
+    assert "UNREAD" in result.serial
+    assert "NOTHING WAS DISCARDED" in result.serial
+
+
+def test_a_log_that_cannot_be_opened_is_left_exactly_as_it_was(storage: Storage):
+    """Nothing is repaired or discarded when the extent of the damage - or
+    whether there is any - was never established."""
+
+    before = b"".join(record_bytes(seq) for seq in (10, 11, 12))
+    storage.write_log(before)
+
+    result = storage.recover(deny_log_open=True)
+
+    assert storage.log_bytes() == before
+    assert not storage.temp_exists()
+    assert "Discarding" not in result.serial
+    assert "Rewriting the log" not in result.serial
+
+
+def test_a_log_that_cannot_be_opened_keeps_the_nvs_reservation_floor(
+    storage: Storage,
+):
+    """D-023: records may exist that were never read, so the log is not the
+    authority and the reservation floor decides."""
+
+    storage.write_log(*(record_bytes(seq) for seq in (10, 11, 12)))
+
+    result = storage.recover(high_water=5000, deny_log_open=True)
+
+    assert result["nextSeq"] == 5001
+    assert "NOT provably intact" in result.serial
+
+
+def test_storage_info_reports_an_unopenable_log_as_unreadable_and_fails(
+    storage: Storage,
+):
+    """INFO must not print a fabricated record count, must not say INTACT, and
+    must not answer OK for a command that could not do what was asked (D-041).
+    """
+
+    storage.write_log(*(record_bytes(seq) for seq in (10, 11, 12)))
+
+    result = storage.info(deny_log_open=True)
+
+    assert result["infoOk"] == 0
+    assert "Tail status:      UNREADABLE" in result.serial
+    assert "INTACT" not in result.serial
+    assert "Valid records:    0" not in result.serial, (
+        "a count of zero from a scan that read nothing is a fabricated "
+        "measurement, not a fact about the log"
+    )
+    assert "Log bytes:        0" not in result.serial
+    assert storage.log_bytes() == b"".join(
+        record_bytes(seq) for seq in (10, 11, 12)
+    )
+
+
+def test_an_absent_an_empty_and_an_unopenable_log_are_three_answers(
+    storage: Storage,
+):
+    """Three different states that used to collapse into two.
+
+    An absent log was already distinct. A readable empty log and an existing
+    log that could not be opened both reported zero records and an intact tail;
+    only one of those is true.
+    """
+
+    absent = storage.info()
+    assert absent["infoOk"] == 1
+    assert "does not exist yet" in absent.serial
+
+    storage.write_log(b"")
+    empty = storage.info()
+    assert empty["infoOk"] == 1
+    assert "Valid records:    0" in empty.serial
+    assert "Tail status:      INTACT" in empty.serial
+
+    storage.write_log(*(record_bytes(seq) for seq in (10, 11)))
+    unopenable = storage.info(deny_log_open=True)
+    assert unopenable["infoOk"] == 0
+    assert "Tail status:      UNREADABLE" in unopenable.serial
+    assert "INTACT" not in unopenable.serial
+
+
+def test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly(
+    storage: Storage,
+):
+    """The refusal in the one function that deletes records covers this case.
+
+    autoStorageScanAndRepair() never reaches the rewrite here, because an
+    unopened log reports no trailing bytes. That is the caller's `else if`
+    chain, not the function's own guarantee, so the guarantee is tested where
+    it lives (D-057, and the external-linkage decision in D-058).
+
+    Pre-fix this was not merely a missing refusal. Driven directly against an
+    unopened log the function announced
+    "Rewriting the log to its valid prefix: 0 of 0 bytes" and proceeded, and
+    the only thing that stopped it was its own source open failing for the same
+    reason the scan's had. Had the fault been transient - the scan's open
+    failing and the rewrite's succeeding - it would have copied `keepBytes`,
+    zero, into the temporary file, removed the log and renamed the empty file
+    over it, destroying every record from a scan that read nothing.
+    """
+
+    before = b"".join(record_bytes(seq) for seq in (10, 11, 12))
+    storage.write_log(before)
+
+    result = storage.force_truncate(deny_log_open=True)
+
+    assert result["truncated"] == 0
+    assert "Refusing to rewrite the log" in result.serial
+    assert "Rewriting the log" not in result.serial, (
+        "the rewrite was announced for a log the scan never read; the refusal "
+        "has to come before the copy, not after it"
+    )
+    assert storage.log_bytes() == before
+    assert not storage.temp_exists()
 
 
 # ============================================================================

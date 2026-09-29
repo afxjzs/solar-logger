@@ -5443,6 +5443,25 @@ bool printStorageInfo()
 		return true;
 	}
 
+	if (scan.openFailed)
+	{
+		// EVERY NUMBER BELOW WOULD BE ZERO BECAUSE NOTHING WAS READ, and printing
+		// them would state as measurements what this command never measured. Until
+		// 2026-09-29 it printed all of them plus "Tail status: INTACT" and answered
+		// CMD_RESULT OK, which is the reassuring summary of a log it never opened.
+		//
+		// ERROR rather than OK, because the command did not do what was asked
+		// (D-041). The mount failure above already reports itself the same way.
+		Serial.println("[STORAGE] Log file:         EXISTS, but could not be opened");
+		Serial.println("[STORAGE] Tail status:      UNREADABLE");
+		Serial.println(
+				"[STORAGE] The log's size, record count and sequence range are "
+				"UNKNOWN, not zero. Boot recovery discards and repairs nothing while "
+				"this persists, and the NVS reservation floor decides the next "
+				"sequence.");
+		return false;
+	}
+
 	Serial.print("[STORAGE] Log bytes:        ");
 	Serial.println(static_cast<unsigned long>(scan.fileBytes));
 

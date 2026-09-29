@@ -72,6 +72,15 @@
 //   validAfterInvalidRecords   good records stranded PAST damage. Non-zero
 //                              means no automatic repair may run at all: see
 //                              autoStorageScanAndRepair().
+//
+// AND ONE FIELD SAYS THE SCAN NEVER HAPPENED. `openFailed` means the log is
+// there and would not open, so NOT ONE BYTE of it was read. Every count below
+// is then zero because nothing was measured, which is a different fact from a
+// log that is empty, and the two used to be indistinguishable to a caller:
+// both reported no records, no trailing bytes and an intact tail. `readError`
+// is set with it, because an open failure is the extreme case of "the log
+// could not be read" and every refusal already keyed on that field - the
+// rewrite's, and the sequence authority's - must cover this too.
 struct AutoLogScan
 {
 	bool mounted;
@@ -89,6 +98,7 @@ struct AutoLogScan
 	uint32_t validAfterInvalidRecords; // valid records past the first bad one
 	bool partialTail;                  // size is not a whole number of records
 	bool readError;                    // the log could not be read to the end
+	bool openFailed;                   // the log exists and would not open
 	bool seqOutOfOrder;
 	int64_t lastRunChargeUAh;
 	int64_t lastRunEnergyUWh;
