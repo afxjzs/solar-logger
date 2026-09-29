@@ -269,6 +269,7 @@ struct RecordingSerial
 	void print(const char *value) { text += value; }
 	void print(unsigned int value) { text += std::to_string(value); }
 	void print(unsigned long value) { text += std::to_string(value); }
+	void print(long long value) { text += std::to_string(value); }
 
 	void println() { text += '\n'; }
 	void println(const char *value) { text += value; text += '\n'; }
@@ -467,7 +468,7 @@ int main(int argc, char **argv)
 		std::fprintf(
 				stderr,
 				"usage: %s scan|recover|info|force-truncate <root> [highWater] "
-				"[phantomBytes] [denyLogOpen]\n",
+				"[phantomBytes] [denyLogOpen] [retainedCharge retainedEnergy]\n",
 				argv[0]);
 		return 2;
 	}
@@ -477,6 +478,15 @@ int main(int argc, char **argv)
 	g_highWater = (argc > 3) ? (uint32_t)std::strtoul(argv[3], nullptr, 10) : 0;
 	g_phantomBytes = (argc > 4) ? (size_t)std::strtoul(argv[4], nullptr, 10) : 0;
 	g_denyLogOpen = (argc > 5) && std::strtoul(argv[5], nullptr, 10) != 0;
+
+	// What the RTC-retained running totals hold when recovery starts. Zero, as
+	// after a cold boot, unless a test places a value there so that "left
+	// alone" and "overwritten with the scan's zero" can be told apart.
+	if (argc > 7)
+	{
+		rtcAutoRunChargeUAh = std::strtoll(argv[6], nullptr, 10);
+		rtcAutoRunEnergyUWh = std::strtoll(argv[7], nullptr, 10);
+	}
 
 	if (!autoStorageMount(true))
 	{
@@ -613,8 +623,12 @@ class Storage:
         high_water: int = 0,
         phantom_bytes: int = 0,
         deny_log_open: bool = False,
+        retained: tuple[int, int] | None = None,
     ) -> Result:
-        return self._run("recover", high_water, phantom_bytes, int(deny_log_open))
+        seed = () if retained is None else retained
+        return self._run(
+            "recover", high_water, phantom_bytes, int(deny_log_open), *seed
+        )
 
     def info(self, deny_log_open: bool = False) -> Result:
         return self._run("info", 0, 0, int(deny_log_open))
@@ -1340,6 +1354,68 @@ def test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly(
     )
     assert storage.log_bytes() == before
     assert not storage.temp_exists()
+
+
+# ============================================================================
+# The RTC-retained running totals when the log could not be read (D-060)
+# ============================================================================
+#
+# autoStorageRecover() used to end by copying the scan's last running totals
+# into rtcAutoRunChargeUAh / rtcAutoRunEnergyUWh unconditionally. After a
+# failed open those are zero because nothing was read; after a short read they
+# are from whichever record the scan happened to reach last. Either way the
+# retained totals took them without a word. They are test-local figures (D-017),
+# so no measurement record was wrong, but the next record's Qsum/Esum continued
+# from a number nothing had established.
+#
+# The retained totals are seeded to a value no fixture record carries, so that
+# "left alone" and "overwritten from the scan" give different answers.
+
+RETAINED_TOTALS = (5555, 6666)
+
+
+@pytest.mark.parametrize(
+    ("phantom_bytes", "deny_log_open"),
+    [(0, True), (RECORD_SIZE, False)],
+    ids=["open-failure", "short-read"],
+)
+def test_an_unread_log_leaves_the_retained_running_totals_alone_and_says_so(
+    storage: Storage, phantom_bytes: int, deny_log_open: bool
+):
+    """Pre-fix: 0/0 after a failed open, and 300/400 - the last record the scan
+    reached, not provably the last one written - after a short read."""
+
+    storage.write_log(
+        record_bytes(10, charge=100, energy=200),
+        record_bytes(11, charge=300, energy=400),
+    )
+
+    result = storage.recover(
+        phantom_bytes=phantom_bytes,
+        deny_log_open=deny_log_open,
+        retained=RETAINED_TOTALS,
+    )
+
+    assert (result["rtcRunCharge"], result["rtcRunEnergy"]) == RETAINED_TOTALS
+    assert "Running totals could NOT be recovered" in result.serial
+    assert "Carrying the retained totals instead: Qsum_uAh=5555 Esum_uWh=6666" in (
+        result.serial
+    ), "refusing to reseed without saying what is carried is the same silence"
+
+
+def test_a_readable_log_still_replaces_whatever_the_totals_held(storage: Storage):
+    """The healthy path is unchanged: the log's last record wins over any
+    retained value, and nothing claims a recovery failure."""
+
+    storage.write_log(
+        record_bytes(10, charge=100, energy=200),
+        record_bytes(11, charge=300, energy=400),
+    )
+
+    result = storage.recover(retained=RETAINED_TOTALS)
+
+    assert (result["rtcRunCharge"], result["rtcRunEnergy"]) == (300, 400)
+    assert "could NOT be recovered" not in result.serial
 
 
 # ============================================================================

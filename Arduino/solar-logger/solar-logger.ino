@@ -3320,8 +3320,30 @@ uint32_t autoStorageRecover()
 
 	// Test-local running totals continue from the last valid record so a
 	// reboot does not restart them at zero.
-	rtcAutoRunChargeUAh = scan.lastRunChargeUAh;
-	rtcAutoRunEnergyUWh = scan.lastRunEnergyUWh;
+	//
+	// Only when the scan read the log to its end (D-060). After a failed open
+	// the scan's totals are zero because nothing was read, and after a short
+	// read they come from whichever record the scan reached last, which is not
+	// provably the last one written. Neither is a recovery, so the retained
+	// values are kept and the operator is told exactly what is being carried.
+	if (scan.openFailed || scan.readError)
+	{
+		Serial.print("[STORAGE] Running totals could NOT be recovered: ");
+		Serial.println(scan.openFailed
+											 ? "the log could not be opened, so none of it was read."
+											 : "a short read stopped the scan before the end of the "
+												 "log.");
+		Serial.print("[STORAGE] Carrying the retained totals instead: Qsum_uAh=");
+		Serial.print(static_cast<long long>(rtcAutoRunChargeUAh));
+		Serial.print(" Esum_uWh=");
+		Serial.print(static_cast<long long>(rtcAutoRunEnergyUWh));
+		Serial.println(". These were NOT checked against the log.");
+	}
+	else
+	{
+		rtcAutoRunChargeUAh = scan.lastRunChargeUAh;
+		rtcAutoRunEnergyUWh = scan.lastRunEnergyUWh;
+	}
 
 	return next;
 }
