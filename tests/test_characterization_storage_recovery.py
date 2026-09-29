@@ -10,8 +10,18 @@ pytest temporary directory, and run:
   autoStorageMount()             mount, which never formats
   autoStorageScan()              one pass over the log
   autoStorageTruncateToValid()   rewrite the log to what the scan kept
-  autoStorageRecover()           boot recovery, and the next sequence
+  autoStorageScanAndRepair()     boot recovery of the FILE: scan, report, repair
+  autoStorageTotalBytes()        the filesystem's own size, for INFO
+  autoStorageUsedBytes()         and how much of it is in use
+  autoStorageRecover()           the next sequence, decided from that scan
   printStorageInfo()             the operator-visible LOGGER STORAGE INFO
+
+All but the last two now live in `Arduino/solar-logger/storage.cpp`, and those
+two in the sketch; firmware_source.py reads every file Arduino compiles, so this
+file did not have to learn where any of them went. What it did have to learn is
+that boot recovery is two functions rather than one, which is the boundary the
+2026-09-24 storage extraction drew: the file half reports and repairs, and the
+sequence half reconciles it with the NVS reservation floor.
 
 `record_format.cpp` is linked in unmodified, so `autoRecordValid()` is the real
 validator and every fixture below is a record by the deployed contract rather
@@ -91,6 +101,10 @@ from conftest import PROJECT_ROOT
 
 RECORD_FORMAT_HEADER = PROJECT_ROOT / "Arduino" / "solar-logger" / "record_format.h"
 RECORD_FORMAT_SOURCE = PROJECT_ROOT / "Arduino" / "solar-logger" / "record_format.cpp"
+
+STORAGE_HEADER = PROJECT_ROOT / "Arduino" / "solar-logger" / "storage.h"
+STORAGE_SOURCE = PROJECT_ROOT / "Arduino" / "solar-logger" / "storage.cpp"
+SKETCH = PROJECT_ROOT / "Arduino" / "solar-logger" / "solar-logger.ino"
 
 RECORD_SIZE = 72
 
@@ -496,7 +510,10 @@ EXTRACTED = (
     ("autoStorageMount", "bool"),
     ("autoStorageScan", "AutoLogScan"),
     ("autoStorageTruncateToValid", "bool"),
+    ("autoStorageScanAndRepair", "AutoLogScan"),
     ("autoStorageRecover", "uint32_t"),
+    ("autoStorageTotalBytes", "size_t"),
+    ("autoStorageUsedBytes", "size_t"),
     ("printStorageInfo", "bool"),
 )
 
@@ -1301,3 +1318,207 @@ def test_storage_info_never_modifies_the_log(storage: Storage):
 
     assert storage.log_bytes() == before
     assert not storage.temp_exists()
+
+
+# ============================================================================
+# The module boundary, asserted as an absence
+# ============================================================================
+#
+# Added with the 2026-09-24 storage extraction. The tests above execute the
+# recovery policy; these pin WHERE that code is allowed to live, so the next
+# move cannot quietly widen the module while every behavior test still passes.
+
+
+def module_code(path: Path) -> firmware_source.Code:
+    """One file of the storage module, as tokens with comments stripped."""
+
+    return firmware_source.Code(
+        firmware_source.tokenize(path.read_text(encoding="utf-8"), path.name)
+    )
+
+
+@pytest.mark.parametrize("path", (STORAGE_HEADER, STORAGE_SOURCE))
+@pytest.mark.parametrize(
+    "forbidden",
+    (
+        "RTC_DATA_ATTR",            # retained autonomous state
+        "Preferences",              # NVS
+        "loadSequenceHighWater",    # sequence authority (D-023)
+        "AUTO_SEQ_BLOCK",           # sequence reservation
+        "esp_sleep_enable_timer_wakeup",  # the scheduler
+        "esp_deep_sleep_start",
+        "WiFi",
+        "connectionClaim",          # transport claims
+        "hostSessionHeld",          # the host lease
+        "emitCommandResult",        # the command protocol
+        "autonomousIntervalSeconds",  # the cadence STORAGE INFO projects from
+        "printAutoRecord",          # the DUMP transcript format
+        "autoRecordCrc",            # record_format's, not storage's, to compute
+    ),
+)
+def test_the_storage_module_takes_on_no_other_responsibility(path, forbidden):
+    """The boundary D-055 drew, checked rather than reviewed.
+
+    Storage owns mount, path, read, append, scan and repair. Sequence
+    authority, retained state, scheduling, session leases, the command protocol
+    and record validity each belong somewhere else, and every name here is one
+    of those.
+    """
+
+    assert not module_code(path).contains(forbidden), (
+        f"{path.name} names `{forbidden}`; that responsibility is not storage's"
+    )
+
+
+def test_littlefs_is_named_only_by_the_storage_module():
+    """The point of the move: one file knows the filesystem exists.
+
+    Comments are stripped before this runs, so the sketch may still explain
+    what LittleFS is; it may not call it.
+    """
+
+    sketch_dir = SKETCH.parent
+    others = [
+        path
+        for path in sorted(sketch_dir.iterdir())
+        if path.is_file()
+        and path.suffix in firmware_source.SOURCE_SUFFIXES
+        and path not in (STORAGE_HEADER, STORAGE_SOURCE)
+    ]
+
+    assert others, "no other sketch files found; this test would pass vacuously"
+
+    for path in others:
+        assert not module_code(path).contains("LittleFS"), (
+            f"{path.name} calls LittleFS directly; storage.cpp owns the "
+            "filesystem, and a caller that needs something it does not expose "
+            "should gain a named primitive rather than reach past it"
+        )
+
+    assert module_code(STORAGE_SOURCE).contains("LittleFS"), (
+        "storage.cpp names no LittleFS at all, so the test above passes by the "
+        "module being empty"
+    )
+
+
+def test_the_log_path_is_private_to_the_storage_module():
+    """Where records are kept is the module's business and nobody else's."""
+
+    for constant in ("AUTO_LOG_PATH", "AUTO_LOG_TMP_PATH"):
+        assert module_code(STORAGE_HEADER).count(constant) == 0, (
+            f"{constant} is in storage.h; it is not part of the API"
+        )
+        assert module_code(SKETCH).count(constant) == 0, (
+            f"{constant} is still in the sketch"
+        )
+        assert module_code(STORAGE_SOURCE).count(f"constexpr char {constant} [ ]") == 1
+
+
+def test_every_storage_function_is_defined_exactly_once():
+    """Two definitions of a storage function is how a firmware silently forks.
+
+    firmware_source raises on a duplicate, so this asserts the count directly
+    rather than relying on the harness's own lookup to notice.
+    """
+
+    sketch = firmware_source.load()
+
+    for name, _returns in EXTRACTED:
+        definitions = sketch.functions.get(name, [])
+        places = ", ".join(definition.where for definition in definitions)
+        assert len(definitions) == 1, f"{name}() defined {len(definitions)} times: {places}"
+
+    for name in (
+        "autoStorageAppend",
+        "autoStorageFormat",
+        "autoStorageLogExists",
+        "autoStorageOpenLogForRead",
+        "autoStorageLastAppendTiming",
+        "dumpStorage",
+        "clearStorage",
+    ):
+        assert len(sketch.functions.get(name, [])) == 1, f"{name}() is not defined once"
+
+
+def test_record_format_remains_the_only_validator():
+    """Storage CALLS autoRecordValid(); it does not own or reimplement it."""
+
+    sketch = firmware_source.load()
+
+    for name in ("autoRecordValid", "autoRecordCrc", "autoRecordSnapshotUnread"):
+        definitions = sketch.functions.get(name, [])
+        assert len(definitions) == 1, f"{name}() is not defined exactly once"
+        assert definitions[0].where.startswith("Arduino/solar-logger/record_format.cpp"), (
+            f"{name}() is defined in {definitions[0].where}, not record_format.cpp"
+        )
+
+    assert module_code(STORAGE_SOURCE).contains("autoRecordValid ( record )"), (
+        "the scan no longer asks record_format whether a record is valid"
+    )
+    assert not module_code(STORAGE_SOURCE).contains("AUTO_RECORD_MAGIC"), (
+        "storage is checking the magic itself instead of calling the validator"
+    )
+
+
+def test_the_storage_header_exports_no_mutable_state():
+    """A module that exported a writable global would have moved nothing.
+
+    The append sub-timings are the case this guards: they were three globals in
+    the sketch, they are now `static` in storage.cpp, and the wake cycle reads
+    them through a function.
+    """
+
+    header = module_code(STORAGE_HEADER)
+
+    assert not header.contains("extern"), (
+        "storage.h declares an `extern`; state belongs behind a function"
+    )
+    assert header.contains("AutoAppendTiming autoStorageLastAppendTiming ( )")
+
+    for name in ("autoAppendOpenUs", "autoAppendWriteUs", "autoAppendFlushCloseUs"):
+        assert not module_code(SKETCH).contains(name), f"{name} is still in the sketch"
+        assert module_code(STORAGE_SOURCE).count(f"static uint32_t {name} = 0 ;") == 1
+
+
+def test_the_rewrite_keeps_external_linkage_so_its_refusal_is_compiled():
+    """Measured on 2026-09-24, and the reason this function is not `static`.
+
+    autoStorageScanAndRepair() is its only caller, and it calls it inside an
+    `else if` chain that has already excluded `readError` and
+    `validAfterInvalidRecords > 0`. Given internal linkage, GCC inlined the
+    function into that one call site, proved the refusal unreachable, and
+    dropped it and its message from the image: the firmware stopped containing
+    a check the source says it contains.
+
+    The refusal is a property of the function under D-057, not of its caller.
+    External linkage is what keeps it compiled.
+    """
+
+    source = STORAGE_SOURCE.read_text(encoding="utf-8")
+
+    assert "\nbool autoStorageTruncateToValid(const AutoLogScan &scan)\n" in source, (
+        "autoStorageTruncateToValid() must be defined with external linkage; "
+        "`static` lets the compiler delete its refusal from the image"
+    )
+    assert module_code(STORAGE_HEADER).contains(
+        "bool autoStorageTruncateToValid ( const AutoLogScan & scan ) ;"
+    ), "the declaration in storage.h is what keeps the definition reachable"
+
+
+def test_the_sequence_decision_stayed_in_the_sketch():
+    """D-055's line: storage reports the log, the sketch decides the sequence."""
+
+    sketch = firmware_source.load()
+
+    recover = sketch.function("autoStorageRecover")
+    assert recover.contains("autoStorageScanAndRepair ( )")
+    assert recover.contains("rtcAutoSeqHighWater = loadSequenceHighWater ( )")
+    assert recover.contains("rtcAutoRunChargeUAh = scan . lastRunChargeUAh ;")
+
+    assert sketch.functions["autoStorageRecover"][0].where.startswith(
+        "Arduino/solar-logger/solar-logger.ino"
+    ), "the sequence decision moved into the storage module"
+
+    repair = sketch.function("autoStorageScanAndRepair")
+    assert not repair.contains("loadSequenceHighWater")
+    assert not repair.contains("rtcAutoNextSeq")

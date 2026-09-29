@@ -1456,6 +1456,98 @@ synthetic damaged logs in `tests/test_characterization_storage_recovery.py`. Tho
 hardware smoke used only its healthy normal path; physical read-error testing
 remains open.
 
+## D-058: Storage owns the filesystem, never which sequence a record gets
+
+Set by the sixth modularization stage on 2026-09-24, the second of the
+boundaries D-055 separated. Compiled, host-tested and **NOT hardware validated**
+at this writing: nothing was uploaded. The gate went from 429 passed / 1 xfailed
+to 462 passed / 1 xfailed, the 33 new tests being the storage module boundary
+and the re-homed harness.
+
+`storage.h` / `storage.cpp` hold the durable-log mechanics: `AUTO_LOG_PATH`
+(`/auto.bin`) and `AUTO_LOG_TMP_PATH` (`/auto.tmp`), the `autoStorageMounted`
+flag, the three append sub-timings, `autoStorageMount()`,
+`autoStorageFormat()`, `autoStorageScan()`, `autoStorageTruncateToValid()`,
+`autoStorageScanAndRepair()`, `autoStorageAppend()`,
+`autoStorageLogExists()`, `autoStorageOpenLogForRead()`,
+`autoStorageLastAppendTiming()`, `autoStorageTotalBytes()` and
+`autoStorageUsedBytes()`, plus `struct AutoLogScan` and `struct
+AutoAppendTiming`. No file outside the module names `LittleFS` or either path,
+and a test asserts that rather than trusting the review.
+
+**The sequence decision did not follow the filesystem in.** `autoStorageRecover()`
+was split at the seam D-055 draws. The file half — scan, report every damage
+case by name, repair only a tail — is `autoStorageScanAndRepair()` in the
+module, and it returns the scan. The sequence half keeps the name
+`autoStorageRecover()` and stays in `solar-logger.ino`, because it reads the NVS
+high-water mark, applies the D-023 reconciliation of an intact log tail against
+the reservation floor, and reseeds `rtcAutoRunChargeUAh` and
+`rtcAutoRunEnergyUWh`. Rejoining the two halves reproduces the pre-move function
+token for token.
+
+**D-057 is unchanged, and one linkage decision exists to keep it that way.**
+`autoStorageTruncateToValid()` is declared in the header although
+`autoStorageScanAndRepair()` is its only caller, which departs from D-047's
+"export only what is used outside". The reason is measured. Given `static` and
+that single call site, GCC inlined it, proved from the caller's `else if` chain
+that `validAfterInvalidRecords > 0 || readError` could not hold there, and
+deleted the refusal and its message from the image: the firmware stopped
+containing a check the source says it contains. Comparing the two images'
+message strings is what found it, not review. The refusal is a property of the
+function under D-057, so it keeps external linkage, and
+`test_the_rewrite_keeps_external_linkage_so_its_refusal_is_compiled` pins the
+reason next to the code.
+
+**Four commands deliberately stayed in the sketch.** `printStorageInfo()`,
+`dumpStorage()`, `clearStorage()` and `printAutoRecord()` each mix
+operator-facing formatting, or the autonomous test's own state, with the file
+access they need: INFO projects capacity from `autonomousIntervalSeconds`, DUMP
+formats every record through `printAutoRecord()`, and CLEAR refuses while the
+test is armed and zeroes the RTC totals afterwards. Moving any of them would
+have carried scheduler or presentation concerns into the module, so only the
+file access moved, as `autoStorageTotalBytes()`, `autoStorageUsedBytes()`,
+`autoStorageLogExists()`, `autoStorageOpenLogForRead()` and
+`autoStorageFormat()`. Six filesystem-space call sites collapsed onto two
+accessors; that is the only place where a token left the sketch without
+reappearing in the module.
+
+**State went with its writer, and the header exports none of it.** The three
+append sub-timings were globals the sketch read and only the append wrote, so
+they are now `static` in `storage.cpp` and the wake cycle reads them through
+`autoStorageLastAppendTiming()`. `autoStorageMounted` is private outright.
+`storage.h` declares no `extern`.
+
+**No format, protocol or version changed.** Record version stays 1, the firmware
+version stays `0.3.0-dev` and the build ID stays
+`solar-logger-protocol-ack-v3`. Storage-full policy, `SYNC FROM`, storage ACKs
+and reclamation remain unimplemented; none was invented to fill a gap in the
+new module, and the unresolved non-record-sized resynchronization case in D-057
+is unchanged.
+
+**The move was audited as a mechanical one (D-047).** 1,585 tokens left the
+sketch and 30 entered it, every one of the 30 being the new module's API names,
+the `#include`, and one local for the timing struct. The four definitions moved
+whole — `autoStorageMount()`, `autoStorageScan()`,
+`autoStorageTruncateToValid()`, `autoStorageAppend()` — and `struct AutoLogScan`
+are token-identical to `HEAD`, and all four compile to identical RISC-V
+instruction sequences in the linked image. One comment was edited and is stated
+rather than hidden by a token audit that cannot see comments: the note beside
+`AutoLogScan` explained why it was declared early in the sketch, which the move
+made false.
+
+**Flash rose 318 bytes and every byte is accounted for.** `.flash.text` grew
+134 bytes across 23 named symbols, the largest being the new
+`autoStorageScanAndRepair()` at 610 against the 572 its body cost inside
+`autoStorageRecover()`, and five previously-inlined filesystem calls becoming
+real functions. `.eh_frame` grew 188 bytes for exactly 7 new FDEs, which is the
+11 functions `storage.cpp` defines less the 4 that left the sketch.
+`.flash.rodata` fell 4 bytes with all 4,053 of its text strings byte-identical
+between the two images, so that is string-pool alignment and not a lost message.
+Two symbols changed by 2 bytes each, `setup()` and the core's
+`fs::LittleFSFS::begin()`, and both have identical instruction sequences: GNU ld
+RISC-V relaxation following the new section placement, the same outcome recorded
+in D-056. Global variables are unchanged at 36,332 bytes.
+
 ## Project practice
 
 These documents are living engineering records. Record substantive changes, measurements, discovered bugs, mistakes and corrections, architecture decisions, and open questions here as part of the same work. Chat history is not the authoritative project record.

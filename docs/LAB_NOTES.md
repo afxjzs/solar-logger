@@ -6,6 +6,50 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-09-29: Storage extraction reviewed and committed separately — hardware pending
+
+The storage-only change was reviewed against **43c3baf** and committed separately
+from capture-gap analysis, its pandas dependency changes, and older documentation/
+evidence work. No firmware behavior was edited during this review. D-058 records
+the boundary; this entry and D-058 accompany the four storage source/test files
+in the commit. The other working-tree changes remain uncommitted and unpushed.
+
+**Fresh move audit:** the bodies of autoStorageMount, autoStorageScan,
+autoStorageTruncateToValid and autoStorageAppend, and the AutoLogScan layout, are
+token-identical to the parent. Recombining autoStorageScanAndRepair with the
+remaining autoStorageRecover body reproduces the original recovery logic exactly.
+All 72 other old function bodies outside the five adapted callers are unchanged
+(including moved functions). Expanding the new filesystem/timing accessors in
+INFO, DUMP, CLEAR and the wake cycle also reproduces their original bodies.
+Sequence authority, RTC state, scheduler, record bytes/CRC and command policy
+remain in their prior owners. No newly introduced behavioral regression was found.
+
+**Fresh isolated gate:** a temporary snapshot of parent 43c3baf plus only the
+four storage source/test files ran the complete tools/check.sh: **exit 0, ALL OK;
+462 passed, 1 xfailed**, pyright/py_compile clean, warning-free clean firmware
+compile, IntelliSense **7/7**, shell syntax and whitespace passing. Flash is
+**1,104,313 bytes**, globals **36,332 bytes**. The snapshot excludes the 24 host
+analysis tests and pandas additions, so 462/1 is the isolated storage result;
+486/1 remains the September 28 combined-working-tree gate. Its code bytes were
+checked against the staged candidate. The known short-cadence overrun xfail
+remains open. No extra tests or dependency changes were introduced in this review.
+
+**Pre-existing diagnostic finding, not an extraction regression:** when the log
+exists but open-for-scan fails, autoStorageScan prints an error and returns
+without setting readError. Zero-initialized trailingBytes then lets recovery/
+INFO print an INTACT tail despite the failed scan. The same body exists in
+43c3baf. Sequence recovery still applies the NVS floor because validRecords is
+zero, and no automatic tail repair runs on this outcome. Track explicit unreadable
+scan status and an open-failure fixture as a separate correctness stage; do not
+interpret an INTACT line as sufficient if any storage error was printed.
+
+[Move audit and isolated gate](evidence/2026-09-29/README.md). No upload or serial
+command was run. Experiment 3 was not reset or cleared. Storage hardware smoke
+is deliberately the next session's bounded task: capture current VERSION and
+healthy storage/experiment evidence before upload, use canonical tools/upload.sh,
+and verify historical decoding plus new autonomous records afterward. Do not
+inject corruption or begin another firmware extraction during that smoke.
+
 ## 2026-09-24: Hardware validation addendum — clean record format and working-tree recovery
 
 **OBSERVED, as supplied by the user:** the results below record two completed

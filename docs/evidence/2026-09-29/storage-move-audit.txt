@@ -1,0 +1,11 @@
+PASS identical moved body: autoStorageMount
+PASS identical moved body: autoStorageScan
+PASS identical moved body: autoStorageTruncateToValid
+PASS identical moved body: autoStorageAppend
+PASS identical AutoLogScan representation
+PASS recombined recovery is token-identical, including sequence and RTC logic
+PASS 72 other function bodies unchanged (including moved functions)
+PASS command unchanged after inlining filesystem accessors: printStorageInfo
+PASS command unchanged after inlining filesystem accessors: dumpStorage
+PASS wake body unchanged after restoring timing accessor reads
+PASS clear command unchanged after inlining format helper; no command executed
