@@ -1,0 +1,23 @@
+{
+  "Arduino/solar-logger/connection.h": "88d14aa870c40cf55c1d9860a58bcdaf8fec544a4b7481491f3ba2f7611daec5",
+  "Arduino/solar-logger/nvs_persistence.h": "c69cfff060c2a645f926c9953bc23ba9e271f08ee9864362db8d999443406cb3",
+  "Arduino/solar-logger/ina228.cpp": "813c6b9a2e1f20feec7e943648449792e728e5031a6cc902c330a061ff9350ed",
+  "Arduino/solar-logger/storage.cpp": "4a62fb1c4438649b5c9c2bb5734d3150b91a6781d86aabfd388ac094cb4c5db8",
+  "Arduino/solar-logger/record_format.cpp": "d303fa7ba88c1f2da5dd2dc974449dc007e9a212af2154234a44a476ba610726",
+  "Arduino/solar-logger/storage.h": "9e7b335f4e0e6a9e5ce2a753574002d51b98b0b5e14a9f4f08c04f537c976830",
+  "Arduino/solar-logger/ina228.h": "2456f98256cdc6dbac2917ea9322d4c380f637f49f1928326a8a3a15b8ed8256",
+  "Arduino/solar-logger/record_format.h": "7191aeb58fdb51c8cb8195acfd1471f0c024d440b323c4aa9ce63351bd5780a1",
+  "Arduino/solar-logger/firmware_version.h": "f0640c94ae1b7e6c73a8d3b4c669fb0ccd6f6bcb5bcdf9f2e5c0d0a00f0f47e5",
+  "Arduino/solar-logger/telemetry.cpp": "b93e834b1c7cb5af5c709f1eb7703d132550d1c34f61791b66a26db0aa27b2b8",
+  "Arduino/solar-logger/connection.cpp": "d53d6a93fadfe7437e1226bfd5f353720f3014d8c416829b449b38babdb8ad0e",
+  "Arduino/solar-logger/nvs_persistence.cpp": "8d324a269487fb83c222f10ef3105d2677a558bd35cc90bcdfb21f8c717fe1ed",
+  "Arduino/solar-logger/solar-logger.ino": "762ee5cb23283550610c09b60056da327b8a99d9da42199698991dc7d37f206a",
+  "Arduino/solar-logger/telemetry.h": "ce8060a1c6f0d25661f51f076356c31e2c4e86eb54e35f4d4e2339895b180ca0",
+  "app/device_session.py": "74683d9f852486b007f9981d82148e1f37778300c3ffc3e1c4fb56074ce4e81e",
+  "app/device_tool.py": "69d9bf64aa561f6fa7fcbfe265ec526c08248b5987a5133ee57ff70ad5351790",
+  "tools/send.sh": "aaeb1e73ab68f13c9e8f64e252fe6d0a690433856e9707e4dbb396e3b1f09a97",
+  "tools/upload.sh": "a298961b451fb2a978fe07f528c4680493a8a2ff700ffa13ea1a977528699383",
+  "tests/test_characterization_storage_recovery.py": "220a6425d1af0303de098f40a1c3d5cc90852e95b3982ae382891e620e750e45",
+  "docs/CURRENT_STATE.md": "1d8da4e54d589ecbbf5164a8e6595170db2b594cc2aa9e50edf80f7b3831c8b0",
+  "docs/LAB_NOTES.md": "a86db94f0acfc14f21a241615fb69fa92d26e86e96a7d45d6480be2607cb844c"
+}

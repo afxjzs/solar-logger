@@ -1,0 +1,17 @@
+ M README.md
+ M docs/BACKLOG.md
+ M docs/DECISIONS.md
+ M docs/HARDWARE_WIRING.md
+ M docs/INDEX.md
+ M docs/LAB_NOTES.md
+ M docs/PROJECT.md
+ M docs/STORAGE_SYNC_DESIGN.md
+ M pyproject.toml
+ M uv.lock
+?? AGENTS.md
+?? docs/CURRENT_STATE.md
+?? docs/evidence/2026-09-25/
+?? docs/evidence/2026-09-28/
+?? docs/evidence/2026-09-29/storage-hardware/
+?? tests/test_charger_transitions.py
+?? tools/charger-transitions.py

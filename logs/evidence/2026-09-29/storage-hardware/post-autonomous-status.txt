@@ -1,0 +1,30 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER AUTONOMOUS STATUS
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER AUTONOMOUS STATUS)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER AUTONOMOUS STATUS,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER AUTONOMOUS STATUS
+
+[AUTO] Autonomous mode: ON
+[AUTO] Armed: YES
+[AUTO] Running: NO
+[AUTO] Interval: 60 seconds
+[AUTO] Boot id: 0
+[AUTO] RTC state valid: NO
+[AUTO] Cycles this power-on: 0
+[AUTO] Next sequence: 0
+[AUTO] Sequence reserved through: 0
+[AUTO] Session elapsed: 0 ms
+[AUTO] Accounting: ISOLATED. Experiment totals are never modified.
+[AUTO] New records will carry experiment id: 3
+[AUTO] Cold-boot maintenance window: 15 seconds (cold boot only; timer wakes do not open one)
+[AUTO] USB right now: plugged=YES cdcConnected=YES
+CMD_RESULT,LOGGER AUTONOMOUS STATUS,OK
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 17
+[COMMAND] Capture ended: port quiet for 600ms.

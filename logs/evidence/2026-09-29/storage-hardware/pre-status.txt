@@ -1,0 +1,41 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: STATUS
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] No board port is currently visible.
+[SERIAL] The board may be in autonomous deep sleep.
+[SERIAL] Waiting for the next USB rendezvous...
+[SERIAL] Press Control-C to cancel.
+[SERIAL] Still waiting (15s elapsed)...
+[SERIAL] Still waiting (30s elapsed)...
+[SERIAL] Still waiting (45s elapsed)...
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,STATUS)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,STATUS,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: STATUS
+
+[STATUS] Current logger state:
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Revision: eba3b5d-dirty
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+[STATUS] Experiment ID      = 0
+[STATUS] Completed interval = 0
+[STATUS] Running charge     = 0.000000 mAh
+[STATUS] Running energy     = 0.000000 mWh
+[STATUS] Interval accounting = SUSPENDED: autonomous logger owns the board
+[STATUS] The interval and totals above are frozen, not advancing.
+[STATUS] Voltage            = 13.0709 V
+[STATUS] Current            = -0.616 mA
+[STATUS] Power              = 8.026 mW
+CMD_RESULT,STATUS,OK
+[AUTO] Rendezvous: 1 / 10 s
+[AUTO] USB plugged: YES
+[AUTO] CDC connected: YES
+[CONNECTION] Active transports: NONE
+[CONNECTION] Host claimed: NO
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 21
+[COMMAND] Capture ended: port quiet for 600ms.

@@ -1,0 +1,104 @@
+## Storage scan-open diagnostic fix — CODE stage complete
+
+**Status: compiled and host-tested. NOT uploaded, NOT hardware validated,
+NOT committed.** No serial port was opened, no board was touched, Experiment 3
+was not reset, cleared or read. Every failure in this work is staged in a
+pytest temporary directory.
+
+### What changed — 4 files, +296/-17
+
+- `Arduino/solar-logger/storage.h` — `AutoLogScan` gains `openFailed`.
+- `Arduino/solar-logger/storage.cpp` — a failed read-open sets `openFailed` and
+  `readError`; `autoStorageScanAndRepair()` reports the tail UNREAD and the
+  counts UNKNOWN instead of falling through to "Log tail is intact: ALL OK".
+- `Arduino/solar-logger/solar-logger.ino` — `printStorageInfo()` prints
+  `Tail status: UNREADABLE`, prints no figure it never measured, and returns
+  false so the command answers `CMD_RESULT,...,ERROR` (D-041) rather than `OK`.
+- `tests/test_characterization_storage_recovery.py` — 7 tests plus one harness
+  staging control that fails read-opens of the log and leaves the file alone.
+
+`readError` is what carries the case into the existing refusals; `openFailed`
+carries what it cannot, which is that a short read has real partial counts and
+a failed open has none.
+
+### SECOND DEFECT FOUND AND FIXED — worth your attention
+
+Driven directly against an unopened log, `autoStorageTruncateToValid()` printed
+"Rewriting the log to its valid prefix: 0 of 0 bytes" and proceeded. Only its
+own source open failing for the same reason stopped it. A fault that cleared in
+between would have copied keepBytes — zero — into the temp file, removed the
+log and renamed the empty file over it, destroying every record. Not reachable
+through `autoStorageScanAndRepair()`, which is exactly the case D-058 made for
+keeping that refusal compiled in the function. `readError` now reaches it.
+
+### MEASURED
+
+- Gate before, working tree as found: ALL OK, 486 passed / 1 xfailed.
+- Gate after, working tree: exit 0, ALL OK, 493 passed / 1 xfailed.
+- Gate after, isolated snapshot (1980d94 + only these 4 files; host tool,
+  its tests and pandas excluded): ALL OK, 469 passed / 1 xfailed.
+  469 = the Sept 29 isolated 462 + these 7. Never a mixed snapshot.
+- 5 of the 7 new tests FAIL against the pre-fix code. The 2 that pass are the
+  conservative half BACKLOG already recorded: file untouched, NVS floor applied.
+- Flash 1,104,313 -> 1,105,273 = +960. Globals 36,332, unchanged.
+  .flash.text +116, .flash.rodata +840, .eh_frame +4. Nothing else moved.
+  Per-symbol: exactly 3 symbols changed, all edited here —
+  printStorageInfo +58, autoStorageScanAndRepair +52, autoStorageScan +6.
+  FDE count identical at 6,356, so no function was added or removed.
+  autoStorageTruncateToValid is 614 bytes and type T in both images: its
+  refusal is still compiled, measured not reviewed.
+  Rodata: string-table multiset delta +834 of message text, 6 of pool packing.
+  The bare "UNREADABLE" literal is now stored as a suffix of the longer Tail
+  status line; it still occurs exactly once as "UNREADABLE\0" in both images.
+- Baseline build reproduced HEAD's 1,104,313 exactly before comparison.
+
+### FOUND, NOT FIXED — reported rather than absorbed, per the kickoff
+
+`autoStorageRecover()` reseeds `rtcAutoRunChargeUAh`/`rtcAutoRunEnergyUWh` from
+a scan that read nothing, so the RTC running totals silently restart at zero.
+Same on the pre-existing short-read path. Changing it alters deployed
+characterized accounting on both, so it is in BACKLOG as its own stage.
+Two smaller, unchanged: the scan's error line prints before the "Scanning
+durable log..." banner; `dumpStorage()` returns true after breaking on a short
+read mid-dump.
+
+### Docs updated (all uncommitted, narrowly scoped)
+
+LAB_NOTES (new dated entry), CURRENT_STATE, BACKLOG (issue closed in source +
+new running-totals issue), STORAGE_SYNC_DESIGN §11, INDEX, PROJECT.
+DECISIONS: a dated addendum to D-057. Your call whether this warrants its own
+numbered decision — the INFO completion-semantics change is a rule, not just a
+fix. I did not create D-060.
+
+### What to run next
+
+    cd /Users/afxjzs/dev/projects/solar-charger
+    git --no-pager diff Arduino/ tests/test_characterization_storage_recovery.py
+    tools/check.sh
+
+### PREDICTED, NOT OBSERVED — expected output of the above
+
+Re-running the gate should reproduce exit 0, ALL OK, 493 passed / 1 xfailed,
+flash 1,105,273, globals 36,332, IntelliSense 7/7. I measured this three times
+on this tree; a fourth run on an unchanged tree is a prediction, not evidence.
+
+### Hardware acceptance — PENDING, nothing has been run
+
+The check this change most needs is the HEALTHY-log path, because that is what
+it must not have moved: after upload, INFO should still report Experiment 3
+with tail INTACT, trailing 0 and at least as many records as before, and the
+decoded dump should still validate them with invalid 0. Those are predictions.
+The open-failure branch needs a real filesystem fault and MUST NOT be obtained
+by damaging the Experiment 3 log. If an unexpected UNREADABLE or any storage
+error appears, stop acceptance and diagnose.
+
+### Left unchanged
+
+Record format (version 1, 72 bytes), CRC, D-023 sequence authority, the
+healthy-log path, firmware identity (0.3.0-dev /
+solar-logger-protocol-ack-v3), the command vocabulary and build ID.
+tools/upload.sh, send.sh, check.sh untouched. The uncommitted host capture-gap
+work (tools/charger-transitions.py, tests/test_charger_transitions.py) and the
+pandas changes in pyproject.toml/uv.lock were not touched — mtimes still
+Sep 24/Sep 28. The sealed Sept 29 hardware evidence was not altered.
+Nothing committed, staged or pushed.

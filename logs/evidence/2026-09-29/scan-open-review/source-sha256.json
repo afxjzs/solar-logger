@@ -1,0 +1,6 @@
+{
+  "Arduino/solar-logger/storage.h": "e86fa285c4af7909d3c850cf6b0fc25177b2cd1e62e805048d8b5eb58a6b571b",
+  "Arduino/solar-logger/storage.cpp": "ea49858497a7ab41fcb526b17f30de9296e75b74de61c81baa5fd042fd0cecd7",
+  "Arduino/solar-logger/solar-logger.ino": "b8b9368fc821aa25f30a70357067e8c88504ba28140dbf5bcff003fe1366d6c1",
+  "tests/test_characterization_storage_recovery.py": "a0ccd0979f25e9f09360d7a08f819bde716e866a356d1e5f7015ca2ad42ea9dd"
+}

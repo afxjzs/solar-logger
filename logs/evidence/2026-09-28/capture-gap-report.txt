@@ -1,0 +1,1114 @@
+CHARGER OUTPUT CAPTURE REPORT
+Analysis settings only; no cause or solar-availability inference.
+Maximum adjacent capture spacing: 2 s (inclusive)
+Persistence: 5 consecutive classified samples per state
+Classification: V=10..16 V; CHARGING >= 20 mA; NOT_CHARGING <= 5 mA; otherwise ambiguous
+Samples: 26674; capture segments: 81
+First captured row: 2026-09-16 10:07:44.231779-07:00
+Last captured row:  2026-09-27 22:21:22.306909-07:00
+Host receipt timestamps, not exact physical switching times; file span is not continuous coverage.
+Ambiguous samples: UNKNOWN=46, TRANSITION=1131
+
+SEGMENT 1: FILE START; experiment 3
+  Capture: 2026-09-16 10:07:44.231779-07:00 .. 2026-09-16 10:11:24.819458-07:00 (246 samples)
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 2: CAPTURE GAP; experiment 3
+  Capture: 2026-09-16 10:14:46.091349-07:00 .. 2026-09-16 10:18:43.120815-07:00 (238 samples)
+  Boundary: 2026-09-16 10:11:24.819458-07:00 (exp 3) -> 2026-09-16 10:14:46.091349-07:00 (exp 3); separation 201.271891 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  INITIAL STATE: NOT_CHARGING
+  First supporting sample: 2026-09-16 10:14:47.091913-07:00
+  Confirmed at: 2026-09-16 10:14:51.091456-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.136719 V  I=-0.588 mA  P=7.693 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-16 10:14:46.091349-07:00              3  13.137109       5.108   67.0720   TRANSITION
+2026-09-16 10:14:47.091913-07:00              3  13.136719      -0.588    7.6928 NOT_CHARGING
+2026-09-16 10:14:48.091671-07:00              3  13.137305       0.544   15.1040 NOT_CHARGING
+2026-09-16 10:14:49.091470-07:00              3  13.136523      -0.612    8.0512 NOT_CHARGING
+2026-09-16 10:14:50.091687-07:00              3  13.136523      -0.392    8.0384 NOT_CHARGING
+2026-09-16 10:14:51.091456-07:00              3  13.136719       3.852   50.5728 NOT_CHARGING
+2026-09-16 10:14:52.092257-07:00              3  13.136328      -0.596    7.8080 NOT_CHARGING
+2026-09-16 10:14:53.091704-07:00              3  13.136719       2.248   32.0640 NOT_CHARGING
+2026-09-16 10:14:54.092437-07:00              3  13.136133      -0.636    8.3584 NOT_CHARGING
+
+SEGMENT 3: CAPTURE GAP; experiment 3
+  Capture: 2026-09-16 10:22:05.091529-07:00 .. 2026-09-16 10:47:57.412970-07:00 (1553 samples)
+  Boundary: 2026-09-16 10:18:43.120815-07:00 (exp 3) -> 2026-09-16 10:22:05.091529-07:00 (exp 3); separation 201.970714 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-16 10:47:00.383309-07:00
+  Confirmed at: 2026-09-16 10:47:04.385528-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.117773 V  I=-0.308 mA  P=10.982 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-16 10:46:57.381234-07:00              3  13.118359       5.640   73.9584   TRANSITION
+2026-09-16 10:46:58.384603-07:00              3  13.117578      -0.592    7.7696 NOT_CHARGING
+2026-09-16 10:46:59.382671-07:00              3  13.117969       9.596  126.0416   TRANSITION
+2026-09-16 10:47:00.383309-07:00              3  13.117773      -0.308   10.9824 NOT_CHARGING
+2026-09-16 10:47:01.383309-07:00              3  13.117383       3.072   44.7360 NOT_CHARGING
+2026-09-16 10:47:02.384619-07:00              3  13.117969       2.912   38.6432 NOT_CHARGING
+2026-09-16 10:47:03.384865-07:00              3  13.117578      -0.604    7.8976 NOT_CHARGING
+2026-09-16 10:47:04.385528-07:00              3  13.117383      -0.620    8.1280 NOT_CHARGING
+2026-09-16 10:47:05.385058-07:00              3  13.117773       4.516   61.2096 NOT_CHARGING
+2026-09-16 10:47:06.386646-07:00              3  13.117773       3.568   50.7520 NOT_CHARGING
+2026-09-16 10:47:07.386294-07:00              3  13.117188      -0.624    8.1536 NOT_CHARGING
+
+SEGMENT 4: CAPTURE GAP; experiment 3
+  Capture: 2026-09-23 09:55:29.458409-07:00 .. 2026-09-23 09:56:44.500348-07:00 (76 samples)
+  Boundary: 2026-09-16 10:47:57.412970-07:00 (exp 3) -> 2026-09-23 09:55:29.458409-07:00 (exp 3); separation 601652.045439 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: CHARGING
+  First supporting sample: 2026-09-23 09:55:29.458409-07:00
+  Confirmed at: 2026-09-23 09:55:33.458576-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.428320 V  I=90.388 mA  P=1213.747 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW raw_state
+2026-09-23 09:55:29.458409-07:00              3  13.428320      90.388 1213.7472  CHARGING
+2026-09-23 09:55:30.458982-07:00              3  13.428516      91.040 1222.5024  CHARGING
+2026-09-23 09:55:31.458309-07:00              3  13.428320      91.404 1227.3664  CHARGING
+2026-09-23 09:55:32.459114-07:00              3  13.428516      90.388 1213.7984  CHARGING
+2026-09-23 09:55:33.458576-07:00              3  13.428516      90.860 1220.0960  CHARGING
+2026-09-23 09:55:34.458446-07:00              3  13.428320      91.284 1225.8048  CHARGING
+2026-09-23 09:55:35.458287-07:00              3  13.428516      89.300 1199.4496  CHARGING
+2026-09-23 09:55:36.458690-07:00              3  13.428516      89.316 1199.6672  CHARGING
+
+SEGMENT 5: CAPTURE GAP; experiment 3
+  Capture: 2026-09-23 12:21:10.479214-07:00 .. 2026-09-23 13:30:46.585426-07:00 (4176 samples)
+  Boundary: 2026-09-23 09:56:44.500348-07:00 (exp 3) -> 2026-09-23 12:21:10.479214-07:00 (exp 3); separation 8665.978866 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-23 12:21:10.479214-07:00
+  Confirmed at: 2026-09-23 12:21:14.479063-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.173633 V  I=-0.608 mA  P=8.013 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-23 12:21:10.479214-07:00              3  13.173633      -0.608    8.0128 NOT_CHARGING
+2026-09-23 12:21:11.481841-07:00              3  13.173828      -0.592    7.7696 NOT_CHARGING
+2026-09-23 12:21:12.479091-07:00              3  13.173633      -0.628    8.2944 NOT_CHARGING
+2026-09-23 12:21:13.479094-07:00              3  13.173828      -0.632    8.3328 NOT_CHARGING
+2026-09-23 12:21:14.479063-07:00              3  13.173633      -0.608    8.0000 NOT_CHARGING
+2026-09-23 12:21:15.479143-07:00              3  13.173438      -0.624    8.2048 NOT_CHARGING
+2026-09-23 12:21:16.481090-07:00              3  13.173633      -0.616    8.1024 NOT_CHARGING
+2026-09-23 12:21:17.479027-07:00              3  13.173633      -0.624    8.2304 NOT_CHARGING
+
+SEGMENT 6: CAPTURE GAP; experiment 3
+  Capture: 2026-09-23 13:30:49.879399-07:00 .. 2026-09-23 15:48:09.883099-07:00 (8238 samples)
+  Boundary: 2026-09-23 13:30:46.585426-07:00 (exp 3) -> 2026-09-23 13:30:49.879399-07:00 (exp 3); separation 3.293973 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-23 13:30:49.879399-07:00
+  Confirmed at: 2026-09-23 13:30:53.745509-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.141602 V  I=-0.624 mA  P=8.205 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-23 13:30:49.879399-07:00              3  13.141602      -0.624    8.2048 NOT_CHARGING
+2026-09-23 13:30:50.745491-07:00              3  13.141992      -0.632    8.3200 NOT_CHARGING
+2026-09-23 13:30:51.745504-07:00              3  13.141797      -0.608    7.9872 NOT_CHARGING
+2026-09-23 13:30:52.745481-07:00              3  13.141602      -0.612    8.0384 NOT_CHARGING
+2026-09-23 13:30:53.745509-07:00              3  13.141602      -0.612    8.0128 NOT_CHARGING
+2026-09-23 13:30:54.745493-07:00              3  13.141797      -0.616    8.0640 NOT_CHARGING
+2026-09-23 13:30:55.746118-07:00              3  13.141406      -0.632    8.3200 NOT_CHARGING
+2026-09-23 13:30:56.745577-07:00              3  13.141992      -0.616    8.1152 NOT_CHARGING
+
+SEGMENT 7: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 14:07:15.467078-07:00 .. 2026-09-24 17:01:35.132076-07:00 (10455 samples)
+  Boundary: 2026-09-23 15:48:09.883099-07:00 (exp 3) -> 2026-09-24 14:07:15.467078-07:00 (exp 3); separation 80345.583979 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 14:07:15.467078-07:00
+  Confirmed at: 2026-09-24 14:07:19.467393-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.189844 V  I=-0.624 mA  P=8.243 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 14:07:15.467078-07:00              3  13.189844      -0.624    8.2432 NOT_CHARGING
+2026-09-24 14:07:16.466972-07:00              3  13.189844      -0.596    7.8336 NOT_CHARGING
+2026-09-24 14:07:17.467573-07:00              3  13.190039      -0.620    8.1920 NOT_CHARGING
+2026-09-24 14:07:18.468464-07:00              3  13.190039      -0.596    7.8720 NOT_CHARGING
+2026-09-24 14:07:19.467393-07:00              3  13.190234      -0.628    8.2944 NOT_CHARGING
+2026-09-24 14:07:20.467522-07:00              3  13.190039      -0.660    8.6912 NOT_CHARGING
+2026-09-24 14:07:21.467457-07:00              3  13.190039      -0.636    8.3712 NOT_CHARGING
+2026-09-24 14:07:22.467073-07:00              3  13.189844      -0.632    8.3200 NOT_CHARGING
+
+  OBSERVED CONTIGUOUS TRANSITION: CHARGING
+  First supporting sample: 2026-09-24 14:09:50.468071-07:00
+  Confirmed at: 2026-09-24 14:09:54.468872-07:00
+  Sample bracket: 2026-09-24 14:09:49.468777-07:00 -> 2026-09-24 14:09:50.468071-07:00 (NOT_CHARGING -> CHARGING)
+  Exact physical switching instant UNKNOWN.
+  V=12.994336 V  I=178.692 mA  P=2322.803 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 14:09:47.468141-07:00              3  12.998438      -0.608    7.9104 NOT_CHARGING
+2026-09-24 14:09:48.467816-07:00              3  12.994141      -0.624    8.1024 NOT_CHARGING
+2026-09-24 14:09:49.468777-07:00              3  12.989648      -0.628    8.1792 NOT_CHARGING
+2026-09-24 14:09:50.468071-07:00              3  12.994336     178.692 2322.8032     CHARGING
+2026-09-24 14:09:51.469187-07:00              3  12.998047     262.236 3408.5504     CHARGING
+2026-09-24 14:09:52.467177-07:00              3  12.996289     261.340 3396.4544     CHARGING
+2026-09-24 14:09:53.468700-07:00              3  12.994531     260.112 3380.0320     CHARGING
+2026-09-24 14:09:54.468872-07:00              3  12.992383     258.564 3359.3728     CHARGING
+2026-09-24 14:09:55.468368-07:00              3  12.990039     258.324 3355.6480     CHARGING
+2026-09-24 14:09:56.467270-07:00              3  12.988672     254.384 3304.0896     CHARGING
+2026-09-24 14:09:57.471099-07:00              3  12.986719     253.464 3291.8912     CHARGING
+
+  OBSERVED CONTIGUOUS TRANSITION: NOT_CHARGING
+  First supporting sample: 2026-09-24 14:48:17.099301-07:00
+  Confirmed at: 2026-09-24 14:48:21.103139-07:00
+  Sample bracket: 2026-09-24 14:48:16.097899-07:00 -> 2026-09-24 14:48:17.099301-07:00 (CHARGING -> NOT_CHARGING)
+  Exact physical switching instant UNKNOWN.
+  V=13.312891 V  I=-0.624 mA  P=8.307 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 14:48:14.097499-07:00              3  13.318750      69.924  931.3024     CHARGING
+2026-09-24 14:48:15.098515-07:00              3  13.318555      68.748  915.6096     CHARGING
+2026-09-24 14:48:16.097899-07:00              3  13.318555      62.708  836.9408     CHARGING
+2026-09-24 14:48:17.099301-07:00              3  13.312891      -0.624    8.3072 NOT_CHARGING
+2026-09-24 14:48:18.099522-07:00              3  13.311719      -0.644    8.5760 NOT_CHARGING
+2026-09-24 14:48:19.103015-07:00              3  13.310547      -0.636    8.4480 NOT_CHARGING
+2026-09-24 14:48:20.099995-07:00              3  13.309766      -0.612    8.1280 NOT_CHARGING
+2026-09-24 14:48:21.103139-07:00              3  13.308594      -0.604    8.0512 NOT_CHARGING
+2026-09-24 14:48:22.101282-07:00              3  13.308203      -0.636    8.4480 NOT_CHARGING
+2026-09-24 14:48:23.103152-07:00              3  13.307422      -0.624    8.2816 NOT_CHARGING
+2026-09-24 14:48:24.101938-07:00              3  13.306445      -0.596    7.9488 NOT_CHARGING
+
+SEGMENT 8: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:01:37.453857-07:00 .. 2026-09-24 17:01:54.141141-07:00 (19 samples)
+  Boundary: 2026-09-24 17:01:35.132076-07:00 (exp 3) -> 2026-09-24 17:01:37.453857-07:00 (exp 3); separation 2.321781 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:01:37.453857-07:00
+  Confirmed at: 2026-09-24 17:01:40.134162-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.123438 V  I=-0.628 mA  P=8.230 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:01:37.453857-07:00              3  13.123438      -0.628    8.2304 NOT_CHARGING
+2026-09-24 17:01:37.521339-07:00              3  13.123828      -0.620    8.1536 NOT_CHARGING
+2026-09-24 17:01:38.132098-07:00              3  13.123828      -0.612    8.0128 NOT_CHARGING
+2026-09-24 17:01:39.133694-07:00              3  13.123828      -0.604    7.9488 NOT_CHARGING
+2026-09-24 17:01:40.134162-07:00              3  13.123828      -0.620    8.1536 NOT_CHARGING
+2026-09-24 17:01:41.135387-07:00              3  13.123633      -0.628    8.2304 NOT_CHARGING
+2026-09-24 17:01:42.135547-07:00              3  13.123633      -0.624    8.2048 NOT_CHARGING
+2026-09-24 17:01:43.135495-07:00              3  13.123633      -0.608    7.9744 NOT_CHARGING
+
+SEGMENT 9: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:11:08.369350-07:00 .. 2026-09-24 17:11:13.368141-07:00 (6 samples)
+  Boundary: 2026-09-24 17:01:54.141141-07:00 (exp 3) -> 2026-09-24 17:11:08.369350-07:00 (exp 3); separation 554.228209 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:11:08.369350-07:00
+  Confirmed at: 2026-09-24 17:11:12.461331-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.121875 V  I=-0.620 mA  P=8.154 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:11:08.369350-07:00              3  13.121875      -0.620    8.1536 NOT_CHARGING
+2026-09-24 17:11:09.368425-07:00              3  13.121875      -0.616    8.0768 NOT_CHARGING
+2026-09-24 17:11:10.368161-07:00              3  13.121875      -0.624    8.1664 NOT_CHARGING
+2026-09-24 17:11:11.368115-07:00              3  13.122070      -0.616    8.0640 NOT_CHARGING
+2026-09-24 17:11:12.461331-07:00              3  13.121875      -0.612    8.0384 NOT_CHARGING
+2026-09-24 17:11:13.368141-07:00              3  13.122070      -0.604    7.9360 NOT_CHARGING
+
+SEGMENT 10: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:13:29.246466-07:00 .. 2026-09-24 17:13:31.245489-07:00 (3 samples)
+  Boundary: 2026-09-24 17:11:13.368141-07:00 (exp 3) -> 2026-09-24 17:13:29.246466-07:00 (exp 3); separation 135.878325 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 11: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:14:48.294432-07:00 .. 2026-09-24 17:14:57.303173-07:00 (10 samples)
+  Boundary: 2026-09-24 17:13:31.245489-07:00 (exp 3) -> 2026-09-24 17:14:48.294432-07:00 (exp 3); separation 77.048943 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:14:48.294432-07:00
+  Confirmed at: 2026-09-24 17:14:52.316432-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.121289 V  I=-0.588 mA  P=7.718 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:14:48.294432-07:00              3  13.121289      -0.588    7.7184 NOT_CHARGING
+2026-09-24 17:14:49.309041-07:00              3  13.121289      -0.620    8.1408 NOT_CHARGING
+2026-09-24 17:14:50.296591-07:00              3  13.121289      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:14:51.316734-07:00              3  13.121289      -0.592    7.7824 NOT_CHARGING
+2026-09-24 17:14:52.316432-07:00              3  13.121484      -0.632    8.2944 NOT_CHARGING
+2026-09-24 17:14:53.295392-07:00              3  13.121289      -0.628    8.2560 NOT_CHARGING
+2026-09-24 17:14:54.296722-07:00              3  13.121289      -0.624    8.1792 NOT_CHARGING
+2026-09-24 17:14:55.296014-07:00              3  13.121289      -0.600    7.8592 NOT_CHARGING
+
+SEGMENT 12: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:21:19.904597-07:00 .. 2026-09-24 17:21:19.904597-07:00 (1 samples)
+  Boundary: 2026-09-24 17:14:57.303173-07:00 (exp 3) -> 2026-09-24 17:21:19.904597-07:00 (exp 3); separation 382.601424 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 13: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:21:25.240634-07:00 .. 2026-09-24 17:22:17.975406-07:00 (58 samples)
+  Boundary: 2026-09-24 17:21:19.904597-07:00 (exp 3) -> 2026-09-24 17:21:25.240634-07:00 (exp 3); separation 5.336037 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:21:25.240634-07:00
+  Confirmed at: 2026-09-24 17:21:27.790256-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.120117 V  I=-0.588 mA  P=7.693 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:21:25.240634-07:00              3  13.120117      -0.588    7.6928 NOT_CHARGING
+2026-09-24 17:21:26.859061-07:00              3  13.120117      -0.616    8.0896 NOT_CHARGING
+2026-09-24 17:21:26.890250-07:00              3  13.120117      -0.580    7.5776 NOT_CHARGING
+2026-09-24 17:21:27.770756-07:00              3  13.120313      -0.612    8.0128 NOT_CHARGING
+2026-09-24 17:21:27.790256-07:00              3  13.120313      -0.600    7.8464 NOT_CHARGING
+2026-09-24 17:21:27.799865-07:00              3  13.120313      -0.612    8.0128 NOT_CHARGING
+2026-09-24 17:21:27.813758-07:00              3  13.120508      -0.600    7.8464 NOT_CHARGING
+2026-09-24 17:21:28.281060-07:00              3  13.120117      -0.612    8.0000 NOT_CHARGING
+
+SEGMENT 14: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:22:20.378352-07:00 .. 2026-09-24 17:24:08.903673-07:00 (111 samples)
+  Boundary: 2026-09-24 17:22:17.975406-07:00 (exp 3) -> 2026-09-24 17:22:20.378352-07:00 (exp 3); separation 2.402946 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:22:20.378352-07:00
+  Confirmed at: 2026-09-24 17:22:22.913177-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.119922 V  I=-0.600 mA  P=7.846 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:22:20.378352-07:00              3  13.119922      -0.600    7.8464 NOT_CHARGING
+2026-09-24 17:22:20.513419-07:00              3  13.119922      -0.668    8.7808 NOT_CHARGING
+2026-09-24 17:22:21.426835-07:00              3  13.119922      -0.624    8.1792 NOT_CHARGING
+2026-09-24 17:22:21.930888-07:00              3  13.120117      -0.604    7.8976 NOT_CHARGING
+2026-09-24 17:22:22.913177-07:00              3  13.119922      -0.628    8.2304 NOT_CHARGING
+2026-09-24 17:22:23.903641-07:00              3  13.119922      -0.612    8.0000 NOT_CHARGING
+2026-09-24 17:22:24.907185-07:00              3  13.120117      -0.612    8.0384 NOT_CHARGING
+2026-09-24 17:22:25.902776-07:00              3  13.120313      -0.620    8.1408 NOT_CHARGING
+
+SEGMENT 15: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:24:19.597294-07:00 .. 2026-09-24 17:24:20.026860-07:00 (8 samples)
+  Boundary: 2026-09-24 17:24:08.903673-07:00 (exp 3) -> 2026-09-24 17:24:19.597294-07:00 (exp 3); separation 10.693621 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:24:19.597294-07:00
+  Confirmed at: 2026-09-24 17:24:19.812907-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.119922 V  I=-0.592 mA  P=7.782 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:24:19.597294-07:00              3  13.119922      -0.592    7.7824 NOT_CHARGING
+2026-09-24 17:24:19.648674-07:00              3  13.119727      -0.616    8.0896 NOT_CHARGING
+2026-09-24 17:24:19.707856-07:00              3  13.119922      -0.624    8.1664 NOT_CHARGING
+2026-09-24 17:24:19.754810-07:00              3  13.119727      -0.584    7.6544 NOT_CHARGING
+2026-09-24 17:24:19.812907-07:00              3  13.119727      -0.608    7.9616 NOT_CHARGING
+2026-09-24 17:24:19.856546-07:00              3  13.119727      -0.636    8.3200 NOT_CHARGING
+2026-09-24 17:24:19.923580-07:00              3  13.119531      -0.624    8.1536 NOT_CHARGING
+2026-09-24 17:24:20.026860-07:00              3  13.119727      -0.620    8.1152 NOT_CHARGING
+
+SEGMENT 16: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:25:21.637790-07:00 .. 2026-09-24 17:27:18.638449-07:00 (118 samples)
+  Boundary: 2026-09-24 17:24:20.026860-07:00 (exp 3) -> 2026-09-24 17:25:21.637790-07:00 (exp 3); separation 61.610930 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:25:21.637790-07:00
+  Confirmed at: 2026-09-24 17:25:25.638061-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.119727 V  I=-0.620 mA  P=8.154 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:25:21.637790-07:00              3  13.119727      -0.620    8.1536 NOT_CHARGING
+2026-09-24 17:25:22.638690-07:00              3  13.119531      -0.596    7.8336 NOT_CHARGING
+2026-09-24 17:25:23.638195-07:00              3  13.119531      -0.620    8.1152 NOT_CHARGING
+2026-09-24 17:25:24.638558-07:00              3  13.119531      -0.616    8.0640 NOT_CHARGING
+2026-09-24 17:25:25.638061-07:00              3  13.119727      -0.620    8.1152 NOT_CHARGING
+2026-09-24 17:25:26.638097-07:00              3  13.119727      -0.616    8.0640 NOT_CHARGING
+2026-09-24 17:25:27.642091-07:00              3  13.119727      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:25:28.638275-07:00              3  13.119531      -0.628    8.2048 NOT_CHARGING
+
+SEGMENT 17: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:27:21.435711-07:00 .. 2026-09-24 17:28:54.754674-07:00 (96 samples)
+  Boundary: 2026-09-24 17:27:18.638449-07:00 (exp 3) -> 2026-09-24 17:27:21.435711-07:00 (exp 3); separation 2.797262 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:27:21.435711-07:00
+  Confirmed at: 2026-09-24 17:27:23.640122-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.119141 V  I=-0.620 mA  P=8.141 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:27:21.435711-07:00              3  13.119141      -0.620    8.1408 NOT_CHARGING
+2026-09-24 17:27:21.530089-07:00              3  13.119531      -0.624    8.1792 NOT_CHARGING
+2026-09-24 17:27:21.845098-07:00              3  13.119336      -0.596    7.7952 NOT_CHARGING
+2026-09-24 17:27:22.638605-07:00              3  13.119336      -0.640    8.4096 NOT_CHARGING
+2026-09-24 17:27:23.640122-07:00              3  13.119141      -0.604    7.9360 NOT_CHARGING
+2026-09-24 17:27:24.638392-07:00              3  13.119141      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:27:25.638139-07:00              3  13.119531      -0.624    8.1920 NOT_CHARGING
+2026-09-24 17:27:26.638244-07:00              3  13.119141      -0.620    8.1280 NOT_CHARGING
+
+SEGMENT 18: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:28:57.249071-07:00 .. 2026-09-24 17:28:58.093831-07:00 (3 samples)
+  Boundary: 2026-09-24 17:28:54.754674-07:00 (exp 3) -> 2026-09-24 17:28:57.249071-07:00 (exp 3); separation 2.494397 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 19: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:29:03.240888-07:00 .. 2026-09-24 17:29:05.428417-07:00 (6 samples)
+  Boundary: 2026-09-24 17:28:58.093831-07:00 (exp 3) -> 2026-09-24 17:29:03.240888-07:00 (exp 3); separation 5.147057 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:29:03.240888-07:00
+  Confirmed at: 2026-09-24 17:29:05.387113-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.118945 V  I=-0.608 mA  P=7.974 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:29:03.240888-07:00              3  13.118945      -0.608    7.9744 NOT_CHARGING
+2026-09-24 17:29:03.340571-07:00              3  13.118945      -0.600    7.8336 NOT_CHARGING
+2026-09-24 17:29:04.240719-07:00              3  13.118945      -0.604    7.9360 NOT_CHARGING
+2026-09-24 17:29:04.282564-07:00              3  13.119141      -0.624    8.1792 NOT_CHARGING
+2026-09-24 17:29:05.387113-07:00              3  13.119141      -0.608    7.9488 NOT_CHARGING
+2026-09-24 17:29:05.428417-07:00              3  13.119141      -0.624    8.1536 NOT_CHARGING
+
+SEGMENT 20: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:29:08.232667-07:00 .. 2026-09-24 17:29:11.463186-07:00 (7 samples)
+  Boundary: 2026-09-24 17:29:05.428417-07:00 (exp 3) -> 2026-09-24 17:29:08.232667-07:00 (exp 3); separation 2.804250 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:29:08.232667-07:00
+  Confirmed at: 2026-09-24 17:29:10.171783-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.119141 V  I=-0.624 mA  P=8.192 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:29:08.232667-07:00              3  13.119141      -0.624    8.1920 NOT_CHARGING
+2026-09-24 17:29:08.324720-07:00              3  13.119141      -0.628    8.2304 NOT_CHARGING
+2026-09-24 17:29:09.206114-07:00              3  13.118945      -0.620    8.1280 NOT_CHARGING
+2026-09-24 17:29:09.240741-07:00              3  13.119141      -0.624    8.1920 NOT_CHARGING
+2026-09-24 17:29:10.171783-07:00              3  13.118945      -0.640    8.3840 NOT_CHARGING
+2026-09-24 17:29:10.213105-07:00              3  13.119141      -0.600    7.8464 NOT_CHARGING
+2026-09-24 17:29:11.463186-07:00              3  13.119141      -0.644    8.4224 NOT_CHARGING
+
+SEGMENT 21: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:29:18.426483-07:00 .. 2026-09-24 17:29:18.426483-07:00 (1 samples)
+  Boundary: 2026-09-24 17:29:11.463186-07:00 (exp 3) -> 2026-09-24 17:29:18.426483-07:00 (exp 3); separation 6.963297 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 22: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:44:20.080244-07:00 .. 2026-09-24 17:44:30.407894-07:00 (11 samples)
+  Boundary: 2026-09-24 17:29:18.426483-07:00 (exp 3) -> 2026-09-24 17:44:20.080244-07:00 (exp 3); separation 901.653761 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:44:20.080244-07:00
+  Confirmed at: 2026-09-24 17:44:24.091068-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.116797 V  I=-0.592 mA  P=7.770 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:44:20.080244-07:00              3  13.116797      -0.592    7.7696 NOT_CHARGING
+2026-09-24 17:44:21.080288-07:00              3  13.116992      -0.628    8.2176 NOT_CHARGING
+2026-09-24 17:44:22.080308-07:00              3  13.116797      -0.596    7.8208 NOT_CHARGING
+2026-09-24 17:44:23.080194-07:00              3  13.116797      -0.612    8.0128 NOT_CHARGING
+2026-09-24 17:44:24.091068-07:00              3  13.116992      -0.616    8.0768 NOT_CHARGING
+2026-09-24 17:44:25.080641-07:00              3  13.116602      -0.600    7.8720 NOT_CHARGING
+2026-09-24 17:44:26.081139-07:00              3  13.116992      -0.620    8.1280 NOT_CHARGING
+2026-09-24 17:44:27.080310-07:00              3  13.116602      -0.604    7.8976 NOT_CHARGING
+
+SEGMENT 23: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:45:47.141985-07:00 .. 2026-09-24 17:51:05.370079-07:00 (319 samples)
+  Boundary: 2026-09-24 17:44:30.407894-07:00 (exp 3) -> 2026-09-24 17:45:47.141985-07:00 (exp 3); separation 76.734091 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:45:47.141985-07:00
+  Confirmed at: 2026-09-24 17:45:51.142946-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.116797 V  I=-0.592 mA  P=7.757 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:45:47.141985-07:00              3  13.116797      -0.592    7.7568 NOT_CHARGING
+2026-09-24 17:45:48.141805-07:00              3  13.116602      -0.628    8.2560 NOT_CHARGING
+2026-09-24 17:45:49.141685-07:00              3  13.116797      -0.600    7.8720 NOT_CHARGING
+2026-09-24 17:45:50.141634-07:00              3  13.116797      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:45:51.142946-07:00              3  13.116602      -0.600    7.8592 NOT_CHARGING
+2026-09-24 17:45:52.142248-07:00              3  13.116797      -0.608    7.9872 NOT_CHARGING
+2026-09-24 17:45:53.142162-07:00              3  13.116602      -0.616    8.0640 NOT_CHARGING
+2026-09-24 17:45:54.141719-07:00              3  13.116602      -0.612    8.0128 NOT_CHARGING
+
+SEGMENT 24: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:51:16.248418-07:00 .. 2026-09-24 17:51:18.870492-07:00 (4 samples)
+  Boundary: 2026-09-24 17:51:05.370079-07:00 (exp 3) -> 2026-09-24 17:51:16.248418-07:00 (exp 3); separation 10.878339 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 25: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:51:20.893457-07:00 .. 2026-09-24 17:51:20.974332-07:00 (2 samples)
+  Boundary: 2026-09-24 17:51:18.870492-07:00 (exp 3) -> 2026-09-24 17:51:20.893457-07:00 (exp 3); separation 2.022965 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 26: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:52:44.558070-07:00 .. 2026-09-24 17:54:00.881363-07:00 (85 samples)
+  Boundary: 2026-09-24 17:51:20.974332-07:00 (exp 3) -> 2026-09-24 17:52:44.558070-07:00 (exp 3); separation 83.583738 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:52:44.558070-07:00
+  Confirmed at: 2026-09-24 17:52:45.529101-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.115820 V  I=-0.600 mA  P=7.872 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:52:44.558070-07:00              3  13.115820      -0.600    7.8720 NOT_CHARGING
+2026-09-24 17:52:44.633927-07:00              3  13.115625      -0.580    7.6032 NOT_CHARGING
+2026-09-24 17:52:44.660260-07:00              3  13.116016      -0.596    7.8208 NOT_CHARGING
+2026-09-24 17:52:45.485165-07:00              3  13.115820      -0.600    7.8592 NOT_CHARGING
+2026-09-24 17:52:45.529101-07:00              3  13.115820      -0.620    8.1024 NOT_CHARGING
+2026-09-24 17:52:46.321263-07:00              3  13.115625      -0.600    7.8848 NOT_CHARGING
+2026-09-24 17:52:46.373956-07:00              3  13.115820      -0.620    8.1152 NOT_CHARGING
+2026-09-24 17:52:46.413229-07:00              3  13.116016      -0.620    8.1152 NOT_CHARGING
+
+SEGMENT 27: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:54:03.735059-07:00 .. 2026-09-24 17:54:03.786273-07:00 (2 samples)
+  Boundary: 2026-09-24 17:54:00.881363-07:00 (exp 3) -> 2026-09-24 17:54:03.735059-07:00 (exp 3); separation 2.853696 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 28: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:54:06.888430-07:00 .. 2026-09-24 17:54:08.932306-07:00 (4 samples)
+  Boundary: 2026-09-24 17:54:03.786273-07:00 (exp 3) -> 2026-09-24 17:54:06.888430-07:00 (exp 3); separation 3.102157 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 29: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:54:12.827919-07:00 .. 2026-09-24 17:54:12.910461-07:00 (2 samples)
+  Boundary: 2026-09-24 17:54:08.932306-07:00 (exp 3) -> 2026-09-24 17:54:12.827919-07:00 (exp 3); separation 3.895613 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 30: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:54:27.971430-07:00 .. 2026-09-24 17:54:28.126051-07:00 (2 samples)
+  Boundary: 2026-09-24 17:54:12.910461-07:00 (exp 3) -> 2026-09-24 17:54:27.971430-07:00 (exp 3); separation 15.060969 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 31: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:58:29.299303-07:00 .. 2026-09-24 17:58:37.300425-07:00 (9 samples)
+  Boundary: 2026-09-24 17:54:28.126051-07:00 (exp 3) -> 2026-09-24 17:58:29.299303-07:00 (exp 3); separation 241.173252 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:58:29.299303-07:00
+  Confirmed at: 2026-09-24 17:58:33.300129-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.115039 V  I=-0.596 mA  P=7.821 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:58:29.299303-07:00              3  13.115039      -0.596    7.8208 NOT_CHARGING
+2026-09-24 17:58:30.300479-07:00              3  13.114844      -0.624    8.1664 NOT_CHARGING
+2026-09-24 17:58:31.299393-07:00              3  13.115039      -0.600    7.8720 NOT_CHARGING
+2026-09-24 17:58:32.299585-07:00              3  13.115039      -0.608    7.9744 NOT_CHARGING
+2026-09-24 17:58:33.300129-07:00              3  13.115039      -0.580    7.5776 NOT_CHARGING
+2026-09-24 17:58:34.300225-07:00              3  13.115234      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:58:35.306622-07:00              3  13.114844      -0.612    8.0000 NOT_CHARGING
+2026-09-24 17:58:36.300591-07:00              3  13.115039      -0.600    7.8336 NOT_CHARGING
+
+SEGMENT 32: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 17:58:40.947170-07:00 .. 2026-09-24 17:58:52.447852-07:00 (15 samples)
+  Boundary: 2026-09-24 17:58:37.300425-07:00 (exp 3) -> 2026-09-24 17:58:40.947170-07:00 (exp 3); separation 3.646745 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 17:58:40.947170-07:00
+  Confirmed at: 2026-09-24 17:58:42.417440-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114844 V  I=-0.604 mA  P=7.923 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 17:58:40.947170-07:00              3  13.114844      -0.604    7.9232 NOT_CHARGING
+2026-09-24 17:58:41.001564-07:00              3  13.114844      -0.604    7.9360 NOT_CHARGING
+2026-09-24 17:58:41.058285-07:00              3  13.114844      -0.612    8.0128 NOT_CHARGING
+2026-09-24 17:58:41.299528-07:00              3  13.115039      -0.620    8.1024 NOT_CHARGING
+2026-09-24 17:58:42.417440-07:00              3  13.115039      -0.612    8.0000 NOT_CHARGING
+2026-09-24 17:58:43.411724-07:00              3  13.114844      -0.612    8.0256 NOT_CHARGING
+2026-09-24 17:58:44.331035-07:00              3  13.115039      -0.596    7.8080 NOT_CHARGING
+2026-09-24 17:58:45.413138-07:00              3  13.114844      -0.588    7.6928 NOT_CHARGING
+
+SEGMENT 33: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:08.981314-07:00 .. 2026-09-24 18:00:10.982946-07:00 (3 samples)
+  Boundary: 2026-09-24 17:58:52.447852-07:00 (exp 3) -> 2026-09-24 18:00:08.981314-07:00 (exp 3); separation 76.533462 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 34: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:13.596189-07:00 .. 2026-09-24 18:00:13.596189-07:00 (1 samples)
+  Boundary: 2026-09-24 18:00:10.982946-07:00 (exp 3) -> 2026-09-24 18:00:13.596189-07:00 (exp 3); separation 2.613243 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 35: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:16.250595-07:00 .. 2026-09-24 18:00:16.250595-07:00 (1 samples)
+  Boundary: 2026-09-24 18:00:13.596189-07:00 (exp 3) -> 2026-09-24 18:00:16.250595-07:00 (exp 3); separation 2.654406 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 36: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:18.974081-07:00 .. 2026-09-24 18:00:21.526966-07:00 (7 samples)
+  Boundary: 2026-09-24 18:00:16.250595-07:00 (exp 3) -> 2026-09-24 18:00:18.974081-07:00 (exp 3); separation 2.723486 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:00:18.974081-07:00
+  Confirmed at: 2026-09-24 18:00:20.929405-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114648 V  I=-0.608 mA  P=7.962 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:00:18.974081-07:00              3  13.114648      -0.608    7.9616 NOT_CHARGING
+2026-09-24 18:00:19.041729-07:00              3  13.114844      -0.604    7.8976 NOT_CHARGING
+2026-09-24 18:00:20.043691-07:00              3  13.114648      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:00:20.080724-07:00              3  13.114453      -0.616    8.0640 NOT_CHARGING
+2026-09-24 18:00:20.929405-07:00              3  13.114844      -0.608    7.9616 NOT_CHARGING
+2026-09-24 18:00:20.973195-07:00              3  13.114648      -0.616    8.0896 NOT_CHARGING
+2026-09-24 18:00:21.526966-07:00              3  13.114648      -0.608    7.9872 NOT_CHARGING
+
+SEGMENT 37: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:27.589038-07:00 .. 2026-09-24 18:00:39.029425-07:00 (19 samples)
+  Boundary: 2026-09-24 18:00:21.526966-07:00 (exp 3) -> 2026-09-24 18:00:27.589038-07:00 (exp 3); separation 6.062072 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:00:27.589038-07:00
+  Confirmed at: 2026-09-24 18:00:27.864108-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114648 V  I=-0.604 mA  P=7.910 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:00:27.589038-07:00              3  13.114648      -0.604    7.9104 NOT_CHARGING
+2026-09-24 18:00:27.663210-07:00              3  13.114648      -0.644    8.4224 NOT_CHARGING
+2026-09-24 18:00:27.704931-07:00              3  13.114453      -0.588    7.7056 NOT_CHARGING
+2026-09-24 18:00:27.801084-07:00              3  13.114844      -0.640    8.4096 NOT_CHARGING
+2026-09-24 18:00:27.864108-07:00              3  13.114648      -0.608    7.9872 NOT_CHARGING
+2026-09-24 18:00:27.926314-07:00              3  13.114453      -0.608    7.9616 NOT_CHARGING
+2026-09-24 18:00:27.982956-07:00              3  13.114648      -0.616    8.0640 NOT_CHARGING
+2026-09-24 18:00:28.039106-07:00              3  13.114844      -0.608    7.9872 NOT_CHARGING
+
+SEGMENT 38: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:00:42.912310-07:00 .. 2026-09-24 18:00:53.986379-07:00 (15 samples)
+  Boundary: 2026-09-24 18:00:39.029425-07:00 (exp 3) -> 2026-09-24 18:00:42.912310-07:00 (exp 3); separation 3.882885 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:00:42.912310-07:00
+  Confirmed at: 2026-09-24 18:00:43.980859-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114648 V  I=-0.588 mA  P=7.731 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:00:42.912310-07:00              3  13.114648      -0.588    7.7312 NOT_CHARGING
+2026-09-24 18:00:43.179515-07:00              3  13.114648      -0.600    7.8848 NOT_CHARGING
+2026-09-24 18:00:43.234999-07:00              3  13.114648      -0.628    8.2304 NOT_CHARGING
+2026-09-24 18:00:43.296940-07:00              3  13.114648      -0.600    7.8464 NOT_CHARGING
+2026-09-24 18:00:43.980859-07:00              3  13.114648      -0.580    7.5776 NOT_CHARGING
+2026-09-24 18:00:44.981423-07:00              3  13.114648      -0.592    7.7696 NOT_CHARGING
+2026-09-24 18:00:46.140303-07:00              3  13.114844      -0.616    8.0768 NOT_CHARGING
+2026-09-24 18:00:46.992384-07:00              3  13.114648      -0.588    7.7184 NOT_CHARGING
+
+SEGMENT 39: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:04:08.554934-07:00 .. 2026-09-24 18:04:13.553466-07:00 (6 samples)
+  Boundary: 2026-09-24 18:00:53.986379-07:00 (exp 3) -> 2026-09-24 18:04:08.554934-07:00 (exp 3); separation 194.568555 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:04:08.554934-07:00
+  Confirmed at: 2026-09-24 18:04:12.558864-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114258 V  I=-0.628 mA  P=8.230 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:04:08.554934-07:00              3  13.114258      -0.628    8.2304 NOT_CHARGING
+2026-09-24 18:04:09.553793-07:00              3  13.114453      -0.616    8.0512 NOT_CHARGING
+2026-09-24 18:04:10.553656-07:00              3  13.114063      -0.608    7.9872 NOT_CHARGING
+2026-09-24 18:04:11.553310-07:00              3  13.114063      -0.600    7.8848 NOT_CHARGING
+2026-09-24 18:04:12.558864-07:00              3  13.114258      -0.608    7.9744 NOT_CHARGING
+2026-09-24 18:04:13.553466-07:00              3  13.114453      -0.612    8.0256 NOT_CHARGING
+
+SEGMENT 40: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:04:26.773068-07:00 .. 2026-09-24 18:04:27.552946-07:00 (14 samples)
+  Boundary: 2026-09-24 18:04:13.553466-07:00 (exp 3) -> 2026-09-24 18:04:26.773068-07:00 (exp 3); separation 13.219602 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:04:26.773068-07:00
+  Confirmed at: 2026-09-24 18:04:26.900152-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114063 V  I=-0.640 mA  P=8.397 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:04:26.773068-07:00              3  13.114063      -0.640    8.3968 NOT_CHARGING
+2026-09-24 18:04:26.835030-07:00              3  13.114258      -0.592    7.7440 NOT_CHARGING
+2026-09-24 18:04:26.840314-07:00              3  13.114258      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:04:26.894523-07:00              3  13.114258      -0.616    8.0896 NOT_CHARGING
+2026-09-24 18:04:26.900152-07:00              3  13.114453      -0.604    7.9360 NOT_CHARGING
+2026-09-24 18:04:26.952075-07:00              3  13.114258      -0.616    8.0768 NOT_CHARGING
+2026-09-24 18:04:27.004591-07:00              3  13.114258      -0.624    8.1536 NOT_CHARGING
+2026-09-24 18:04:27.057073-07:00              3  13.114258      -0.616    8.1024 NOT_CHARGING
+
+SEGMENT 41: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:05:29.943132-07:00 .. 2026-09-24 18:05:42.943430-07:00 (14 samples)
+  Boundary: 2026-09-24 18:04:27.552946-07:00 (exp 3) -> 2026-09-24 18:05:29.943132-07:00 (exp 3); separation 62.390186 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:05:29.943132-07:00
+  Confirmed at: 2026-09-24 18:05:33.944159-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114258 V  I=-0.612 mA  P=8.013 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:05:29.943132-07:00              3  13.114258      -0.612    8.0128 NOT_CHARGING
+2026-09-24 18:05:30.943867-07:00              3  13.113867      -0.628    8.2304 NOT_CHARGING
+2026-09-24 18:05:31.945843-07:00              3  13.114063      -0.620    8.1152 NOT_CHARGING
+2026-09-24 18:05:32.947810-07:00              3  13.113867      -0.616    8.0768 NOT_CHARGING
+2026-09-24 18:05:33.944159-07:00              3  13.113867      -0.600    7.8592 NOT_CHARGING
+2026-09-24 18:05:34.942580-07:00              3  13.114063      -0.628    8.2176 NOT_CHARGING
+2026-09-24 18:05:35.943517-07:00              3  13.114063      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:05:36.943296-07:00              3  13.114063      -0.620    8.1024 NOT_CHARGING
+
+SEGMENT 42: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:05:50.258067-07:00 .. 2026-09-24 18:06:30.942567-07:00 (48 samples)
+  Boundary: 2026-09-24 18:05:42.943430-07:00 (exp 3) -> 2026-09-24 18:05:50.258067-07:00 (exp 3); separation 7.314637 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:05:50.258067-07:00
+  Confirmed at: 2026-09-24 18:05:50.434485-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.114258 V  I=-0.612 mA  P=8.013 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:05:50.258067-07:00              3  13.114258      -0.612    8.0128 NOT_CHARGING
+2026-09-24 18:05:50.320515-07:00              3  13.114063      -0.612    8.0128 NOT_CHARGING
+2026-09-24 18:05:50.372093-07:00              3  13.113672      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:05:50.429907-07:00              3  13.114063      -0.624    8.1920 NOT_CHARGING
+2026-09-24 18:05:50.434485-07:00              3  13.114258      -0.636    8.3072 NOT_CHARGING
+2026-09-24 18:05:50.484565-07:00              3  13.113867      -0.620    8.1280 NOT_CHARGING
+2026-09-24 18:05:50.536298-07:00              3  13.114258      -0.620    8.1024 NOT_CHARGING
+2026-09-24 18:05:50.942414-07:00              3  13.114063      -0.608    7.9744 NOT_CHARGING
+
+SEGMENT 43: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:06:33.290619-07:00 .. 2026-09-24 18:06:33.529878-07:00 (2 samples)
+  Boundary: 2026-09-24 18:06:30.942567-07:00 (exp 3) -> 2026-09-24 18:06:33.290619-07:00 (exp 3); separation 2.348052 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 44: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:06:35.658608-07:00 .. 2026-09-24 18:07:08.070773-07:00 (35 samples)
+  Boundary: 2026-09-24 18:06:33.529878-07:00 (exp 3) -> 2026-09-24 18:06:35.658608-07:00 (exp 3); separation 2.128730 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:06:35.658608-07:00
+  Confirmed at: 2026-09-24 18:06:38.021378-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113867 V  I=-0.588 mA  P=7.731 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:06:35.658608-07:00              3  13.113867      -0.588    7.7312 NOT_CHARGING
+2026-09-24 18:06:35.703802-07:00              3  13.113867      -0.624    8.1792 NOT_CHARGING
+2026-09-24 18:06:35.989267-07:00              3  13.114063      -0.620    8.1536 NOT_CHARGING
+2026-09-24 18:06:37.001527-07:00              3  13.113867      -0.612    8.0256 NOT_CHARGING
+2026-09-24 18:06:38.021378-07:00              3  13.114063      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:06:38.992861-07:00              3  13.114063      -0.596    7.8336 NOT_CHARGING
+2026-09-24 18:06:39.991968-07:00              3  13.113867      -0.584    7.6672 NOT_CHARGING
+2026-09-24 18:06:40.974947-07:00              3  13.113867      -0.620    8.1408 NOT_CHARGING
+
+SEGMENT 45: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:10:25.359919-07:00 .. 2026-09-24 18:12:18.359847-07:00 (114 samples)
+  Boundary: 2026-09-24 18:07:08.070773-07:00 (exp 3) -> 2026-09-24 18:10:25.359919-07:00 (exp 3); separation 197.289146 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:10:25.359919-07:00
+  Confirmed at: 2026-09-24 18:10:29.359625-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113477 V  I=-0.612 mA  P=8.038 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:10:25.359919-07:00              3  13.113477      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:10:26.360755-07:00              3  13.113477      -0.624    8.2048 NOT_CHARGING
+2026-09-24 18:10:27.393743-07:00              3  13.113477      -0.600    7.8720 NOT_CHARGING
+2026-09-24 18:10:28.360152-07:00              3  13.113672      -0.588    7.6800 NOT_CHARGING
+2026-09-24 18:10:29.359625-07:00              3  13.113477      -0.588    7.7312 NOT_CHARGING
+2026-09-24 18:10:30.359906-07:00              3  13.113281      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:10:31.360873-07:00              3  13.113477      -0.612    8.0256 NOT_CHARGING
+2026-09-24 18:10:32.360473-07:00              3  13.113672      -0.584    7.6800 NOT_CHARGING
+
+SEGMENT 46: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:12:20.790080-07:00 .. 2026-09-24 18:12:20.790080-07:00 (1 samples)
+  Boundary: 2026-09-24 18:12:18.359847-07:00 (exp 3) -> 2026-09-24 18:12:20.790080-07:00 (exp 3); separation 2.430233 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 47: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:12:24.275312-07:00 .. 2026-09-24 18:12:25.603534-07:00 (5 samples)
+  Boundary: 2026-09-24 18:12:20.790080-07:00 (exp 3) -> 2026-09-24 18:12:24.275312-07:00 (exp 3); separation 3.485232 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:12:24.275312-07:00
+  Confirmed at: 2026-09-24 18:12:25.603534-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113086 V  I=-0.608 mA  P=7.974 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:12:24.275312-07:00              3  13.113086      -0.608    7.9744 NOT_CHARGING
+2026-09-24 18:12:24.348864-07:00              3  13.113086      -0.616    8.0640 NOT_CHARGING
+2026-09-24 18:12:25.463612-07:00              3  13.113281      -0.592    7.7696 NOT_CHARGING
+2026-09-24 18:12:25.556052-07:00              3  13.113477      -0.588    7.7184 NOT_CHARGING
+2026-09-24 18:12:25.603534-07:00              3  13.113281      -0.604    7.9360 NOT_CHARGING
+
+SEGMENT 48: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:12:28.628332-07:00 .. 2026-09-24 18:12:37.379359-07:00 (13 samples)
+  Boundary: 2026-09-24 18:12:25.603534-07:00 (exp 3) -> 2026-09-24 18:12:28.628332-07:00 (exp 3); separation 3.024798 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:12:28.628332-07:00
+  Confirmed at: 2026-09-24 18:12:31.453057-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113086 V  I=-0.636 mA  P=8.320 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:12:28.628332-07:00              3  13.113086      -0.636    8.3200 NOT_CHARGING
+2026-09-24 18:12:30.530216-07:00              3  13.113477      -0.628    8.2176 NOT_CHARGING
+2026-09-24 18:12:30.595369-07:00              3  13.113477      -0.600    7.8592 NOT_CHARGING
+2026-09-24 18:12:31.360625-07:00              3  13.113281      -0.612    8.0000 NOT_CHARGING
+2026-09-24 18:12:31.453057-07:00              3  13.113281      -0.616    8.1024 NOT_CHARGING
+2026-09-24 18:12:32.250367-07:00              3  13.113086      -0.616    8.0768 NOT_CHARGING
+2026-09-24 18:12:32.303800-07:00              3  13.113281      -0.620    8.1280 NOT_CHARGING
+2026-09-24 18:12:32.967442-07:00              3  13.113281      -0.592    7.7824 NOT_CHARGING
+
+SEGMENT 49: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:12:40.847774-07:00 .. 2026-09-24 18:12:40.847774-07:00 (1 samples)
+  Boundary: 2026-09-24 18:12:37.379359-07:00 (exp 3) -> 2026-09-24 18:12:40.847774-07:00 (exp 3); separation 3.468415 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 50: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:12:46.305720-07:00 .. 2026-09-24 18:14:59.360926-07:00 (141 samples)
+  Boundary: 2026-09-24 18:12:40.847774-07:00 (exp 3) -> 2026-09-24 18:12:46.305720-07:00 (exp 3); separation 5.457946 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:12:46.305720-07:00
+  Confirmed at: 2026-09-24 18:12:47.901486-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113281 V  I=-0.600 mA  P=7.885 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:12:46.305720-07:00              3  13.113281      -0.600    7.8848 NOT_CHARGING
+2026-09-24 18:12:46.679066-07:00              3  13.113281      -0.632    8.2944 NOT_CHARGING
+2026-09-24 18:12:47.040841-07:00              3  13.113086      -0.584    7.6544 NOT_CHARGING
+2026-09-24 18:12:47.073691-07:00              3  13.113281      -0.636    8.3328 NOT_CHARGING
+2026-09-24 18:12:47.901486-07:00              3  13.113281      -0.596    7.8080 NOT_CHARGING
+2026-09-24 18:12:48.056255-07:00              3  13.113281      -0.604    7.9360 NOT_CHARGING
+2026-09-24 18:12:48.500035-07:00              3  13.113281      -0.600    7.8592 NOT_CHARGING
+2026-09-24 18:12:48.539555-07:00              3  13.113281      -0.632    8.2688 NOT_CHARGING
+
+SEGMENT 51: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:03.173611-07:00 .. 2026-09-24 18:15:03.221780-07:00 (2 samples)
+  Boundary: 2026-09-24 18:14:59.360926-07:00 (exp 3) -> 2026-09-24 18:15:03.173611-07:00 (exp 3); separation 3.812685 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 52: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:08.372668-07:00 .. 2026-09-24 18:15:09.046766-07:00 (2 samples)
+  Boundary: 2026-09-24 18:15:03.221780-07:00 (exp 3) -> 2026-09-24 18:15:08.372668-07:00 (exp 3); separation 5.150888 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 53: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:12.150289-07:00 .. 2026-09-24 18:15:14.215233-07:00 (4 samples)
+  Boundary: 2026-09-24 18:15:09.046766-07:00 (exp 3) -> 2026-09-24 18:15:12.150289-07:00 (exp 3); separation 3.103523 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 54: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:18.031661-07:00 .. 2026-09-24 18:15:18.068403-07:00 (2 samples)
+  Boundary: 2026-09-24 18:15:14.215233-07:00 (exp 3) -> 2026-09-24 18:15:18.031661-07:00 (exp 3); separation 3.816428 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 55: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:23.179857-07:00 .. 2026-09-24 18:15:23.278229-07:00 (3 samples)
+  Boundary: 2026-09-24 18:15:18.068403-07:00 (exp 3) -> 2026-09-24 18:15:23.179857-07:00 (exp 3); separation 5.111454 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 56: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:26.363026-07:00 .. 2026-09-24 18:15:34.356957-07:00 (13 samples)
+  Boundary: 2026-09-24 18:15:23.278229-07:00 (exp 3) -> 2026-09-24 18:15:26.363026-07:00 (exp 3); separation 3.084797 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:15:26.363026-07:00
+  Confirmed at: 2026-09-24 18:15:29.186126-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.113086 V  I=-0.628 mA  P=8.205 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:15:26.363026-07:00              3  13.113086      -0.628    8.2048 NOT_CHARGING
+2026-09-24 18:15:26.429098-07:00              3  13.113281      -0.612    8.0128 NOT_CHARGING
+2026-09-24 18:15:27.290038-07:00              3  13.113086      -0.604    7.9360 NOT_CHARGING
+2026-09-24 18:15:27.385722-07:00              3  13.112891      -0.612    8.0256 NOT_CHARGING
+2026-09-24 18:15:29.186126-07:00              3  13.113086      -0.616    8.0896 NOT_CHARGING
+2026-09-24 18:15:29.248184-07:00              3  13.112891      -0.584    7.6800 NOT_CHARGING
+2026-09-24 18:15:29.296073-07:00              3  13.113086      -0.596    7.8080 NOT_CHARGING
+2026-09-24 18:15:30.177790-07:00              3  13.112891      -0.604    7.9232 NOT_CHARGING
+
+SEGMENT 57: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:37.534494-07:00 .. 2026-09-24 18:15:37.872665-07:00 (2 samples)
+  Boundary: 2026-09-24 18:15:34.356957-07:00 (exp 3) -> 2026-09-24 18:15:37.534494-07:00 (exp 3); separation 3.177537 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 58: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:42.152595-07:00 .. 2026-09-24 18:15:45.000584-07:00 (4 samples)
+  Boundary: 2026-09-24 18:15:37.872665-07:00 (exp 3) -> 2026-09-24 18:15:42.152595-07:00 (exp 3); separation 4.279930 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 59: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:15:47.117904-07:00 .. 2026-09-24 18:15:57.223197-07:00 (21 samples)
+  Boundary: 2026-09-24 18:15:45.000584-07:00 (exp 3) -> 2026-09-24 18:15:47.117904-07:00 (exp 3); separation 2.117320 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:15:47.117904-07:00
+  Confirmed at: 2026-09-24 18:15:48.234331-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.112891 V  I=-0.612 mA  P=8.038 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:15:47.117904-07:00              3  13.112891      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:15:47.182761-07:00              3  13.112891      -0.632    8.2944 NOT_CHARGING
+2026-09-24 18:15:47.230846-07:00              3  13.113086      -0.600    7.8592 NOT_CHARGING
+2026-09-24 18:15:48.191771-07:00              3  13.112891      -0.640    8.3968 NOT_CHARGING
+2026-09-24 18:15:48.234331-07:00              3  13.113086      -0.584    7.6544 NOT_CHARGING
+2026-09-24 18:15:48.285809-07:00              3  13.112891      -0.612    8.0128 NOT_CHARGING
+2026-09-24 18:15:49.117152-07:00              3  13.112891      -0.616    8.0640 NOT_CHARGING
+2026-09-24 18:15:49.160621-07:00              3  13.112891      -0.592    7.7568 NOT_CHARGING
+
+SEGMENT 60: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:17.459786-07:00 .. 2026-09-24 18:43:18.471945-07:00 (2 samples)
+  Boundary: 2026-09-24 18:15:57.223197-07:00 (exp 3) -> 2026-09-24 18:43:17.459786-07:00 (exp 3); separation 1640.236589 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 61: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:23.843235-07:00 .. 2026-09-24 18:43:23.870160-07:00 (2 samples)
+  Boundary: 2026-09-24 18:43:18.471945-07:00 (exp 3) -> 2026-09-24 18:43:23.843235-07:00 (exp 3); separation 5.371290 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 62: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:27.694678-07:00 .. 2026-09-24 18:43:27.790106-07:00 (2 samples)
+  Boundary: 2026-09-24 18:43:23.870160-07:00 (exp 3) -> 2026-09-24 18:43:27.694678-07:00 (exp 3); separation 3.824518 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 63: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:33.657798-07:00 .. 2026-09-24 18:43:33.687875-07:00 (3 samples)
+  Boundary: 2026-09-24 18:43:27.790106-07:00 (exp 3) -> 2026-09-24 18:43:33.657798-07:00 (exp 3); separation 5.867692 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 64: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:36.631648-07:00 .. 2026-09-24 18:43:36.697845-07:00 (2 samples)
+  Boundary: 2026-09-24 18:43:33.687875-07:00 (exp 3) -> 2026-09-24 18:43:36.631648-07:00 (exp 3); separation 2.943773 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 65: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:40.834249-07:00 .. 2026-09-24 18:43:40.878985-07:00 (2 samples)
+  Boundary: 2026-09-24 18:43:36.697845-07:00 (exp 3) -> 2026-09-24 18:43:40.834249-07:00 (exp 3); separation 4.136404 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 66: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:44.737818-07:00 .. 2026-09-24 18:43:44.822878-07:00 (3 samples)
+  Boundary: 2026-09-24 18:43:40.878985-07:00 (exp 3) -> 2026-09-24 18:43:44.737818-07:00 (exp 3); separation 3.858833 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 67: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:46.949694-07:00 .. 2026-09-24 18:43:48.851518-07:00 (6 samples)
+  Boundary: 2026-09-24 18:43:44.822878-07:00 (exp 3) -> 2026-09-24 18:43:46.949694-07:00 (exp 3); separation 2.126816 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:43:46.949694-07:00
+  Confirmed at: 2026-09-24 18:43:48.831611-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.109570 V  I=-0.608 mA  P=7.987 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:43:46.949694-07:00              3  13.109570      -0.608    7.9872 NOT_CHARGING
+2026-09-24 18:43:47.789872-07:00              3  13.109961      -0.604    7.9104 NOT_CHARGING
+2026-09-24 18:43:48.775988-07:00              3  13.109766      -0.624    8.1536 NOT_CHARGING
+2026-09-24 18:43:48.803165-07:00              3  13.109570      -0.640    8.3712 NOT_CHARGING
+2026-09-24 18:43:48.831611-07:00              3  13.109375      -0.640    8.3840 NOT_CHARGING
+2026-09-24 18:43:48.851518-07:00              3  13.109766      -0.600    7.8592 NOT_CHARGING
+
+SEGMENT 68: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:53.871911-07:00 .. 2026-09-24 18:43:54.972332-07:00 (3 samples)
+  Boundary: 2026-09-24 18:43:48.851518-07:00 (exp 3) -> 2026-09-24 18:43:53.871911-07:00 (exp 3); separation 5.020393 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 69: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:43:57.667113-07:00 .. 2026-09-24 18:43:58.541132-07:00 (3 samples)
+  Boundary: 2026-09-24 18:43:54.972332-07:00 (exp 3) -> 2026-09-24 18:43:57.667113-07:00 (exp 3); separation 2.694781 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 70: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:04.648271-07:00 .. 2026-09-24 18:44:06.639343-07:00 (4 samples)
+  Boundary: 2026-09-24 18:43:58.541132-07:00 (exp 3) -> 2026-09-24 18:44:04.648271-07:00 (exp 3); separation 6.107139 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 71: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:10.599406-07:00 .. 2026-09-24 18:44:10.599406-07:00 (1 samples)
+  Boundary: 2026-09-24 18:44:06.639343-07:00 (exp 3) -> 2026-09-24 18:44:10.599406-07:00 (exp 3); separation 3.960063 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 72: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:16.838254-07:00 .. 2026-09-24 18:44:16.906755-07:00 (3 samples)
+  Boundary: 2026-09-24 18:44:10.599406-07:00 (exp 3) -> 2026-09-24 18:44:16.838254-07:00 (exp 3); separation 6.238848 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 73: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:21.812226-07:00 .. 2026-09-24 18:44:21.812226-07:00 (1 samples)
+  Boundary: 2026-09-24 18:44:16.906755-07:00 (exp 3) -> 2026-09-24 18:44:21.812226-07:00 (exp 3); separation 4.905471 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 74: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:27.705718-07:00 .. 2026-09-24 18:44:27.728880-07:00 (2 samples)
+  Boundary: 2026-09-24 18:44:21.812226-07:00 (exp 3) -> 2026-09-24 18:44:27.705718-07:00 (exp 3); separation 5.893492 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 75: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:30.587039-07:00 .. 2026-09-24 18:44:31.090386-07:00 (7 samples)
+  Boundary: 2026-09-24 18:44:27.728880-07:00 (exp 3) -> 2026-09-24 18:44:30.587039-07:00 (exp 3); separation 2.858159 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-24 18:44:30.587039-07:00
+  Confirmed at: 2026-09-24 18:44:31.058000-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.109766 V  I=-0.632 mA  P=8.269 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-24 18:44:30.587039-07:00              3  13.109766      -0.632    8.2688 NOT_CHARGING
+2026-09-24 18:44:30.621374-07:00              3  13.109961      -0.604    7.9360 NOT_CHARGING
+2026-09-24 18:44:30.648183-07:00              3  13.109961      -0.612    8.0384 NOT_CHARGING
+2026-09-24 18:44:31.036739-07:00              3  13.109961      -0.632    8.2688 NOT_CHARGING
+2026-09-24 18:44:31.058000-07:00              3  13.109570      -0.640    8.3584 NOT_CHARGING
+2026-09-24 18:44:31.070026-07:00              3  13.109766      -0.596    7.8080 NOT_CHARGING
+2026-09-24 18:44:31.090386-07:00              3  13.109766      -0.580    7.6032 NOT_CHARGING
+
+SEGMENT 76: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:33.989234-07:00 .. 2026-09-24 18:44:34.047491-07:00 (4 samples)
+  Boundary: 2026-09-24 18:44:31.090386-07:00 (exp 3) -> 2026-09-24 18:44:33.989234-07:00 (exp 3); separation 2.898848 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 77: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:42.617516-07:00 .. 2026-09-24 18:44:42.728113-07:00 (2 samples)
+  Boundary: 2026-09-24 18:44:34.047491-07:00 (exp 3) -> 2026-09-24 18:44:42.617516-07:00 (exp 3); separation 8.570025 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 78: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:51.095161-07:00 .. 2026-09-24 18:44:51.095161-07:00 (1 samples)
+  Boundary: 2026-09-24 18:44:42.728113-07:00 (exp 3) -> 2026-09-24 18:44:51.095161-07:00 (exp 3); separation 8.367048 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 79: CAPTURE GAP; experiment 3
+  Capture: 2026-09-24 18:44:55.014074-07:00 .. 2026-09-24 18:44:55.114836-07:00 (2 samples)
+  Boundary: 2026-09-24 18:44:51.095161-07:00 (exp 3) -> 2026-09-24 18:44:55.014074-07:00 (exp 3); separation 3.918913 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+  No confirmed state: insufficient consecutive classified samples.
+
+SEGMENT 80: CAPTURE GAP; experiment 3
+  Capture: 2026-09-25 08:27:12.636615-07:00 .. 2026-09-25 08:28:28.636627-07:00 (77 samples)
+  Boundary: 2026-09-24 18:44:55.114836-07:00 (exp 3) -> 2026-09-25 08:27:12.636615-07:00 (exp 3); separation 49337.521779 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-25 08:27:12.636615-07:00
+  Confirmed at: 2026-09-25 08:27:16.637359-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.072852 V  I=-0.608 mA  P=7.923 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-25 08:27:12.636615-07:00              3  13.072852      -0.608    7.9232 NOT_CHARGING
+2026-09-25 08:27:13.637098-07:00              3  13.073047      -0.636    8.2944 NOT_CHARGING
+2026-09-25 08:27:14.637098-07:00              3  13.073047      -0.608    7.9488 NOT_CHARGING
+2026-09-25 08:27:15.637043-07:00              3  13.072852      -0.596    7.7568 NOT_CHARGING
+2026-09-25 08:27:16.637359-07:00              3  13.073047      -0.576    7.5520 NOT_CHARGING
+2026-09-25 08:27:17.637123-07:00              3  13.072852      -0.612    7.9872 NOT_CHARGING
+2026-09-25 08:27:18.637017-07:00              3  13.073047      -0.604    7.9104 NOT_CHARGING
+2026-09-25 08:27:19.636953-07:00              3  13.072852      -0.608    7.9232 NOT_CHARGING
+
+SEGMENT 81: CAPTURE GAP; experiment 3
+  Capture: 2026-09-27 22:18:38.306874-07:00 .. 2026-09-27 22:21:22.306909-07:00 (165 samples)
+  Boundary: 2026-09-25 08:28:28.636627-07:00 (exp 3) -> 2026-09-27 22:18:38.306874-07:00 (exp 3); separation 222609.670247 s
+  Persistence restarted; intervening states and transition timing UNKNOWN.
+
+  STATE AFTER CAPTURE GAP: NOT_CHARGING
+  First supporting sample: 2026-09-27 22:18:38.306874-07:00
+  Confirmed at: 2026-09-27 22:18:42.307646-07:00
+  Transition timing UNKNOWN; this is a state observation, not a timed edge.
+  V=13.053320 V  I=-0.592 mA  P=7.706 mW
+  Surrounding samples (clipped to this capture segment):
+                     captured_at  experiment_id  voltage_V  current_mA  power_mW    raw_state
+2026-09-27 22:18:38.306874-07:00              3  13.053320      -0.592    7.7056 NOT_CHARGING
+2026-09-27 22:18:39.307704-07:00              3  13.053320      -0.580    7.5776 NOT_CHARGING
+2026-09-27 22:18:40.308321-07:00              3  13.053320      -0.628    8.2048 NOT_CHARGING
+2026-09-27 22:18:41.307350-07:00              3  13.053125      -0.624    8.1408 NOT_CHARGING
+2026-09-27 22:18:42.307646-07:00              3  13.053125      -0.624    8.1664 NOT_CHARGING
+2026-09-27 22:18:43.306886-07:00              3  13.053125      -0.632    8.2560 NOT_CHARGING
+2026-09-27 22:18:44.308089-07:00              3  13.053125      -0.624    8.1664 NOT_CHARGING
+2026-09-27 22:18:45.308096-07:00              3  13.053320      -0.616    8.0512 NOT_CHARGING
+
+Observed contiguous transitions: 2
+State observations without a timed edge: 39
+Capture gaps: 80
+Same state on both sides of a gap does not prove it persisted inside the gap.

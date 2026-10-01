@@ -1,0 +1,13 @@
+# Healthy-log preflight — 2026-09-29
+
+Fresh canonical command output, captured byte-for-byte from each sender process's combined stdout/stderr. This is decoded text, not raw serial bytes or a binary flash backup. Adjacent JSON records argv, host timestamps, exit status, byte count and SHA-256. The sender itself normalizes serial lines and does not retain pre-ACK chatter; no claim of a complete boot transcript is made.
+
+Read-only commands only: VERSION, STATUS, LOGGER STORAGE INFO, LOGGER AUTONOMOUS STATUS, LOGGER STORAGE DUMP. No HOLD, upload or experiment/storage mutation occurred during startup/preflight. Autonomous measurements continued naturally.
+
+Board: 0.3.0-dev / eba3b5d-dirty / solar-logger-protocol-ack-v3. Autonomous status: armed YES, 60 s, boot 35, experiment id 3 read from NVS. INFO: 10,650 valid 72-byte records, 766,800 log bytes, seq 1412–12061, zero trailing bytes, INTACT, no printed storage errors. Later dump: 10,659 records, all exp=3, sequences 1412–12070 consecutive, invalid 0. BEGIN/END, summary, ACK and matching RESULT OK are present. Capture ended with transport loss AFTER the completed result and normal unclaimed-rendezvous sleep, not the capture cap. The sender's generic text says “expected for RELEASE”; no RELEASE was sent. All 5,756 September 25 decoded record lines match exactly. CRC validity is board-reported, not independently reconstructed from rounded values.
+
+STATUS during early timer-wake rendezvous printed experiment/interval/totals zero. Source printStatus reads globals before the later loadCheckpoint restoration; autonomous status reads NVS directly and the entire dump says exp=3. This is a pre-existing presentation defect; do not treat those zeros as restored experiment state. No firmware fix belongs in this smoke.
+
+Git remains main at 1980d94 (one ahead of existing origin/main; no fetch/push), empty index, clean sketch and hardware tools. Existing host/dependency/docs work remains separate. App inventory found no other active BMW chat, but two Claude Code processes (75004, 83205) had this repo as cwd. User explicitly confirmed CODE sessions idle and this chat's ownership. No host logger process or pending command/upload marker found. Source and initial shared-document hashes rechecked unchanged immediately before the deliberate upload stage.
+
+Hardware acceptance is still pending until upload identity, historical decoding and new autonomous growth are verified. No separate reset, clear, flash erase or corruption injection is authorized. The canonical uploader necessarily enters the bootloader and restarts the board as part of upload.

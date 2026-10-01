@@ -1,0 +1,38 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER STORAGE INFO
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] No board port is currently visible.
+[SERIAL] The board may be in autonomous deep sleep.
+[SERIAL] Waiting for the next USB rendezvous...
+[SERIAL] Press Control-C to cancel.
+[SERIAL] Still waiting (15s elapsed)...
+[SERIAL] Still waiting (30s elapsed)...
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER STORAGE INFO)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER STORAGE INFO,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 10s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER STORAGE INFO
+
+[STORAGE] Filesystem total: 1441792 bytes
+[STORAGE] Filesystem used:  786432 bytes
+[STORAGE] Filesystem free:  655360 bytes
+[STORAGE] Record size:      72 bytes
+[STORAGE] Log bytes:        767736
+[STORAGE] Valid records:    10663
+[STORAGE] Oldest sequence:  1412
+[STORAGE] Newest sequence:  12074
+[STORAGE] Trailing bytes:   0
+[STORAGE] Tail status:      INTACT
+[STORAGE] Room for 9102 more records = 6 days at 60 second cadence
+CMD_RESULT,LOGGER STORAGE INFO,OK
+[AUTO] Rendezvous: 1 / 10 s
+[AUTO] USB plugged: YES
+[AUTO] CDC connected: YES
+[CONNECTION] Active transports: NONE
+[CONNECTION] Host claimed: NO
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 19
+[COMMAND] Capture ended: port quiet for 600ms.

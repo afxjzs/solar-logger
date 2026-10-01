@@ -1,0 +1,37 @@
+2026-09-29T08:58:26.465032-07:00
+$ git rev-parse HEAD
+1980d942a284703bcb22ce3ec95d00fc83028685
+EXIT 0
+$ git status --short
+ M README.md
+ M docs/BACKLOG.md
+ M docs/DECISIONS.md
+ M docs/HARDWARE_WIRING.md
+ M docs/INDEX.md
+ M docs/LAB_NOTES.md
+ M docs/PROJECT.md
+ M docs/STORAGE_SYNC_DESIGN.md
+ M pyproject.toml
+ M uv.lock
+?? AGENTS.md
+?? docs/CURRENT_STATE.md
+?? docs/evidence/2026-09-25/
+?? docs/evidence/2026-09-28/
+?? docs/evidence/2026-09-29/storage-hardware/
+?? tests/test_charger_transitions.py
+?? tools/charger-transitions.py
+EXIT 0
+$ git log -5 --oneline
+1980d94 Extract durable storage mechanics
+43c3baf Fix durable log recovery and reconcile project docs
+eba3b5d Extract record format and document current wiring
+be83906 Update logger architecture and installation roadmap
+4a6309d Fix INA228 accumulator overflow sampling order
+EXIT 0
+$ git rev-list --left-right --count origin/main...HEAD
+0	1
+EXIT 0
+$ git diff --cached --stat
+EXIT 0
+$ git diff HEAD -- Arduino/solar-logger app tools/send.sh tools/upload.sh tests/test_characterization_storage_recovery.py
+EXIT 0

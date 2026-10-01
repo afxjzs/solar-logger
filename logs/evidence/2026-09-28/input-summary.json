@@ -1,0 +1,12 @@
+{
+  "sha256": "af01adf4fb2d6dbd053abc5d3943f890dd0e6eb907dc898053a6c838b98a9714",
+  "bytes": 2057536,
+  "rows": 26674,
+  "first": "2026-09-16T10:07:44.231779-07:00",
+  "last": "2026-09-27T22:21:22.306909-07:00",
+  "experiments": {
+    "3": 26674
+  },
+  "positive_delta_median_s": 1.000138,
+  "gaps_over_2s": 80
+}

@@ -1,0 +1,60 @@
+{
+  "file": "post-dump.txt",
+  "sha256": "64aea1493de06a29afbb8b519c83d818cfaf552c85bd94f5fe595ddb2cd3c276",
+  "records": 13650,
+  "first_seq": 1412,
+  "last_seq": 15061,
+  "experiment_ids": [
+    "3"
+  ],
+  "sequence_gaps": [],
+  "board_invalid": 0,
+  "complete": true,
+  "capture_stop": "transport disappeared after the successful result (expected for RELEASE).",
+  "boot_counts": {
+    "13": 7,
+    "14": 148,
+    "15": 1,
+    "16": 35,
+    "17": 5,
+    "18": 399,
+    "19": 101,
+    "20": 465,
+    "22": 9,
+    "23": 845,
+    "24": 4,
+    "25": 39,
+    "26": 1163,
+    "27": 3,
+    "28": 48,
+    "29": 93,
+    "30": 1062,
+    "31": 101,
+    "32": 116,
+    "33": 11,
+    "34": 3911,
+    "35": 2095,
+    "36": 439,
+    "37": 2413,
+    "39": 9,
+    "40": 128
+  },
+  "time_quality": {
+    "UNKNOWN": 13650
+  },
+  "epochs": [
+    "0"
+  ],
+  "last_records": [
+    "[STORAGE] #13642 seq=15054 boot=40 exp=3 elapsed_ms=7285181 interval_ms=60004 V=13.066601 I_mA=-0.643 P_mW=8.383 T_C=24.453 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122354 Esum_uWh=18409615 time=UNKNOWN epoch=0 flags=0x0[none] crc=0xFE6229A6",
+    "[STORAGE] #13643 seq=15055 boot=40 exp=3 elapsed_ms=7345226 interval_ms=60004 V=13.066210 I_mA=-0.628 P_mW=8.179 T_C=24.507 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122344 Esum_uWh=18409744 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x1EB430F7",
+    "[STORAGE] #13644 seq=15056 boot=40 exp=3 elapsed_ms=7405275 interval_ms=60004 V=13.066406 I_mA=-0.620 P_mW=8.102 T_C=24.523 dQ_uAh=-10 dE_uWh=130 Qsum_uAh=1122334 Esum_uWh=18409874 time=UNKNOWN epoch=0 flags=0x0[none] crc=0xAB69DF22",
+    "[STORAGE] #13645 seq=15057 boot=40 exp=3 elapsed_ms=7465325 interval_ms=60004 V=13.066406 I_mA=-0.600 P_mW=7.820 T_C=24.414 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122324 Esum_uWh=18410003 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x45C43420",
+    "[STORAGE] #13646 seq=15058 boot=40 exp=3 elapsed_ms=7525374 interval_ms=60004 V=13.066601 I_mA=-0.607 P_mW=7.961 T_C=24.335 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122314 Esum_uWh=18410132 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x8DDDBF66",
+    "[STORAGE] #13647 seq=15059 boot=40 exp=3 elapsed_ms=7585431 interval_ms=60004 V=13.066601 I_mA=-0.580 P_mW=7.756 T_C=24.273 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122304 Esum_uWh=18410261 time=UNKNOWN epoch=0 flags=0x0[none] crc=0xB34644D4",
+    "[STORAGE] #13648 seq=15060 boot=40 exp=3 elapsed_ms=7645486 interval_ms=60004 V=13.066210 I_mA=-0.584 P_mW=7.628 T_C=24.234 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122294 Esum_uWh=18410390 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x38B0D46A",
+    "[STORAGE] #13649 seq=15061 boot=40 exp=3 elapsed_ms=7709744 interval_ms=60004 V=13.066210 I_mA=-0.600 P_mW=7.833 T_C=24.242 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1122284 Esum_uWh=18410519 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x40545083"
+  ],
+  "compared_against": "pre-dump.txt",
+  "identical_historical_record_lines": 11098
+}

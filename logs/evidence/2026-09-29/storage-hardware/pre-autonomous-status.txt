@@ -1,0 +1,40 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER AUTONOMOUS STATUS
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] No board port is currently visible.
+[SERIAL] The board may be in autonomous deep sleep.
+[SERIAL] Waiting for the next USB rendezvous...
+[SERIAL] Press Control-C to cancel.
+[SERIAL] Still waiting (15s elapsed)...
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER AUTONOMOUS STATUS)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER AUTONOMOUS STATUS,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER AUTONOMOUS STATUS
+
+[AUTO] Autonomous mode: ON
+[AUTO] Armed: YES
+[AUTO] Running: YES
+[AUTO] Interval: 60 seconds
+[AUTO] Boot id: 35
+[AUTO] RTC state valid: YES
+[AUTO] Cycles this power-on: 2092
+[AUTO] Next sequence: 12070
+[AUTO] Sequence reserved through: 12100
+[AUTO] Session elapsed: 125811923 ms
+[AUTO] Accounting: ISOLATED. Experiment totals are never modified.
+[AUTO] New records will carry experiment id: 3
+[AUTO] Cold-boot maintenance window: 15 seconds (cold boot only; timer wakes do not open one)
+[AUTO] USB right now: plugged=YES cdcConnected=YES
+CMD_RESULT,LOGGER AUTONOMOUS STATUS,OK
+[AUTO] Rendezvous: 1 / 10 s
+[AUTO] USB plugged: YES
+[AUTO] CDC connected: YES
+[CONNECTION] Active transports: NONE
+[CONNECTION] Host claimed: NO
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 22
+[COMMAND] Capture ended: port quiet for 600ms.

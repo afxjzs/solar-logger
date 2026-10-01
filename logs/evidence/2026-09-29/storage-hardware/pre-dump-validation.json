@@ -1,0 +1,55 @@
+{
+  "file": "pre-dump.txt",
+  "sha256": "ac596be5ad75ce535684fb7f734a516368d6f90683573b1d10cbfc2de314d893",
+  "records": 10659,
+  "first_seq": 1412,
+  "last_seq": 12070,
+  "experiment_ids": [
+    "3"
+  ],
+  "sequence_gaps": [],
+  "board_invalid": 0,
+  "complete": true,
+  "capture_stop": "transport disappeared after the successful result (expected for RELEASE).",
+  "boot_counts": {
+    "13": 7,
+    "14": 148,
+    "15": 1,
+    "16": 35,
+    "17": 5,
+    "18": 399,
+    "19": 101,
+    "20": 465,
+    "22": 9,
+    "23": 845,
+    "24": 4,
+    "25": 39,
+    "26": 1163,
+    "27": 3,
+    "28": 48,
+    "29": 93,
+    "30": 1062,
+    "31": 101,
+    "32": 116,
+    "33": 11,
+    "34": 3911,
+    "35": 2093
+  },
+  "time_quality": {
+    "UNKNOWN": 10659
+  },
+  "epochs": [
+    "0"
+  ],
+  "last_records": [
+    "[STORAGE] #10651 seq=12063 boot=35 exp=3 elapsed_ms=125451565 interval_ms=60004 V=13.071093 I_mA=-0.592 P_mW=7.718 T_C=21.070 dQ_uAh=-10 dE_uWh=128 Qsum_uAh=1012373 Esum_uWh=16145634 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x3DB41D5F",
+    "[STORAGE] #10652 seq=12064 boot=35 exp=3 elapsed_ms=125511613 interval_ms=60004 V=13.070898 I_mA=-0.600 P_mW=7.820 T_C=21.101 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1012363 Esum_uWh=16145763 time=UNKNOWN epoch=0 flags=0x0[none] crc=0xD24A2208",
+    "[STORAGE] #10653 seq=12065 boot=35 exp=3 elapsed_ms=125571665 interval_ms=60004 V=13.070898 I_mA=-0.592 P_mW=7.756 T_C=21.140 dQ_uAh=-10 dE_uWh=128 Qsum_uAh=1012353 Esum_uWh=16145891 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x788FCA0C",
+    "[STORAGE] #10654 seq=12066 boot=35 exp=3 elapsed_ms=125631719 interval_ms=60004 V=13.070898 I_mA=-0.628 P_mW=8.230 T_C=21.187 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1012343 Esum_uWh=16146020 time=UNKNOWN epoch=0 flags=0x0[none] crc=0xBEDB9092",
+    "[STORAGE] #10655 seq=12067 boot=35 exp=3 elapsed_ms=125691778 interval_ms=60004 V=13.071093 I_mA=-0.596 P_mW=7.795 T_C=21.257 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1012333 Esum_uWh=16146149 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x60CB7116",
+    "[STORAGE] #10656 seq=12068 boot=35 exp=3 elapsed_ms=125751835 interval_ms=60004 V=13.071093 I_mA=-0.600 P_mW=7.846 T_C=21.289 dQ_uAh=-10 dE_uWh=128 Qsum_uAh=1012323 Esum_uWh=16146277 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x93272A75",
+    "[STORAGE] #10657 seq=12069 boot=35 exp=3 elapsed_ms=125811927 interval_ms=60004 V=13.070898 I_mA=-0.616 P_mW=8.051 T_C=21.320 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1012313 Esum_uWh=16146406 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x14D52CCF",
+    "[STORAGE] #10658 seq=12070 boot=35 exp=3 elapsed_ms=125871972 interval_ms=60004 V=13.071093 I_mA=-0.624 P_mW=8.153 T_C=21.343 dQ_uAh=-10 dE_uWh=129 Qsum_uAh=1012303 Esum_uWh=16146535 time=UNKNOWN epoch=0 flags=0x0[none] crc=0x4E358482"
+  ],
+  "identical_historical_record_lines": 5756
+}

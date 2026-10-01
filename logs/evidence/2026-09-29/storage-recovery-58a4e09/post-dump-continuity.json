@@ -1,0 +1,24 @@
+{
+  "file": "post-dump.txt",
+  "records": 13650,
+  "boundary_how": "identified from pre-dump.txt",
+  "boundary": {
+    "last_before_reset": {
+      "seq": 12511,
+      "boot": 36,
+      "qsum_uAh": 1007893,
+      "esum_uWh": 16203190
+    },
+    "first_after_reset": {
+      "seq": 12512,
+      "boot": 37,
+      "dq_uAh": -10,
+      "de_uWh": 128,
+      "qsum_uAh": 1007883,
+      "esum_uWh": 16203318
+    },
+    "expected_qsum_uAh": 1007883,
+    "expected_esum_uWh": 16203318
+  },
+  "other_continuity_breaks_reported_not_asserted": []
+}

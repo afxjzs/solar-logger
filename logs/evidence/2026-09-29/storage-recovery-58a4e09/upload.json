@@ -1,0 +1,10 @@
+{
+  "started": "2026-09-29T16:30:17.741675-07:00",
+  "finished": "2026-09-29T16:31:02.684007-07:00",
+  "argv": [
+    "tools/upload.sh"
+  ],
+  "exit_code": 0,
+  "bytes": 7944,
+  "sha256": "ca22842d57d7e897b414dbefb22ed06ee4d8f0b7f2df4c39d97e8f4fccb88732"
+}

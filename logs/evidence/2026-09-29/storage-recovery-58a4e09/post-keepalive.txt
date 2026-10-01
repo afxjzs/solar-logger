@@ -1,0 +1,17 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER SESSION KEEPALIVE
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER SESSION KEEPALIVE)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER SESSION KEEPALIVE,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER SESSION KEEPALIVE
+[SESSION] KEEPALIVE 1: lease renewed for 15000 ms: ALL OK
+CMD_RESULT,LOGGER SESSION KEEPALIVE,OK
+CSV_SAMPLE,3,28801.001,13.066602,-0.600000,7.820800,24.2344
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 4
+[COMMAND] Capture ended: port quiet for 600ms.

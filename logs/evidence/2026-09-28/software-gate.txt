@@ -1,0 +1,99 @@
+
+============================================================
+[CHECK] pytest
+============================================================
+.........................................................x.............. [ 14%]
+........................................................................ [ 29%]
+........................................................................ [ 44%]
+........................................................................ [ 59%]
+........................................................................ [ 73%]
+........................................................................ [ 88%]
+.......................................................                  [100%]
+486 passed, 1 xfailed in 52.46s
+
+============================================================
+[CHECK] pyright
+============================================================
+0 errors, 0 warnings, 0 informations
+
+============================================================
+[CHECK] py_compile
+============================================================
+
+============================================================
+[CHECK] firmware compile
+============================================================
+[CHECK] arduino-cli compile --clean --warnings all --fqbn esp32:esp32:XIAO_ESP32C3 Arduino/solar-logger
+Sketch uses 1104313 bytes (84%) of program storage space. Maximum is 1310720 bytes.
+Global variables use 36332 bytes (11%) of dynamic memory, leaving 291348 bytes for local variables. Maximum is 327680 bytes.
+
+============================================================
+[CHECK] intellisense
+============================================================
+[INTELLISENSE] NOTICE: The old build directory still exists:
+[INTELLISENSE]   /Users/afxjzs/dev/projects/solar-charger/.vscode/arduino-build
+[INTELLISENSE] Nothing uses it any more. Remove it when convenient:
+[INTELLISENSE]   rm -rf /Users/afxjzs/dev/projects/solar-charger/.vscode/arduino-build
+[INTELLISENSE] NOTICE: /Users/afxjzs/dev/projects/solar-charger/build/intellisense holds Arduino CLI output from the old layout
+[INTELLISENSE] (sketch/, core/, libraries/, intellisense/ and the files beside
+[INTELLISENSE] them). Nothing reads it now; Arduino CLI builds into arduino-cli/.
+[INTELLISENSE] To clear it: rm -rf /Users/afxjzs/dev/projects/solar-charger/build/intellisense, then run this script again.
+[INTELLISENSE] Generating Arduino CLI compilation database...
+[INTELLISENSE] Target: esp32:esp32:XIAO_ESP32C3
+[INTELLISENSE] Arduino CLI build path: /Users/afxjzs/dev/projects/solar-charger/build/intellisense/arduino-cli
+[INTELLISENSE] Project translation units found (7):
+[INTELLISENSE]   connection.cpp
+[INTELLISENSE]   ina228.cpp
+[INTELLISENSE]   nvs_persistence.cpp
+[INTELLISENSE]   record_format.cpp
+[INTELLISENSE]   solar-logger.ino
+[INTELLISENSE]   storage.cpp
+[INTELLISENSE]   telemetry.cpp
+[INTELLISENSE] Expanded each compile command to 335 absolute include paths
+[INTELLISENSE] No response file or -iprefix indirection remains in any project entry
+[INTELLISENSE] Every project entry resolves Arduino.h, freertos/FreeRTOS.h, esp_sleep.h, soc/soc_caps.h, esp_rom_crc.h: ALL OK
+[INTELLISENSE] Verifying: compiling all 7 project translation units with exactly their editor flags...
+[INTELLISENSE]   connection.cpp: compiles cleanly: ALL OK (direct includes: connection.h, Arduino.h)
+[INTELLISENSE]   ina228.cpp: compiles cleanly: ALL OK (direct includes: ina228.h, Arduino.h, Wire.h)
+[INTELLISENSE]   nvs_persistence.cpp: compiles cleanly: ALL OK (direct includes: nvs_persistence.h, Arduino.h, Preferences.h)
+[INTELLISENSE]   record_format.cpp: compiles cleanly: ALL OK (direct includes: record_format.h, esp_rom_crc.h)
+[INTELLISENSE]   solar-logger.ino: compiles cleanly: ALL OK (direct includes: Wire.h, WiFi.h, esp_sleep.h, firmware_version.h, ina228.h, connection.h, nvs_persistence.h, telemetry.h, record_format.h, storage.h)
+[INTELLISENSE]   storage.cpp: compiles cleanly: ALL OK (direct includes: storage.h, Arduino.h, LittleFS.h)
+[INTELLISENSE]   telemetry.cpp: compiles cleanly: ALL OK (direct includes: telemetry.h, Arduino.h)
+[INTELLISENSE] Compilation database ready: /Users/afxjzs/dev/projects/solar-charger/build/intellisense/compile_commands.json
+[INTELLISENSE] Entries: 85, of which 7 name project files and the rest are the core and libraries as Arduino CLI wrote them
+
+============================================================
+[CHECK] shell syntax
+============================================================
+[CHECK] bash -n tools/check.sh: OK
+[CHECK] bash -n tools/intellisense.sh: OK
+[CHECK] bash -n tools/send.sh: OK
+[CHECK] bash -n tools/upload.sh: OK
+[CHECK] bash -n tools/watch-port.sh: OK
+
+============================================================
+[CHECK] whitespace
+============================================================
+[CHECK] NOTE: untracked files are not covered by git diff --check:
+[CHECK]   untracked: AGENTS.md
+[CHECK]   untracked: Arduino/solar-logger/storage.cpp
+[CHECK]   untracked: Arduino/solar-logger/storage.h
+[CHECK]   untracked: docs/CURRENT_STATE.md
+[CHECK]   untracked: docs/evidence/2026-09-25/README.md
+[CHECK]   untracked: docs/evidence/2026-09-25/ina228-purchase-listing.png
+[CHECK]   untracked: docs/evidence/2026-09-25/storage-dump.txt
+[CHECK]   untracked: tests/test_charger_transitions.py
+[CHECK]   untracked: tools/charger-transitions.py
+
+============================================================
+[CHECK] SUMMARY
+============================================================
+[CHECK]   PASS  pytest
+[CHECK]   PASS  pyright
+[CHECK]   PASS  py_compile
+[CHECK]   PASS  firmware compile
+[CHECK]   PASS  intellisense
+[CHECK]   PASS  shell syntax
+[CHECK]   PASS  whitespace
+[CHECK] ALL OK

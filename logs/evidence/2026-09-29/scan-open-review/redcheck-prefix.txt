@@ -1,0 +1,146 @@
+Red-check: the seven new scan-open tests against pre-fix 1980d94
+Staging: new test file copied in; openFailed DECLARED in storage.h, never set.
+Expected: 5 failed, 2 passed.
+
+warning: `VIRTUAL_ENV=/Users/afxjzs/dev/projects/solar-charger/.venv` does not match the project environment path `.venv` and will be ignored; use `--active` to target the active environment instead
+Using CPython 3.11.5 interpreter at: /Users/afxjzs/miniconda3/bin/python3
+Creating virtual environment at: .venv
+Installed 17 packages in 47ms
+FF..FFF                                                                  [100%]
+=================================== FAILURES ===================================
+_____ test_a_log_that_cannot_be_opened_is_reported_unreadable_not_scanned ______
+
+storage = <test_characterization_storage_recovery.Storage object at 0x102631e10>
+
+    def test_a_log_that_cannot_be_opened_is_reported_unreadable_not_scanned(
+        storage: Storage,
+    ):
+        """The scan must say the log exists and that it learned nothing about it.
+    
+        `openFailed` carries the distinction the zeros cannot: an unopened log and
+        an empty one produce the same counts and are not the same fact.
+        """
+    
+        storage.write_log(*(record_bytes(seq) for seq in (10, 11, 12)))
+    
+        result = storage.scan(deny_log_open=True)
+    
+        assert result["fileExists"] == 1
+>       assert result["openFailed"] == 1
+E       assert 0 == 1
+
+tests/test_characterization_storage_recovery.py:1205: AssertionError
+___________ test_a_log_that_cannot_be_opened_is_never_called_intact ____________
+
+storage = <test_characterization_storage_recovery.Storage object at 0x10252d210>
+
+    def test_a_log_that_cannot_be_opened_is_never_called_intact(storage: Storage):
+        """The defect itself: boot recovery announced an intact tail for an unread
+        log, which is the reassuring half of a summary nothing measured."""
+    
+        before = b"".join(record_bytes(seq) for seq in (10, 11, 12))
+        storage.write_log(before)
+    
+        result = storage.recover(deny_log_open=True)
+    
+>       assert "Log tail is intact" not in result.serial
+E       AssertionError: assert 'Log tail is intact' not in '[STORAGE] E...r applies.\n'
+E         
+E         'Log tail is intact' is contained here:
+E           [STORAGE] Log tail is intact: ALL OK
+E           [STORAGE] Next sequence from log: 1, from NVS reservation: 1, using: 1
+E           [STORAGE] Log tail is NOT provably intact, so the NVS reservation floor applies.
+
+tests/test_characterization_storage_recovery.py:1224: AssertionError
+_____ test_storage_info_reports_an_unopenable_log_as_unreadable_and_fails ______
+
+storage = <test_characterization_storage_recovery.Storage object at 0x102b2f8d0>
+
+    def test_storage_info_reports_an_unopenable_log_as_unreadable_and_fails(
+        storage: Storage,
+    ):
+        """INFO must not print a fabricated record count, must not say INTACT, and
+        must not answer OK for a command that could not do what was asked (D-041).
+        """
+    
+        storage.write_log(*(record_bytes(seq) for seq in (10, 11, 12)))
+    
+        result = storage.info(deny_log_open=True)
+    
+>       assert result["infoOk"] == 0
+E       assert 1 == 0
+
+tests/test_characterization_storage_recovery.py:1270: AssertionError
+_______ test_an_absent_an_empty_and_an_unopenable_log_are_three_answers ________
+
+storage = <test_characterization_storage_recovery.Storage object at 0x102b2ebd0>
+
+    def test_an_absent_an_empty_and_an_unopenable_log_are_three_answers(
+        storage: Storage,
+    ):
+        """Three different states that used to collapse into two.
+    
+        An absent log was already distinct. A readable empty log and an existing
+        log that could not be opened both reported zero records and an intact tail;
+        only one of those is true.
+        """
+    
+        absent = storage.info()
+        assert absent["infoOk"] == 1
+        assert "does not exist yet" in absent.serial
+    
+        storage.write_log(b"")
+        empty = storage.info()
+        assert empty["infoOk"] == 1
+        assert "Valid records:    0" in empty.serial
+        assert "Tail status:      INTACT" in empty.serial
+    
+        storage.write_log(*(record_bytes(seq) for seq in (10, 11)))
+        unopenable = storage.info(deny_log_open=True)
+>       assert unopenable["infoOk"] == 0
+E       assert 1 == 0
+
+tests/test_characterization_storage_recovery.py:1305: AssertionError
+__ test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly __
+
+storage = <test_characterization_storage_recovery.Storage object at 0x102bdb150>
+
+    def test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly(
+        storage: Storage,
+    ):
+        """The refusal in the one function that deletes records covers this case.
+    
+        autoStorageScanAndRepair() never reaches the rewrite here, because an
+        unopened log reports no trailing bytes. That is the caller's `else if`
+        chain, not the function's own guarantee, so the guarantee is tested where
+        it lives (D-057, and the external-linkage decision in D-058).
+    
+        Pre-fix this was not merely a missing refusal. Driven directly against an
+        unopened log the function announced
+        "Rewriting the log to its valid prefix: 0 of 0 bytes" and proceeded, and
+        the only thing that stopped it was its own source open failing for the same
+        reason the scan's had. Had the fault been transient - the scan's open
+        failing and the rewrite's succeeding - it would have copied `keepBytes`,
+        zero, into the temporary file, removed the log and renamed the empty file
+        over it, destroying every record from a scan that read nothing.
+        """
+    
+        before = b"".join(record_bytes(seq) for seq in (10, 11, 12))
+        storage.write_log(before)
+    
+        result = storage.force_truncate(deny_log_open=True)
+    
+        assert result["truncated"] == 0
+>       assert "Refusing to rewrite the log" in result.serial
+E       AssertionError: assert 'Refusing to rewrite the log' in '[STORAGE] ERROR: Could not open the log for scanning.\n[STORAGE] Rewriting the log to its valid prefix: 0 of 0 bytes.\n[STORAGE] ERROR: Could not open the log for recovery.\n'
+E        +  where '[STORAGE] ERROR: Could not open the log for scanning.\n[STORAGE] Rewriting the log to its valid prefix: 0 of 0 bytes.\n[STORAGE] ERROR: Could not open the log for recovery.\n' = Result(fields={'mountFailed': 0, 'truncated': 0}, serial='[STORAGE] ERROR: Could not open the log for scanning.\n[STORAGE] Rewriting the log to its valid prefix: 0 of 0 bytes.\n[STORAGE] ERROR: Could not open the log for recovery.\n').serial
+
+tests/test_characterization_storage_recovery.py:1336: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_characterization_storage_recovery.py::test_a_log_that_cannot_be_opened_is_reported_unreadable_not_scanned
+FAILED tests/test_characterization_storage_recovery.py::test_a_log_that_cannot_be_opened_is_never_called_intact
+FAILED tests/test_characterization_storage_recovery.py::test_storage_info_reports_an_unopenable_log_as_unreadable_and_fails
+FAILED tests/test_characterization_storage_recovery.py::test_an_absent_an_empty_and_an_unopenable_log_are_three_answers
+FAILED tests/test_characterization_storage_recovery.py::test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly
+
+pytest exit status: 1 (1 is expected here: these tests MUST fail pre-fix)

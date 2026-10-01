@@ -1,0 +1,33 @@
+{
+  "sealed_preflight_checksums": "PASS",
+  "unchanged_source_files": [
+    "Arduino/solar-logger/connection.h",
+    "Arduino/solar-logger/nvs_persistence.h",
+    "Arduino/solar-logger/ina228.cpp",
+    "Arduino/solar-logger/storage.cpp",
+    "Arduino/solar-logger/record_format.cpp",
+    "Arduino/solar-logger/storage.h",
+    "Arduino/solar-logger/ina228.h",
+    "Arduino/solar-logger/record_format.h",
+    "Arduino/solar-logger/firmware_version.h",
+    "Arduino/solar-logger/telemetry.cpp",
+    "Arduino/solar-logger/connection.cpp",
+    "Arduino/solar-logger/nvs_persistence.cpp",
+    "Arduino/solar-logger/solar-logger.ino",
+    "Arduino/solar-logger/telemetry.h",
+    "app/device_session.py",
+    "app/device_tool.py",
+    "tools/send.sh",
+    "tools/upload.sh",
+    "tests/test_characterization_storage_recovery.py"
+  ],
+  "both_dump_validations": "PASS",
+  "all_command_capture_metadata": "PASS",
+  "checkpoint_and_evidence_links": "PASS",
+  "tracked_whitespace": "PASS",
+  "host_logger": "not running",
+  "pending_upload_or_command": "absent",
+  "head": "1980d942a284703bcb22ce3ec95d00fc83028685",
+  "index": "",
+  "checked_at": "2026-09-29T09:19:12.603984-07:00"
+}

@@ -1,0 +1,13 @@
+{
+  "started": "2026-09-29T10:30:46.823790-07:00",
+  "finished": "2026-09-29T10:30:49.638805-07:00",
+  "argv": [
+    "uv",
+    "run",
+    "pytest",
+    "tests/test_characterization_storage_recovery.py",
+    "tests/test_characterization_protocol.py",
+    "-q"
+  ],
+  "exit_code": 0
+}
