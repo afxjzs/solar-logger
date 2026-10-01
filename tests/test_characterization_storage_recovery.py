@@ -468,7 +468,8 @@ int main(int argc, char **argv)
 		std::fprintf(
 				stderr,
 				"usage: %s scan|recover|info|force-truncate <root> [highWater] "
-				"[phantomBytes] [denyLogOpen] [retainedCharge retainedEnergy]\n",
+				"[phantomBytes] [denyLogOpen] [retainedCharge retainedEnergy] "
+				"[retainedValid]\n",
 				argv[0]);
 		return 2;
 	}
@@ -488,6 +489,11 @@ int main(int argc, char **argv)
 		rtcAutoRunEnergyUWh = std::strtoll(argv[7], nullptr, 10);
 	}
 
+	// Whether rtcAutoMagic was valid at the call site BEFORE the call site set
+	// it, which is the only place that fact still exists. Invalid unless a test
+	// says otherwise, as after a power-on reset.
+	const bool retainedValid = (argc > 8) && std::strtoul(argv[8], nullptr, 10) != 0;
+
 	if (!autoStorageMount(true))
 	{
 		std::printf("mountFailed=1\n");
@@ -506,7 +512,7 @@ int main(int argc, char **argv)
 
 	if (std::strcmp(command, "recover") == 0)
 	{
-		uint32_t next = autoStorageRecover();
+		uint32_t next = autoStorageRecover(retainedValid);
 		std::printf("nextSeq=%u\n", (unsigned)next);
 		std::printf("rtcRunCharge=%lld\n", (long long)rtcAutoRunChargeUAh);
 		std::printf("rtcRunEnergy=%lld\n", (long long)rtcAutoRunEnergyUWh);
@@ -623,11 +629,16 @@ class Storage:
         high_water: int = 0,
         phantom_bytes: int = 0,
         deny_log_open: bool = False,
-        retained: tuple[int, int] | None = None,
+        retained: tuple[int, int] = (0, 0),
+        retained_valid: bool = False,
     ) -> Result:
-        seed = () if retained is None else retained
         return self._run(
-            "recover", high_water, phantom_bytes, int(deny_log_open), *seed
+            "recover",
+            high_water,
+            phantom_bytes,
+            int(deny_log_open),
+            *retained,
+            int(retained_valid),
         )
 
     def info(self, deny_log_open: bool = False) -> Result:
@@ -1370,52 +1381,126 @@ def test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly(
 #
 # The retained totals are seeded to a value no fixture record carries, so that
 # "left alone" and "overwritten from the scan" give different answers.
+#
+# Whether carrying them is right depends on whether they were valid, and
+# rtcAutoMagic is the firmware's own answer (D-011). Every call site sets the
+# magic just before recovery, so the call site captures the validity first and
+# passes it in; `retained_valid` is that argument.
 
 RETAINED_TOTALS = (5555, 6666)
 
-
-@pytest.mark.parametrize(
+UNREAD_LOG = pytest.mark.parametrize(
     ("phantom_bytes", "deny_log_open"),
     [(0, True), (RECORD_SIZE, False)],
     ids=["open-failure", "short-read"],
 )
-def test_an_unread_log_leaves_the_retained_running_totals_alone_and_says_so(
-    storage: Storage, phantom_bytes: int, deny_log_open: bool
-):
-    """Pre-fix: 0/0 after a failed open, and 300/400 - the last record the scan
-    reached, not provably the last one written - after a short read."""
 
+
+def two_records_with_totals(storage: Storage) -> None:
     storage.write_log(
         record_bytes(10, charge=100, energy=200),
         record_bytes(11, charge=300, energy=400),
     )
+
+
+@UNREAD_LOG
+def test_an_unread_log_carries_valid_retained_totals_and_says_so(
+    storage: Storage, phantom_bytes: int, deny_log_open: bool
+):
+    """D-060's half that stays: valid retained totals are the best figure there
+    is when the log cannot supply one."""
+
+    two_records_with_totals(storage)
 
     result = storage.recover(
         phantom_bytes=phantom_bytes,
         deny_log_open=deny_log_open,
         retained=RETAINED_TOTALS,
+        retained_valid=True,
     )
 
     assert (result["rtcRunCharge"], result["rtcRunEnergy"]) == RETAINED_TOTALS
     assert "Running totals could NOT be recovered" in result.serial
+    assert "Retained RTC state was valid before recovery" in result.serial
     assert "Carrying the retained totals instead: Qsum_uAh=5555 Esum_uWh=6666" in (
         result.serial
     ), "refusing to reseed without saying what is carried is the same silence"
 
 
-def test_a_readable_log_still_replaces_whatever_the_totals_held(storage: Storage):
-    """The healthy path is unchanged: the log's last record wins over any
-    retained value, and nothing claims a recovery failure."""
+@UNREAD_LOG
+def test_an_unread_log_zeroes_invalid_retained_totals_and_says_so(
+    storage: Storage, phantom_bytes: int, deny_log_open: bool
+):
+    """Pre-fix (58a4e09): 5555/6666 carried, on exactly the path whose own
+    comment says not to guess the running totals because RTC state is gone."""
 
-    storage.write_log(
-        record_bytes(10, charge=100, energy=200),
-        record_bytes(11, charge=300, energy=400),
+    two_records_with_totals(storage)
+
+    result = storage.recover(
+        phantom_bytes=phantom_bytes,
+        deny_log_open=deny_log_open,
+        retained=RETAINED_TOTALS,
+        retained_valid=False,
     )
 
-    result = storage.recover(retained=RETAINED_TOTALS)
+    assert (result["rtcRunCharge"], result["rtcRunEnergy"]) == (0, 0)
+    assert "Running totals could NOT be recovered" in result.serial
+    assert "Retained RTC state was NOT valid before recovery" in result.serial
+    assert "Restarting the running totals at Qsum_uAh=0 Esum_uWh=0" in (
+        result.serial
+    ), "a silent zero trades one silent deviation for another"
+    assert "Carrying the retained totals" not in result.serial
+
+
+def test_a_readable_log_still_replaces_whatever_the_totals_held(storage: Storage):
+    """The healthy path is unchanged: the log's last record wins even over
+    retained totals that were valid, and nothing claims a recovery failure."""
+
+    two_records_with_totals(storage)
+
+    result = storage.recover(retained=RETAINED_TOTALS, retained_valid=True)
 
     assert (result["rtcRunCharge"], result["rtcRunEnergy"]) == (300, 400)
     assert "could NOT be recovered" not in result.serial
+    assert "Retained RTC state" not in result.serial
+
+
+def test_every_recovery_call_is_told_whether_retained_state_was_valid():
+    """The harness above runs recovery, not its callers. Validity read AFTER a
+    call site sets the magic is always true, which is the defect this fixes,
+    so the order at every call site is pinned here: capture, then set, then
+    call, with no other recovery call in between."""
+
+    sketch = firmware_source.load()
+    capture = "const bool retainedStateValid = rtcAutoMagic == AUTO_RTC_MAGIC ;"
+    overwrite = "rtcAutoMagic = AUTO_RTC_MAGIC ;"
+    call = "autoStorageRecover ( retainedStateValid )"
+
+    sites = 0
+
+    for name in sorted(sketch.functions_containing("autoStorageRecover (")):
+        body = sketch.function(name)
+        assert body.count("autoStorageRecover (") == body.count(call), (
+            f"{name}() calls recovery without the validity captured beforehand"
+        )
+
+        previous_call = -1
+
+        for at in body.find_all(call):
+            sites += 1
+            before = body.slice(0, at)
+            sets = [i for i in before.find_all(overwrite) if i > previous_call]
+            captures = [i for i in before.find_all(capture) if i > previous_call]
+
+            assert sets and captures, (
+                f"{name}(): a recovery call has no capture-then-set before it"
+            )
+            assert max(captures) < max(sets), (
+                f"{name}(): validity is captured after the magic is overwritten"
+            )
+            previous_call = at
+
+    assert sites == 4, f"expected the four known recovery call sites, found {sites}"
 
 
 # ============================================================================

@@ -3244,7 +3244,13 @@ void printAutoRecord(const AutoRecord &record)
 // Nothing here is silent: every discarded byte is counted and reported by
 // autoStorageScanAndRepair(), which owns the scan, the reporting, and any
 // repair the shape of the damage allows.
-uint32_t autoStorageRecover()
+//
+// retainedStateValid is whether rtcAutoMagic was valid at the call site BEFORE
+// the call site set it. Every caller sets the magic immediately before calling,
+// so by the time this runs the magic always reads valid and cannot answer the
+// question; the caller captures the answer first and passes it in. It decides
+// only what happens to the running totals when the log could not be read.
+uint32_t autoStorageRecover(bool retainedStateValid)
 {
 	AutoLogScan scan = autoStorageScanAndRepair();
 
@@ -3324,8 +3330,12 @@ uint32_t autoStorageRecover()
 	// Only when the scan read the log to its end (D-060). After a failed open
 	// the scan's totals are zero because nothing was read, and after a short
 	// read they come from whichever record the scan reached last, which is not
-	// provably the last one written. Neither is a recovery, so the retained
-	// values are kept and the operator is told exactly what is being carried.
+	// provably the last one written. Neither is a recovery.
+	//
+	// What replaces them then depends on whether the retained state was valid,
+	// which is the magic's job (D-011), not on what the bootloader is believed to
+	// do to RTC memory on a reset. Valid: carry them, the best figure there is.
+	// Not valid: they are not a figure at all, so restart at zero. Both say so.
 	if (scan.openFailed || scan.readError)
 	{
 		Serial.print("[STORAGE] Running totals could NOT be recovered: ");
@@ -3333,11 +3343,30 @@ uint32_t autoStorageRecover()
 											 ? "the log could not be opened, so none of it was read."
 											 : "a short read stopped the scan before the end of the "
 												 "log.");
-		Serial.print("[STORAGE] Carrying the retained totals instead: Qsum_uAh=");
-		Serial.print(static_cast<long long>(rtcAutoRunChargeUAh));
-		Serial.print(" Esum_uWh=");
-		Serial.print(static_cast<long long>(rtcAutoRunEnergyUWh));
-		Serial.println(". These were NOT checked against the log.");
+
+		if (retainedStateValid)
+		{
+			Serial.println(
+					"[STORAGE] Retained RTC state was valid before recovery, so its "
+					"totals are the best figure available.");
+			Serial.print("[STORAGE] Carrying the retained totals instead: Qsum_uAh=");
+			Serial.print(static_cast<long long>(rtcAutoRunChargeUAh));
+			Serial.print(" Esum_uWh=");
+			Serial.print(static_cast<long long>(rtcAutoRunEnergyUWh));
+			Serial.println(". These were NOT checked against the log.");
+		}
+		else
+		{
+			rtcAutoRunChargeUAh = 0;
+			rtcAutoRunEnergyUWh = 0;
+
+			Serial.println(
+					"[STORAGE] Retained RTC state was NOT valid before recovery, so there "
+					"are no totals to carry.");
+			Serial.println(
+					"[STORAGE] Restarting the running totals at Qsum_uAh=0 Esum_uWh=0. "
+					"The next record does NOT continue the log's totals.");
+		}
 	}
 	else
 	{
@@ -4435,10 +4464,13 @@ HandoffResult beginAutonomousSleepFromHostSession(const char *reason,
 			return HANDOFF_STORAGE_UNAVAILABLE;
 		}
 
+		// False by the test above. Captured anyway, as at every recovery call, so
+		// the answer recovery gets can never be read after the magic is set.
+		const bool retainedStateValid = rtcAutoMagic == AUTO_RTC_MAGIC;
 		rtcAutoMagic = AUTO_RTC_MAGIC;
 		rtcAutoBootId = nextBootId();
 		rtcAutoCycleCount = 0;
-		rtcAutoNextSeq = autoStorageRecover();
+		rtcAutoNextSeq = autoStorageRecover(retainedStateValid);
 		ensureSequenceReservation(rtcAutoNextSeq, true);
 	}
 
@@ -5201,12 +5233,16 @@ bool armAutonomousTest()
 	autonomousTestArmed = true;
 	autonomousTestRunning = true;
 
+	// Ordinarily false: LOGGER AUTONOMOUS OFF clears the magic, and so does the
+	// image initializer. Captured rather than assumed, because the arm path does
+	// not test it.
+	const bool retainedStateValid = rtcAutoMagic == AUTO_RTC_MAGIC;
 	rtcAutoMagic = AUTO_RTC_MAGIC;
 	rtcAutoBootId = nextBootId();
 	rtcAutoSessionElapsedMs = millis();
 	rtcAutoCycleCount = 0;
 
-	rtcAutoNextSeq = autoStorageRecover();
+	rtcAutoNextSeq = autoStorageRecover(retainedStateValid);
 	ensureSequenceReservation(rtcAutoNextSeq, true);
 
 	Serial.println();
@@ -5808,12 +5844,15 @@ void setup()
 				}
 				else
 				{
+					// False by the test above: this is the path the comment above is
+					// about, and recovery must not carry what it calls lost.
+					const bool retainedStateValid = rtcAutoMagic == AUTO_RTC_MAGIC;
 					rtcAutoMagic = AUTO_RTC_MAGIC;
 					rtcAutoBootId = nextBootId();
 					rtcAutoSessionElapsedMs = 0;
 					rtcAutoIntervalStartMs = 0;
 					rtcAutoCycleCount = 0;
-					rtcAutoNextSeq = autoStorageRecover();
+					rtcAutoNextSeq = autoStorageRecover(retainedStateValid);
 					ensureSequenceReservation(rtcAutoNextSeq, true);
 
 					autonomousTestRunning = true;
@@ -6334,12 +6373,18 @@ void setup()
 		}
 		else
 		{
+			// Nothing above tests the magic, so either answer can arrive here: a
+			// timer wake that lost RTC state and could not mount storage arrives
+			// invalid, and a reset that left RTC memory intact, or a timer wake whose
+			// first NVS load read "not armed", can arrive valid. Recovery is told
+			// which instead of assuming.
+			const bool retainedStateValid = rtcAutoMagic == AUTO_RTC_MAGIC;
 			rtcAutoMagic = AUTO_RTC_MAGIC;
 			rtcAutoBootId = nextBootId();
 			rtcAutoCycleCount = 0;
 
 			const uint32_t tScanStart = micros();
-			rtcAutoNextSeq = autoStorageRecover();
+			rtcAutoNextSeq = autoStorageRecover(retainedStateValid);
 			const uint32_t tScanDone = micros();
 
 			ensureSequenceReservation(rtcAutoNextSeq, true);
