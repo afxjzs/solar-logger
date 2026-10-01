@@ -137,7 +137,7 @@ AutoLogScan autoStorageScan()
 		// one byte of which had been looked at.
 		//
 		// `readError` is what the refusals are keyed on - the rewrite's own guard
-		// below, and `logIntact` in autoStorageRecover() - so setting it is what
+		// below, and `logIntact` in sequenceAuthorityNext() - so setting it is what
 		// makes an unopened log keep the D-023 reservation floor and keeps the
 		// only record-deleting function in the firmware away from it.
 		// `openFailed` carries the part `readError` cannot: a short read has real
@@ -177,8 +177,10 @@ AutoLogScan autoStorageScan()
 		{
 			// Not a torn tail: the file says these bytes exist and the filesystem
 			// would not hand them over. What is past here is unknown, so it is
-			// never automatically discarded. autoStorageRecover() refuses to
-			// rewrite while this is set.
+			// never automatically discarded. autoStorageTruncateToValid() refuses
+			// to rewrite while this is set, in its own guard rather than in a
+			// caller's; corrected 2026-10-01, this comment named
+			// autoStorageRecover(), which has never held that refusal.
 			Serial.println(
 					"[STORAGE] ERROR: Short read while scanning the log. The rest of "
 					"the log could not be read, so nothing will be repaired "
@@ -371,8 +373,9 @@ bool autoStorageTruncateToValid(const AutoLogScan &scan)
 // every case that was NOT repaired says so.
 //
 // The sequence decision that used to sit at the end of this function is not
-// gone; it is in autoStorageRecover() in solar-logger.ino, which owns the NVS
-// reservation floor and the RTC-retained totals (D-055).
+// gone; it is sequenceAuthorityNext() in sequence_authority.cpp, called from
+// autoStorageRecover() in solar-logger.ino, which reads the NVS reservation
+// floor and owns the RTC-retained totals (D-055).
 AutoLogScan autoStorageScanAndRepair()
 {
 	AutoLogScan scan = autoStorageScan();

@@ -13,7 +13,8 @@ pytest temporary directory, and run:
   autoStorageScanAndRepair()     boot recovery of the FILE: scan, report, repair
   autoStorageTotalBytes()        the filesystem's own size, for INFO
   autoStorageUsedBytes()         and how much of it is in use
-  autoStorageRecover()           the next sequence, decided from that scan
+  sequenceAuthorityNext()        the next sequence, decided from that scan
+  autoStorageRecover()           both of those, plus the NVS read and totals
   printStorageInfo()             the operator-visible LOGGER STORAGE INFO
 
 All but the last two now live in `Arduino/solar-logger/storage.cpp`, and those
@@ -551,6 +552,7 @@ EXTRACTED = (
     ("autoStorageScan", "AutoLogScan"),
     ("autoStorageTruncateToValid", "bool"),
     ("autoStorageScanAndRepair", "AutoLogScan"),
+    ("sequenceAuthorityNext", "uint32_t"),
     ("autoStorageRecover", "uint32_t"),
     ("autoStorageTotalBytes", "size_t"),
     ("autoStorageUsedBytes", "size_t"),
@@ -1866,8 +1868,19 @@ def test_the_rewrite_keeps_external_linkage_so_its_refusal_is_compiled():
     ), "the declaration in storage.h is what keeps the definition reachable"
 
 
-def test_the_sequence_decision_stayed_in_the_sketch():
-    """D-055's line: storage reports the log, the sketch decides the sequence."""
+def test_recovery_composition_stayed_in_the_sketch():
+    """D-055's line, as it stands after D-062.
+
+    Storage reports the log, `sequence_authority` decides the sequence, and the
+    sketch composes the two. RENAMED 2026-10-01: this was
+    `test_the_sequence_decision_stayed_in_the_sketch`, which stopped being true
+    when D-062 moved the D-023 decision into its own module. Not one assertion
+    below changed, because none of them was about the decision: they pin that
+    the STORAGE module absorbed neither the NVS high-water load nor the totals
+    reseed, and that recovery is still composed in the sketch. Only the name was
+    wrong, and a test whose name misdescribes what it checks is a silent
+    deviation of its own.
+    """
 
     sketch = firmware_source.load()
 
@@ -1878,7 +1891,7 @@ def test_the_sequence_decision_stayed_in_the_sketch():
 
     assert sketch.functions["autoStorageRecover"][0].where.startswith(
         "Arduino/solar-logger/solar-logger.ino"
-    ), "the sequence decision moved into the storage module"
+    ), "autoStorageRecover() left the sketch; it composes recovery and must stay"
 
     repair = sketch.function("autoStorageScanAndRepair")
     assert not repair.contains("loadSequenceHighWater")

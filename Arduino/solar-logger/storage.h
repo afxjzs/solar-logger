@@ -14,9 +14,10 @@
 //
 // IT ALSO DECIDES NOTHING ABOUT SEQUENCES. autoStorageScanAndRepair() reports
 // what the log holds; which sequence number the next record gets is the D-023
-// reconciliation of an intact log tail against the NVS reservation floor, and
-// that decision, the NVS read behind it and the RTC-retained state it reseeds
-// all stay in solar-logger.ino's autoStorageRecover(). This module names no
+// reconciliation of an intact log tail against the NVS reservation floor.
+// That decision is sequence_authority.h's; the NVS read behind it and the
+// RTC-retained state recovery reseeds stay in solar-logger.ino's
+// autoStorageRecover(), which calls both modules. This module names no
 // Preferences, no RTC_DATA_ATTR variable, no scheduler and no command parser
 // (D-055).
 //
@@ -150,8 +151,8 @@ AutoLogScan autoStorageScan();
 // without reading the file a second time.
 //
 // A repair that ran and a repair that was refused never read alike. The
-// sequence decision is deliberately NOT here; see autoStorageRecover() in
-// solar-logger.ino.
+// sequence decision is deliberately NOT here; see sequence_authority.h, and
+// autoStorageRecover() in solar-logger.ino, which hands it this scan.
 AutoLogScan autoStorageScanAndRepair();
 
 // Rewrite the log to exactly its valid prefix, discarding only tail damage, and

@@ -33,6 +33,11 @@
 // an operator command prints are decided in this file.
 #include "storage.h"
 
+// Sequence authority: which sequence the next record gets, reconciled from the
+// boot-recovery scan and the NVS reservation (D-023). Reading the reservation,
+// reserving blocks and the RTC mirror of the reservation stay in this file.
+#include "sequence_authority.h"
+
 // ============================================================================
 // BMW SOLAR LOGGER
 // Development firmware
@@ -3030,7 +3035,7 @@ bool loadAutonomousSettings()
 // How wide a block is, and the RTC-retained mirror of the reservation, stay
 // here. saveSequenceHighWater() stores the number and reports whether the
 // store worked; which of the log tail and the reservation is authoritative is
-// D-023 policy and is decided in autoStorageRecover().
+// D-023 policy and is decided in sequenceAuthorityNext().
 //
 // The RTC mirror advances only after the NVS write succeeds, exactly as
 // before: a reservation that was not persisted must not raise the floor that
@@ -3233,17 +3238,19 @@ void printAutoRecord(const AutoRecord &record)
 //
 // The LittleFS mechanics moved to storage.h / storage.cpp on 2026-09-24: the
 // mount that never formats, the log path, the full scan, the tail repair and
-// the append. What is left here is the one thing the file does not get to
-// decide - which sequence number the next record carries - because that
-// reconciles the log against the NVS reservation and reseeds RTC-retained
-// state, and neither belongs in a storage module (D-055).
+// the append. Which sequence number the next record carries moved to
+// sequence_authority.h / .cpp on 2026-10-01: the D-023 reconciliation of the
+// log against the NVS reservation. What is left here composes the two with the
+// RTC-retained state neither module owns: the mirror of the reservation and the
+// running totals (D-055).
 // ============================================================================
 
 // Boot recovery. Returns the sequence to use for the next record.
 //
 // Nothing here is silent: every discarded byte is counted and reported by
 // autoStorageScanAndRepair(), which owns the scan, the reporting, and any
-// repair the shape of the damage allows.
+// repair the shape of the damage allows, and sequenceAuthorityNext() reports
+// which of the log and the reservation it took the sequence from.
 //
 // retainedStateValid is whether rtcAutoMagic was valid at the call site BEFORE
 // the call site set it. Every caller sets the magic immediately before calling,
@@ -3254,75 +3261,13 @@ uint32_t autoStorageRecover(bool retainedStateValid)
 {
 	AutoLogScan scan = autoStorageScanAndRepair();
 
-	// Where the next sequence comes from.
-	//
-	// The log is the only thing that ever writes a record, so when the log is
-	// provably intact it is also the authority on the highest sequence ever
-	// used, and the next record can continue directly from its tail. Skipping
-	// past the NVS reservation in that case produced a large gap on every clean
-	// restart for no safety benefit.
-	//
-	// The NVS reservation is the floor in every other case, because then the log
-	// tail cannot be trusted to show everything that was written:
-	//
-	//   - an empty log may have been cleared after records were already synced
-	//   - a partial or corrupt tail means records were lost
-	//   - out-of-order sequences mean the log already contains a reuse
-	//
-	// Gaps stay acceptable. Duplicates stay forbidden.
-	//
-	// NOTE for when pruning is implemented: a pruned log no longer holds the
-	// highest sequence ever used, so "log is intact" will stop being sufficient
-	// and the NVS floor will have to apply unconditionally again.
-	//
-	// `invalidRecords == 0` now covers mid-file damage as well as a bad tail,
-	// because the scan no longer stops at the first bad record. A log with a
-	// preserved mid-file corruption is therefore NOT intact, and the NVS floor
-	// applies to it, which is the conservative side.
-	const bool logIntact = scan.fileExists && scan.validRecords > 0 &&
-												 !scan.partialTail && !scan.seqOutOfOrder &&
-												 !scan.readError && scan.invalidRecords == 0 &&
-												 scan.trailingBytes == 0;
-
-	uint32_t fromLog = (scan.validRecords > 0) ? scan.lastSeq + 1 : 1;
-
 	// Cached so the reservation logic can see it without a second NVS read.
 	rtcAutoSeqHighWater = loadSequenceHighWater();
 
-	// One past the reservation, not at it. The reservation covers up to
-	// highWater - 1, so this deliberately skips one extra number rather than
-	// risk landing on a sequence that a lost record might have used.
-	uint32_t fromNvs = rtcAutoSeqHighWater + 1;
-
-	uint32_t next = logIntact ? fromLog
-														: ((fromLog > fromNvs) ? fromLog : fromNvs);
-
-	Serial.print("[STORAGE] Next sequence from log: ");
-	Serial.print(fromLog);
-	Serial.print(", from NVS reservation: ");
-	Serial.print(fromNvs);
-	Serial.print(", using: ");
-	Serial.println(next);
-
-	if (logIntact)
-	{
-		Serial.println(
-				"[STORAGE] Log tail is provably intact, so it is the authority and "
-				"the NVS reservation floor was not applied.");
-	}
-	else
-	{
-		Serial.println(
-				"[STORAGE] Log tail is NOT provably intact, so the NVS reservation "
-				"floor applies.");
-	}
-
-	if (next > fromLog)
-	{
-		Serial.println(
-				"[STORAGE] A sequence gap was skipped. Gaps are expected after a "
-				"crash and are preferable to reuse.");
-	}
+	// Where the next sequence comes from: the D-023 reconciliation of this scan
+	// against the reservation just read. sequence_authority.cpp decides it and
+	// prints which of the two it used.
+	uint32_t next = sequenceAuthorityNext(scan, rtcAutoSeqHighWater);
 
 	// Test-local running totals continue from the last valid record so a
 	// reboot does not restart them at zero.
