@@ -11,6 +11,8 @@ Open work, proposed directions, and resolved findings retained with their status
 
 The boundary that matters most is the last one. Everything under "Longer-term ideas" is speculation with a rationale attached, not a roadmap.
 
+**Reading the resolved sections.** Items grouped under a dated stint heading — the 2026-09-17 and 2026-09-18 groups in particular — keep the status they carried when that stint closed, including lines like "not uploaded and not verified on hardware". Those are as-of-that-date statements, not current ones: every fix in them has shipped in each image built since, and the board has passed hardware acceptances on `eba3b5d`, `1980d94`, `58a4e09` and `16a299d`. For current status, trust the per-item headings in "Known bugs and issues" and [CURRENT_STATE.md](CURRENT_STATE.md), not a status line inside a closed stint's history.
+
 ---
 
 # Current and near-term work
@@ -316,8 +318,8 @@ nothing, and keep the file that a person edits from being valid C++ on its own
 - **Sequence authority**, `sequence_authority.h` and `sequence_authority.cpp`,
   2026-10-01: the D-023 decision only, `sequenceAuthorityNext(scan,
   reservedHighWater)`, with its three `[STORAGE]` lines. Compiled and
-  host-tested; **NOT committed, uploaded or hardware validated.** Its boundary
-  is D-062. Reading the NVS reservation into `rtcAutoSeqHighWater`, the mirror
+  host-tested; **committed `16a299d`, hardware validated 2026-10-02.** Its
+  boundary is D-062. Reading the NVS reservation into `rtcAutoSeqHighWater`, the mirror
   itself, `reserveSequenceBlock()`, `ensureSequenceReservation()`,
   `AUTO_SEQ_BLOCK` and the running-totals reseed stayed in the sketch; see the
   module table row below for why.
@@ -415,7 +417,7 @@ filenames or completed extractions**.
 | `telemetry` | CSV formatting/emission mechanics | Extracted, host-tested and running in the smoke-validated `eba3b5d` image; exhaustive CSV comparison not claimed (D-051) |
 | Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested and **HARDWARE-VALIDATED on clean `eba3b5d`** |
 | LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Extracted 2026-09-24 as `storage`, exactly as this row describes: it uses the record contract and reports log facts, and `autoStorageScanAndRepair()` hands the scan back rather than choosing a sequence. The four-damage-case corruption policy is preserved token for token; no reclamation or storage-full policy was invented (D-058). Host-tested; **healthy-log hardware-smoke validated on clean 1980d94** |
-| Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | **Decision half extracted 2026-10-01 as `sequence_authority`; NOT committed, uploaded or hardware validated** (D-062). The module is handed the scan and the reservation and reads neither: no NVS, RTC, LittleFS or `extern`. **Reservation did not move**: `reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater`, and `tests/test_characterization_nvs.py` pins that write token for token, so moving it needed either the first `RTC_DATA_ATTR` in a module, ahead of the retained-state stage, or a changed characterization test. Reservation, `AUTO_SEQ_BLOCK`, the mirror and the NVS read into it wait for the retained-state stage to settle who owns the mirror. The `ensureSequenceReservation()` call after each recovery stays a caller responsibility: the wake cycle calls it too, with `announceNoOp` false |
+| Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | **Decision half extracted 2026-10-01 as `sequence_authority`, committed `16a299d`, hardware validated 2026-10-02** (D-062). The module is handed the scan and the reservation and reads neither: no NVS, RTC, LittleFS or `extern`. **Reservation did not move**: `reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater`, and `tests/test_characterization_nvs.py` pins that write token for token, so moving it needed either the first `RTC_DATA_ATTR` in a module, ahead of the retained-state stage, or a changed characterization test. Reservation, `AUTO_SEQ_BLOCK`, the mirror and the NVS read into it wait for the retained-state stage to settle who owns the mirror. The `ensureSequenceReservation()` call after each recovery stays a caller responsibility: the wake cycle calls it too, with `announceNoOp` false |
 | RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
 | Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
 | Experiment accounting | Tethered interval/experiment state, interval close and checkpoint timing | Planned; calls existing INA/NVS/telemetry interfaces and explicit autonomous-ownership queries |
@@ -658,8 +660,8 @@ Storage-full policy was deliberately not invented during the move, so it remains
 undecided. Details: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
 **Sequence authority's decision half was extracted on 2026-10-01 (D-062)**;
-it is not committed, uploaded or hardware validated. Reservation stayed in the
-sketch with the RTC mirror it writes. **The next structural candidate is the
+it is committed as `16a299d` and hardware validated on 2026-10-02. Reservation
+stayed in the sketch with the RTC mirror it writes. **The next structural candidate is the
 RTC-retained autonomous state**, which must also decide who owns
 `rtcAutoSeqHighWater` and therefore where reservation goes. The paragraph
 below is the 2026-09-24 reasoning that chose this stage:
@@ -674,7 +676,7 @@ place the D-023 log-versus-NVS reconciliation happens.
 | --- | --- | --- |
 | ~~Record format / CRC~~ **BUILT 2026-09-24** | Nothing else moved: no LittleFS, RTC, sequence allocation or scheduling | Done as stated: exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics, now also asserted per field at compile time |
 | ~~LittleFS mechanics~~ **BUILT 2026-09-24** | No sequence-authority or storage-full policy decision | Done as stated. Append/read/recovery behavior is preserved, including the four-case policy and the refusal to repair mid-file damage; `tests/test_characterization_storage_recovery.py` did follow the code, needing only to learn that boot recovery is now two functions. Sequence authority stayed in `autoStorageRecover()` in the sketch and storage-full policy is still undecided (D-058). **Healthy-log hardware smoke passed on clean 1980d94; damaged-log hardware branches remain untested** |
-| Sequence authority / reservation — **decision half BUILT 2026-10-01, not committed or uploaded** | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases executed unchanged through `autoStorageRecover()`; serial message strings byte-identical in the image. Reservation (NVS write failure, duplicate avoidance) did not move and still needs a home; reclamation must revisit authority explicitly |
+| ~~Sequence authority decision~~ **BUILT 2026-10-01, `16a299d`, hardware validated 2026-10-02**; reservation still to move | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases executed unchanged through `autoStorageRecover()`; serial message strings byte-identical in the image. Reservation (NVS write failure, duplicate avoidance) did not move and still needs a home; reclamation must revisit authority explicitly |
 | RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
 | Autonomous scheduling / policy | Consume mechanics/state through explicit boundaries | Existing deadline, handoff and command-pump contracts; preserve the known overrun xfail until its own fix |
 | Experiment, power-test, session and command concerns | Retain accounting ownership and the separation of transport claims from leases | Scoped characterization, required local gate and later deliberate hardware checks for each move |
@@ -993,7 +995,7 @@ report unavailable/unloaded checkpoint state explicitly or read it safely, with
 meaningful coverage of commands issued during early timer wake. Do not reset the
 experiment to make STATUS look right. [Fresh evidence](../logs/evidence/2026-09-29/storage-hardware/README.md).
 
-## Open-for-scan failure can still report an INTACT tail — found 2026-09-29, FIXED AND COMMITTED `44d8b27` 2026-09-29, NOT HARDWARE VALIDATED
+## Open-for-scan failure can still report an INTACT tail — found 2026-09-29, FIXED, COMMITTED `44d8b27` 2026-09-29, HARDWARE VALIDATED 2026-10-01
 
 **Fixed, reviewed, red-checked and committed as `44d8b27`; nothing was uploaded,
 so no board has run it.** The red-check staged the pre-fix tree with the
@@ -1052,9 +1054,9 @@ file untouched, which is software failure injection and not evidence of what a
 real LittleFS fault does. Do not inject corruption into the Experiment 3 log to
 get it.
 
-## Boot recovery restarts the running totals at zero from a log it could not read — found 2026-09-29, FIXED AND COMMITTED `58a4e09` 2026-09-29, NOT HARDWARE VALIDATED
+## Boot recovery restarts the running totals at zero from a log it could not read — found 2026-09-29, FIXED, COMMITTED `58a4e09` 2026-09-29, HARDWARE VALIDATED 2026-10-01
 
-**Fixed under D-060 and committed as `58a4e09`; not uploaded.** When
+**Fixed under D-060, committed as `58a4e09`, hardware validated 2026-10-01.** When
 `scan.openFailed || scan.readError`, recovery no longer assigns the retained
 totals. It prints `Running totals could NOT be recovered: ...` and
 `Carrying the retained totals instead: Qsum_uAh=... Esum_uWh=...`. Healthy
@@ -1079,9 +1081,9 @@ damaging the Experiment 3 log. The finding as it was recorded:
 > between them changes deployed accounting behavior on the existing read-error
 > path as well, so it wants its own stage with its own hardware check.
 
-## Recovery cannot see whether the retained totals it carries were ever valid — found 2026-09-29 in review of `58a4e09`, FIXED AND COMMITTED `6192c2d` 2026-10-01, NOT HARDWARE VALIDATED
+## Recovery cannot see whether the retained totals it carries were ever valid — found 2026-09-29 in review of `58a4e09`, FIXED, COMMITTED `6192c2d` 2026-10-01, HARDWARE VALIDATED 2026-10-02
 
-**Fixed under D-061 and committed as `6192c2d`; not uploaded.** `autoStorageRecover()` now
+**Fixed under D-061, committed as `6192c2d`, hardware validated 2026-10-02.** `autoStorageRecover()` now
 takes `bool retainedStateValid`, which each of the four call sites captures
 before it sets the magic. An unreadable log carries valid totals and says so,
 and zeroes invalid ones and says so. Red-checked against `58a4e09`: the
@@ -2230,12 +2232,23 @@ What happens then has never been exercised on hardware: appends fail, storage
 errors print to a serial port no unattended board has anyone reading, and
 logging stops without any persistent record that it stopped.
 
-Raising the cadence buys time rather than fixing it — Section 6 puts 5 minutes at
-about 62 days and 15 minutes at about 188 days. Note that `LOGGER INTERVAL` is
-refused while armed, so changing it means `AUTONOMOUS OFF`, set, `AUTONOMOUS ON`,
-which clears `rtcAutoMagic` and re-arms. That exercises D-061's branch and the
-re-arm issue recorded above, so prefer doing it after the next hardware smoke
-rather than before.
+**Superseded 2026-10-02: the cadence was raised to 300 seconds and the deadline
+moved.** The `16a299d` acceptance reported room for 4,721 more records, which at
+300 seconds is roughly **16 days, to about 2026-10-18**. The 2026-10-05 figure
+above was correct for the 60-second cadence it was written against; it is kept
+because it records what the board actually projected at the time.
+
+**Section 6's day counts assume a FRESH log and must not be applied to this one.**
+It puts 5 minutes at about 62 days and 15 minutes at about 188 days, which are
+whole-partition figures. This log is already about 83 percent full, so the same
+cadences buy 16 and 49 days respectively. Prefer the board's own
+`Room for N more records` line over any table.
+
+Raising the cadence buys weeks, not a fix. Note that `LOGGER INTERVAL` is refused
+while armed, so changing it means `AUTONOMOUS OFF`, set, `AUTONOMOUS ON`, which
+clears `rtcAutoMagic` and re-arms, exercising D-061's branch and the re-arm issue
+recorded above. The 2026-10-02 change was deliberately sequenced after that day's
+hardware acceptance for exactly that reason.
 
 **Direction:** this is the store-and-forward milestone, and it is now the
 limiting factor on how long the logger can be left alone. Until it is built, a

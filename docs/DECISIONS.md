@@ -1316,8 +1316,9 @@ module choosing a sequence. Retained state, scheduling, sessions and the command
 protocol still await their own extractions.
 
 **Superseded further by D-062 on 2026-10-01:** the D-023 decision is now its own
-module, `sequence_authority`. It is not committed or uploaded. Reservation and
-its RTC mirror stayed in the sketch for the retained-state stage.
+module, `sequence_authority`, committed as `16a299d` and hardware validated on
+2026-10-02. Reservation and its RTC mirror stayed in the sketch for the
+retained-state stage.
 
 ## D-056: Record format owns what a record is, never when one is written
 
@@ -1422,8 +1423,8 @@ Recovery distinguishes four cases (the shape of damage does not prove its physic
   remainder is unknown and must not be discarded.
 
 **Extended 2026-09-29: a scan that never happened must not be representable as
-a scan that found nothing.** Fixed in source and host-tested; **not uploaded and
-not hardware validated**. A log that exists and will not open reported an error
+a scan that found nothing.** Fixed, committed as `44d8b27` and **hardware
+validated on 2026-10-01**. A log that exists and will not open reported an error
 and returned a zero-initialized scan with `readError` false, so its zeros were
 read as measurements: boot recovery announced "Log tail is intact: ALL OK" and
 `LOGGER STORAGE INFO` printed `Tail status: INTACT` and answered `OK`, for a log

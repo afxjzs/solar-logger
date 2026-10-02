@@ -257,7 +257,7 @@ The 72-byte layout is a deployed binary contract: Experiment 3's log holds thous
 
 What it deliberately does not own is which sequence number the next record carries. `autoStorageScanAndRepair()` scans, reports every damage case by name and repairs only a damaged tail, then hands the scan back; `autoStorageRecover()` in `solar-logger.ino` reads the NVS reservation floor, has `sequence_authority` reconcile the scan against it under D-023, and reseeds the RTC-retained totals. `printStorageInfo()`, `dumpStorage()`, `clearStorage()` and `printAutoRecord()` stayed in the sketch as well, each because it mixes operator-facing formatting, or the autonomous test's own state, with the file access it needs; only the file access moved. Storage-full policy is still undecided and was not invented here, and sync, storage ACKs and reclamation remain absent rather than stubbed.
 
-**Sequence authority**, `sequence_authority.h` and `sequence_authority.cpp`, owns one decision: which sequence the next record gets. `sequenceAuthorityNext()` is handed the scan and the NVS reservation high-water mark and reads neither itself. An intact log tail is the authority; otherwise the result is never below one past the reservation. It prints the three `[STORAGE]` lines that say which source it used. Reserving a block, the block width and the RTC mirror `rtcAutoSeqHighWater` stayed in the sketch, as did the running-totals reseed (D-060, D-061). The boundary is [DECISIONS.md](DECISIONS.md) D-062. Extracted 2026-10-01. Compiled and host-tested; **not committed, uploaded or hardware validated**.
+**Sequence authority**, `sequence_authority.h` and `sequence_authority.cpp`, owns one decision: which sequence the next record gets. `sequenceAuthorityNext()` is handed the scan and the NVS reservation high-water mark and reads neither itself. An intact log tail is the authority; otherwise the result is never below one past the reservation. It prints the three `[STORAGE]` lines that say which source it used. Reserving a block, the block width and the RTC mirror `rtcAutoSeqHighWater` stayed in the sketch, as did the running-totals reseed (D-060, D-061). The boundary is [DECISIONS.md](DECISIONS.md) D-062. Extracted 2026-10-01, committed as `16a299d`, and **hardware validated 2026-10-02**. Arming on 2026-10-02 printed `Next sequence from log: 16439, from NVS reservation: 16453, using: 16439`, so the module has been observed choosing the log over a reservation floor that sat 14 numbers ahead.
 
 `autoStorageTruncateToValid()` is exported although the module is its only caller, which is a deliberate departure from D-047. With internal linkage GCC inlined it into that one call site, proved its refusal unreachable from the caller's `else if` chain, and deleted the refusal and its message from the image; the refusal is a property of the function under D-057, so it keeps external linkage and a test pins that. The boundary is [DECISIONS.md](DECISIONS.md) D-058. Extracted 2026-09-24. It is compiled and host-tested, and **healthy-log hardware-smoke validated on clean `1980d94` (September 29)**.
 
@@ -311,13 +311,19 @@ version 1, 72 bytes, CRC coverage 0–67 with CRC at offset 68; the deployed gol
 fixture is `seq=4445`, CRC `0xFB25DA73`. Telemetry ran in this smoke-validated
 image, without a claim of exhaustive CSV comparison.
 
-**Latest supplied hardware: `eba3b5d-dirty`**, the storage-recovery working-tree
-build based on `eba3b5d`, containing uncommitted recovery changes. It is not a
-clean commit containing the fix. Version is `0.3.0-dev`; build ID remains
-`solar-logger-protocol-ack-v3`. The healthy-log smoke progressed from 4,644 valid
-records/newest 6055 to 4,649/6060, with zero trailing bytes and INTACT tail;
-the final dump read 4,650 records, invalid 0, through 6061. Experiment 3 remained
-intact. These are supplied observations, not a new board query.
+**Current hardware image: `16a299d`**, verified by `VERSION` on 2026-10-02.
+Version is `0.3.0-dev`; build ID remains `solar-logger-protocol-ack-v3`. The
+2026-10-02 acceptance covered `6192c2d` and `16a299d` together: final dump 15,021
+records through sequence 16432, no gaps, invalid 0, tail INTACT, and all 13,991
+preflight record lines byte-identical. Evidence and limits:
+[logs/evidence/2026-10-01/storage-recovery-16a299d/](../logs/evidence/2026-10-01/storage-recovery-16a299d/startup-baseline.md).
+
+**Superseded, kept as history:** `eba3b5d-dirty` was the storage-recovery
+working-tree build based on `eba3b5d`, containing uncommitted recovery changes
+and not a clean commit. Its healthy-log smoke progressed from 4,644 valid
+records/newest 6055 to 4,649/6060, zero trailing bytes, INTACT tail; the final
+dump read 4,650 records, invalid 0, through 6061, Experiment 3 intact. Three
+later acceptances supersede it: `1980d94`, `58a4e09` and `16a299d`.
 
 Recovery now scans the full log. Tail-only partial/invalid records may be
 repaired automatically; detected mid-file damage or a read error preserves the
