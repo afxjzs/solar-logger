@@ -33,20 +33,26 @@ Nothing is blocked.
 ## Repository and hardware snapshot
 
 Canonical path: `/Users/afxjzs/dev/projects/solar-charger`. HEAD **`65f55d1`** on
-main, **12 commits ahead of origin/main; no fetch and no push.** Index empty.
+main, **14 commits ahead of `origin/main` at this commit; a push to origin was
+authorized on 2026-10-02 and is performed immediately after it.** Whether it
+succeeded is not asserted here: check `git log origin/main..HEAD` rather than
+trusting this line. The working tree is otherwise clean.
 
-Two separate pieces of uncommitted work, and they must not be committed together:
+Two stages were committed on 2026-10-02, deliberately as separate commits:
 
-- **The D-063 retained-state extraction**, built 2026-10-02 and reviewed the
-  same day. New `Arduino/solar-logger/autonomous_retained_state.{h,cpp}` and
+- **`1801098`, the D-063 retained-state extraction.** New
+  `Arduino/solar-logger/autonomous_retained_state.{h,cpp}` and
   `tests/test_characterization_autonomous_retained_state.py`; modified
   `solar-logger.ino` (one `#include`, the definitions removed, three comment
-  fixes), `sequence_authority.h` (comment only), and the DECISIONS, LAB_NOTES,
-  BACKLOG and CURRENT_STATE entries for it. Ready to commit.
+  fixes), `sequence_authority.h` (a corrected docstring and comment, no
+  assertion), and the DECISIONS, LAB_NOTES, BACKLOG and INDEX entries.
+  **Committed, not uploaded, not hardware validated.**
 - **The capture-gap stage** (D-059): `tools/charger-transitions.py`,
   `tests/test_charger_transitions.py`, and the pandas and tzdata entries in
-  `pyproject.toml` / `uv.lock`. Complete and host-tested, and still awaiting a
-  commit-or-drop decision after several days.
+  `pyproject.toml` / `uv.lock`. It had sat uncommitted for several days while
+  D-059, PROJECT and INDEX already described it as existing, so the docs
+  referenced a file the repository did not contain. Committing it closes that
+  gap. Host-tested only; it opens no serial port and reads only CSV.
 
 **The board runs `16a299d`**, verified by `VERSION` on 2026-10-02:
 `0.3.0-dev / 16a299d / solar-logger-protocol-ack-v3`. Experiment 3 is intact,
@@ -67,8 +73,8 @@ headroom. That change cleared `rtcAutoMagic` and re-armed, which produced boot i
 | Running totals from an unread log (D-060) | Committed `58a4e09`, hardware validated 2026-10-01 |
 | Retained-state validity (D-061) | Committed `6192c2d`, hardware validated 2026-10-02 |
 | Sequence authority (D-062) | Committed `16a299d`, **hardware validated 2026-10-02** |
-| Retained autonomous state (D-063) | Built and host-tested 2026-10-02, orchestrator-reviewed, **not committed, not uploaded, not hardware validated** |
-| Capture-gap report (D-059) | Implemented and host-tested, **still uncommitted** |
+| Retained autonomous state (D-063) | Host-tested and orchestrator-reviewed, committed `1801098`, **not uploaded, not hardware validated** |
+| Capture-gap report (D-059) | Implemented and host-tested, committed 2026-10-02. Host analysis only; it opens no serial port |
 | Software gate, working tree 2026-10-02 | `ALL OK`, exit 0 — **563 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense **9/9**. Run twice: by the CODE stage and independently by the orchestrator |
 
 Sketch: **6,670 lines**. Eight modules extracted. D-063 changed no byte of the
