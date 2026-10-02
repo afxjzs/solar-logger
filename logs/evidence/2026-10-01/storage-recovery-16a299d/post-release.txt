@@ -1,0 +1,99 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER SESSION RELEASE
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER SESSION RELEASE)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER SESSION RELEASE,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER SESSION RELEASE
+[SESSION] RELEASE parsed
+
+[SESSION] Host session release requested after 3 s and 1 keepalives.
+[CONNECTION] USB transport RELEASED.
+[CONNECTION] Active transports: NONE
+[CONNECTION] Any host connected: NO
+[SESSION] Autonomous mode is still ARMED. Resuming the autonomous sleep cycle.
+[AUTO] STATE: HOST_SESSION -> HOST_SESSION_RELEASED  (LOGGER SESSION RELEASE)
+
+============================================================
+[AUTO] Handing the board back to the autonomous cycle: host released the session
+[AUTO] Session lasted 3.803 s; normal 60 s intervals already closed during it: 0
+[AUTO] Closing the open tethered interval first (3.799 s).
+[AUTO] A short value here is correct when a 60 s interval closed just before release. Session time is accounted across all of them, not only this last one.
+[AUTO] It is recorded at its real elapsed length, not as a full interval, so no charge is lost and none is double counted.
+
+============================================================
+[LOGGER] INTERVAL TIMER EXPIRED
+[LOGGER] Actual elapsed time = 3.799 seconds
+
+[INA228] Capturing end-of-interval measurements...
+[INA228] Reading accumulated CHARGE...
+[INA228] Reading accumulated ENERGY...
+[INA228] Closing completed interval.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[WARNING] Accumulator reset readback was not exactly zero. ENERGY=0 CHARGE=-1
+[INA228] New accumulation interval started.
+[VSHUNT] Reading raw shunt ADC...
+[VSHUNT] Signed ADC counts    = -31
+[VSHUNT] Shunt voltage        = -0.009688 mV
+[VSHUNT] Assumed shunt R      = 15.6200 mOhm
+[VSHUNT] V/R current          = -0.620 mA
+[CURRENT] INA CURRENT register = -0.624 mA
+[COMPARE] Difference           = -0.004 mA
+
+------------------------------------------------------------
+EXPERIMENT #3
+INTERVAL #482
+Actual interval:     3.799 seconds
+
+Ending voltage:      13.0514 V
+Current right now:   -0.624 mA
+Power right now:     8.141 mW
+Temperature:         20.59 C
+
+Raw VSHUNT counts:   -31
+Shunt voltage:       -0.009688 mV
+VSHUNT/R current:    -0.620 mA
+CURRENT register:    -0.624 mA
+Current difference:  -0.004 mA
+
+Interval charge:     -0.000650 mAh
+Interval energy:     0.008249 mWh
+Average current:     -0.616 mA
+Average power:       7.817 mW
+
+RUNNING charge:      86.899273 mAh
+RUNNING energy:      1248.386731 mWh
+Shunt power:         0.000 mW
+Shunt range used:    0.006 %
+------------------------------------------------------------
+CSV_DATA,3,482,3.799,13.051367,-0.624000,8.140800,20.5859,-0.000650000,0.008248889,-0.615952,7.816794,86.899273333,1248.386730667
+[NVS] CHECKPOINT REQUIRED
+
+[NVS] Writing checkpoint for experiment 3, interval 482
+[NVS] Writing schema = 2
+[NVS] Writing experiment = 3
+[NVS] Writing interval = 482
+[NVS] Writing charge = 86.899273 mAh
+[NVS] Writing energy = 1248.386731 mWh
+*** NVS CHECKPOINT SAVED SUCCESSFULLY ***
+[AUTO] Next autonomous record will be sequence 16432
+[AUTO] STATE: HOST_SESSION_RELEASED -> DEEP_SLEEP_PENDING  (host released the session)
+[SESSION] RELEASE accounting complete
+[AUTO] Deferred autonomous sleep ARMED; entering it in 250 ms, after the command result has been delivered.
+[SESSION] Released: ALL OK
+CMD_RESULT,LOGGER SESSION RELEASE,OK
+[SESSION] RELEASE result queued
+CSV_SAMPLE,3,28920.198,13.051172,-0.604000,7.859200,20.5859
+[AUTO] Deferred sleep deadline reached
+[AUTO] Command acknowledgement grace elapsed; entering autonomous sleep.
+[AUTO] Sleeping until interval deadline; remaining: 59750 ms.
+[TIMING] Host-session duration (setup entry -> sleep): 9331.577 ms
+[TIMING] NOT a wake timing. It covers the entire time a host held the board awake.
+[TIMING] micros() at setup en
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 86
+[COMMAND] Capture ended: transport disappeared after the successful result (expected for RELEASE).

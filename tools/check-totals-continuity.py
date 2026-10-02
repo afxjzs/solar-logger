@@ -141,6 +141,15 @@ def main() -> int:
     expected_qsum = previous["qsum"] + current["dq"]
     expected_esum = previous["esum"] + current["de"]
 
+    # D-062: the sequence decision is not visible in any command's output - INFO
+    # does not run it, and the recovery transcript happens at a cold boot the
+    # sender does not capture. Its CONSEQUENCE is visible right here. On a
+    # healthy log, D-023 makes the log the authority and the next sequence is
+    # lastSeq + 1, so the boundary is contiguous. A jump would mean the NVS
+    # reservation floor was applied instead, which on a log the board itself
+    # reported INTACT would be a regression in the decision.
+    sequence_contiguous = current["seq"] == previous["seq"] + 1
+
     breaks = [
         {"from_seq": a["seq"], "to_seq": b["seq"],
          "from_boot": a["boot"], "to_boot": b["boot"]}
@@ -164,11 +173,20 @@ def main() -> int:
             },
             "expected_qsum_uAh": expected_qsum,
             "expected_esum_uWh": expected_esum,
+            "expected_seq": previous["seq"] + 1,
+            "sequence_contiguous": sequence_contiguous,
         },
         "other_continuity_breaks_reported_not_asserted": breaks,
     }
 
     print(json.dumps(result, indent=2))
+
+    if not sequence_contiguous:
+        reject("the sequence did NOT continue across the reset. Expected "
+               f"seq {previous['seq'] + 1}, got {current['seq']}. On a healthy "
+               "log D-023 makes the log the authority, so recovery should have "
+               "chosen lastSeq + 1; a jump means the NVS reservation floor was "
+               "applied to a log the board reported INTACT (D-062).")
 
     if current["qsum"] != expected_qsum or current["esum"] != expected_esum:
         reject("the running totals did NOT continue across the reset. Expected "

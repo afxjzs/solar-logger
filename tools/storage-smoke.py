@@ -39,6 +39,8 @@ FORBIDDEN = (
     "could not be opened",
     "Running totals could NOT be recovered",
     "Carrying the retained totals instead",
+    "Retained RTC state was",
+    "Restarting the running totals",
     "was never read",
     "[STORAGE] ERROR",
     "[STORAGE] WARNING",

@@ -1,0 +1,152 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER SESSION HOLD
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER SESSION HOLD)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER SESSION HOLD,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER SESSION HOLD
+
+[SESSION] Charge accumulated during the USB rendezvous belongs to no interval and is being discarded. This is a stated gap, not a silent loss.
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[INA228] Accumulators reset: OK
+[SESSION] Tethered measurement interval baseline established at the claim: ALL OK
+
+[SESSION] Host session ACQUIRED.
+[SESSION] Autonomous deep sleep is suspended while this lease is valid.
+[SESSION] Autonomous mode remains ARMED. This is not LOGGER TEST STOP.
+[SESSION] Lease valid for 15000 ms from now.
+[SESSION] Send LOGGER SESSION KEEPALIVE before it expires, or the board resumes autonomous sleep on its own.
+[SESSION] Host session held: ALL OK
+[CONNECTION] USB transport CLAIMED by an explicit host lease.
+[CONNECTION] Active transports: USB
+[CONNECTION] Any host connected: YES
+[AUTO] STATE: USB_RENDEZVOUS -> HOST_SESSION  (LOGGER SESSION HOLD)
+CMD_RESULT,LOGGER SESSION HOLD,OK
+[AUTO] Host claimed this wake after 5205 ms.
+[AUTO] Rendezvous timeout CANCELLED. The board stays awake for as long as the lease is renewed.
+[CONNECTION] Active transports: USB
+[TIMING] Measurement work:       54.400 ms
+[TIMING] USB rendezvous:         5207.783 ms
+[TIMING] Awake so far:           5266.208 ms
+
+[AUTO] Staying awake. Continuing into normal initialization so this wake can serve a host session.
+[AUTO] NOTE: charge accumulated during the rendezvous belongs to no interval. The initialization below resets the accumulators to start a clean tethered interval, so that window is a stated gap rather than a silent loss.
+[LOGGER] Skipping the 1500 ms USB enumeration delay: a host is already talking to us, so there is nothing to wait for.
+[BOOT] Wake reason: DEEP SLEEP TIMER
+[BOOT] Wake cause code: 4
+[WIFI] Boot default: OFF
+[WIFI] Disabling Wi-Fi...
+[WIFI] Wi-Fi disabled: ALL OK
+
+============================================================
+BMW SOLAR LOGGER - DEVELOPMENT FIRMWARE
+INA228 + XIAO ESP32-C3
+NVS schema 2 + experiment-aware CSV
+============================================================
+
+[BOOT] Starting I2C...
+[BOOT] I2C started: SDA=D4, SCL=D5, 400 kHz
+[INA228] Verifying device identity...
+[INA228] Manufacturer ID = 0x5449
+[INA228] Device ID       = 0x2281
+[INA228] Revision        = 1
+[INA228] Identity check: PASS
+[INA228] Configuring sensor...
+[INA228] CONFIG / ADC_CONFIG / SHUNT_CAL readback: PASS
+[INA228] Configuration complete.
+
+[BOOT] Loading persistent state from NVS...
+
+[NVS] Beginning checkpoint load...
+[NVS] Opening namespace "solarlog" in READ ONLY mode...
+[NVS] Namespace opened.
+[NVS] Stored schema = 2
+[NVS] experiment = 3
+[NVS] interval = 481
+[NVS] charge = 86.899923 mAh
+[NVS] energy = 1248.378482 mWh
+[NVS] Namespace closed.
+[NVS] Checkpoint load: OK
+[NVS] Wi-Fi power-test flag: not armed
+[NVS] Deep-sleep test flag: not armed
+[NVS] Deep-sleep variant flag: INA continuous
+
+[INA228] Skipping the 2000 ms ADC settle: the INA228 has been converting continuously and a host session is waiting on its lease.
+[INA228] ADC settle complete.
+
+[INA228] Reading current sensor state...
+[VSHUNT] Reading raw shunt ADC...
+[VSHUNT] Signed ADC counts    = -30
+[VSHUNT] Shunt voltage        = -0.009375 mV
+[VSHUNT] Assumed shunt R      = 15.6200 mOhm
+[VSHUNT] V/R current          = -0.600 mA
+[CURRENT] INA CURRENT register = -0.608 mA
+[COMPARE] Difference           = -0.008 mA
+[INA228] Voltage      = 13.0512 V
+[INA228] Current      = -0.608 mA
+[INA228] Power        = 7.962 mW
+[INA228] Temperature  = 20.58 C
+
+
+[LOGGER] Measurement interval was already started by LOGGER SESSION HOLD.
+[LOGGER] Interval open for 0.009 s so far. NOT resetting the accumulators again.
+
+============================================================
+ALL OK
+Initialization completed successfully.
+
+Measurement interval: 60 seconds
+Live sample interval: 1 second
+Heartbeat interval:   5 seconds
+NVS checkpoint every: 1 interval
+Shunt resistance:     15.6200 mOhm
+VSHUNT LSB:           312.5 nV/count
+
+Restored experiment:  3
+Restored interval:    481
+Restored charge:      86.899923 mAh
+Restored energy:      1248.378482 mWh
+============================================================
+CSV_EVENT,EXPERIMENT_RESUME,3,481
+
+[CSV] Machine-readable interval logging enabled.
+CSV_HEADER,experiment_id,interval,elapsed_seconds,voltage_V,current_mA,power_mW,temperature_C,interval_charge_mAh,interval_energy_mWh,average_current_mA,average_power_mW,running_charge_mAh,running_energy_mWh
+
+[COMMAND] Available commands:
+  HELP       - show this list
+  STATUS     - print current experiment state and live sensor reading
+  VERSION    - print firmware version, source revision, and build ID
+  WIFI ON    - enable Wi-Fi station mode without connecting
+  WIFI OFF   - disable the Wi-Fi subsystem
+  WIFI STATUS - print Wi-Fi state and mode
+  POWER TEST WIFI   - arm the repeating Wi-Fi power test
+  POWER TEST SLEEP  - arm the deep-sleep power test, INA228 stays in continuous conversion
+  POWER TEST SLEEP INA OFF - arm the deep-sleep power test, INA228 enters its own shutdown mode before each sleep
+  POWER TEST STOP   - stop whichever power test is active
+  POWER TEST STATUS - print power-test state
+  LOGGER AUTONOMOUS ON     - enable autonomous sleep/wake/store mode
+  LOGGER AUTONOMOUS OFF    - disable it (only parsed while awake: during a USB rendezvous, a host session, or the cold-boot maintenance window)
+  LOGGER AUTONOMOUS STATUS - mode, cadence, storage, session state
+  LOGGER TEST AUTONOMOUS / STOP / STATUS - DEPRECATED aliases for the three above
+  LOGGER SESSION HOLD - claim this wake; stay awake while a host is attached (autonomous mode stays ARMED)
+  LOGGER SESSION KEEPALIVE - renew the host lease
+  LOGGER SESSION RELEASE - hand the board back to autonomous sleep (does NOT disarm autonomous mode)
+  LOGGER SESSION STATUS - print state, lease, and rendezvous info
+  LOGGER INTERVAL <seconds> - set the autonomous cadence
+  LOGGER STORAGE INFO - filesystem and durable-log summary
+  LOGGER STORAGE DUMP - decode stored records to Serial
+  LOGGER STORAGE CLEAR YES - erase stored records (NOT experiment state)
+  RESET      - explain reset confirmation
+  RESET YES  - start a NEW experiment
+
+
+[AUTO] A host session is held, so the autonomous resume below is skipped and the board stays awake.
+[AUTO] Lease remaining: 14986 ms
+[AUTO] Autonomous mode remains ARMED and resumes when the host releases or stops renewing.
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 139
+[COMMAND] Capture ended: port quiet for 600ms.

@@ -1,0 +1,16 @@
+{
+  "started": "2026-10-02T09:52:38.775724-07:00",
+  "finished": "2026-10-02T09:52:39.551145-07:00",
+  "argv": [
+    "tools/send.sh",
+    "--wait",
+    "--timeout",
+    "150",
+    "LOGGER",
+    "SESSION",
+    "HOLD"
+  ],
+  "exit_code": 0,
+  "bytes": 7047,
+  "sha256": "c697df289d2b4d2456673b6b22b749a1cd617650516bc2d7ef58f9a5fe304fb3"
+}
