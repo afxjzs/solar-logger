@@ -23,11 +23,19 @@ declares no `extern` (D-058).
 
 Deliberately left in the sketch:
 
-  - reading the reservation out of NVS into the RTC mirror, and the mirror
-    itself, `rtcAutoSeqHighWater`, which is RTC-retained autonomous state
+  - reading the reservation out of NVS into the RTC mirror
+    `rtcAutoSeqHighWater`, which is RTC-retained autonomous state
   - `reserveSequenceBlock()`, `ensureSequenceReservation()` and
     `AUTO_SEQ_BLOCK`, which write that mirror
   - reseeding the running totals (D-060, D-061), which is retained state too
+
+DOCSTRING CORRECTED 2026-10-02, no assertion changed. This said the mirror
+"itself" was left in the sketch. D-063 moved its definition into
+`autonomous_retained_state.cpp`; every write to it stayed in the sketch, which
+is what the three bullets above are about. The assertions below are unaffected
+and were not touched: they forbid `rtcAutoSeqHighWater`, `AUTO_SEQ_BLOCK`,
+`saveSequenceHighWater` and `extern` in `sequence_authority`'s own two files,
+and all four are still absent from them.
 """
 
 from __future__ import annotations

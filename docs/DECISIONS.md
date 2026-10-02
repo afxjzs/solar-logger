@@ -1320,6 +1320,12 @@ module, `sequence_authority`, committed as `16a299d` and hardware validated on
 2026-10-02. Reservation and its RTC mirror stayed in the sketch for the
 retained-state stage.
 
+**Superseded further by D-063 on 2026-10-02:** the retained-state definitions
+are now their own module, `autonomous_retained_state`, compiled and host-tested
+and not yet committed or hardware validated. It owns the definitions and their
+lifetime, including the reservation mirror's, and no writer. Reservation policy,
+scheduling, sessions and the command protocol still await their own extractions.
+
 ## D-056: Record format owns what a record is, never when one is written
 
 Set by the fifth modularization stage on 2026-09-24, the first of the boundaries
@@ -1826,6 +1832,138 @@ rewrite refusal to `autoStorageRecover()`; the refusal has always been
 `autoStorageTruncateToValid()`'s own guard (D-057, D-058).
 
 Record format (version 1, 72 bytes), CRC, D-023, D-057, D-060 and D-061
+semantics, firmware identity and the command vocabulary are unchanged.
+
+## D-063: Retained autonomous state owns one definition of each value, and no transition
+
+Set by the eighth modularization stage on 2026-10-02, the fourth of the
+boundaries D-055 separated. The boundary was chosen by the user from three
+options the CODE stage put to them. Compiled and host-tested; **not committed,
+not uploaded, not hardware validated.** Evidence: the 2026-10-02 LAB_NOTES entry.
+
+`autonomous_retained_state.h` / `.cpp` hold the ten `rtcAuto*` values and
+`AUTO_RTC_MAGIC`. The `.cpp` holds the only definition of each, with
+`RTC_DATA_ATTR` and its zero initializer. The header declares all ten `extern`
+and defines the magic. The module defines no function.
+
+**What it owns.** Exactly one definition per variable, in exactly one
+translation unit. BACKLOG calls that the single highest-risk detail in the
+whole modularization plan, and it was not testable while the definitions were
+ordinary lines in the sketch. It is now pinned by a test. It is also the
+precondition for every later stage: the scheduler extraction can include this
+header instead of making the project's first upward reach into sketch globals.
+A module with no behavior in it is justified by owning that invariant.
+
+**What it does not own.** Any transition. Nine functions write these values,
+and all of them stay in `solar-logger.ino`: the scheduler, arm and stop, the
+host handoff, the wake cycle, `setup()`, boot recovery, `clearStorage()` and
+`reserveSequenceBlock()`. Those are autonomous-scheduling, recovery and
+reservation policy, and each has its own later stage. Power-test RTC state stays
+out too: `rtcSleepTestMagic` and `rtcSleepTestCycle` are under their own magic
+(D-011), and `stopAutonomousTest()` clearing `rtcAutoMagic` must never sit next
+to them.
+
+**Who owns `rtcAutoSeqHighWater`.** D-062 deferred this to this stage, and it is
+answered here so the next stage inherits it. Retained state owns the mirror's
+definition and lifetime: it is valid only under the magic, because every
+recovery reloads it from NVS immediately after the magic is set. Reservation
+policy owns its writes. `AUTO_SEQ_BLOCK`, `reserveSequenceBlock()` and
+`ensureSequenceReservation()` stay in the sketch until a reservation stage.
+That stage's module can include this header rather than needing an `extern` of
+its own.
+
+**The `extern` is a measured departure from D-047, and it is named.** The header
+exports all ten because the sketch uses all ten, so D-047's "a header declares
+only what code outside the module uses" is satisfied, not bent. D-047's other
+rule, "a variable moves into a module only if that module writes it", is
+broken, because this module writes none of them. This is the project's first
+`extern`. D-049, D-058 and D-062 each avoided one, and the direction is what
+separates their cases from this one:
+
+- Those modules refused to reach **up** into the sketch's globals. Here the
+  sketch reaches **down** into a module, the same direction as every function
+  call it makes. No module gains an upward dependency.
+- D-058 refused to export state a module **writes** when an accessor would do.
+  An accessor would not do here. The invariants that matter are ordering rules
+  across several variables at the call sites: capture the validity, then set
+  the magic, then recover (D-061); set the magic only after the rest is valid;
+  keep `session_elapsed_ms` monotonic within `boot_id` (D-033). A per-variable
+  setter cannot enforce any of them. Accessors would also have rewritten 85
+  references in 11 functions and ten pinned characterization tests, so the
+  stage could not have been a move.
+
+The cost is real. Anything that includes the header can now write retained
+state. The compensating control is
+`test_only_the_known_functions_write_retained_state`: one test that pins every
+writer of all ten, counting assignment, compound assignment, increments and
+taking the address. That follows D-058's precedent for
+`autoStorageTruncateToValid()`, which kept external linkage against D-047 as a
+stated, tested departure.
+
+**That control is location-independent, and it was measured rather than
+reasoned about.** It collects writers by function name across every file Arduino
+compiles, so a later stage that relocates a writer under the same name does not
+disturb it. Verified on 2026-10-02 by performing the move: in a scratch copy of
+the sketch directory, `reserveSequenceBlock()` was cut out of
+`solar-logger.ino` verbatim into a new `sequence_reservation.cpp` and the tree
+re-read through `firmware_source`. The mirror's writer set stayed
+`{autoStorageRecover, reserveSequenceBlock}` and the test passed. The same
+experiment confirmed it still fails when a write genuinely changes hands: adding
+a new writer reported the extra name, and renaming the writer reported the new
+set. The orchestrator had asserted the opposite — that the reservation stage
+would be forced to update this test — and the CODE stage's reading was correct.
+
+The consequence for the reservation stage is in BACKLOG: **this test going red is
+not available as evidence that that move happened**, so that stage needs its own
+positive test, the way D-063's single-definition and `extern`-only-header tests
+were its real red evidence.
+
+**`AUTO_RTC_MAGIC` is in the header** because `printAutonomousStatus()` and the
+four validity capture sites read it. A namespace-scope `constexpr` has internal
+linkage, so each translation unit gets its own copy of a constant. That is
+harmless, and it is not the hazard of a `static` variable in a header.
+
+**Named for what it holds.** Every module name is a noun, and this one uses the
+phrase D-055 and BACKLOG already use, "RTC-retained autonomous state". The
+shorter `retained_state` was rejected for D-050's reason: power-test state is
+retained too, and a module named for all of it that holds only part of it would
+be a defect, not a cosmetic issue.
+
+**Audited as a move (D-047).** The sketch is HEAD's sketch with one 66-token run
+removed (the magic and the ten definitions) and one `#include` inserted, and
+nothing else. The magic's definition is verbatim in the header, and the ten
+definitions are verbatim and in order in the `.cpp`. Function bodies: zero
+tokens changed. The linked image is identical. All ten allocated `PROGBITS`
+sections keep their address and size, and across all of them **exactly four
+bytes differ**: the core's compile-time stamp in its "Software Info" string
+inside `.flash.rodata`. The two symbol tables are identical — sorted
+`riscv32-esp-elf-nm -S` output diffs empty across all 9,927 entries, so every
+symbol keeps its name, address, size and type. Flash stays 1,106,273 B, globals
+stay 36,332 B, and no forward declaration was removed because none of the moved
+items was a function.
+
+**Compare ELFs, not `.bin` files, when auditing a move.** The two `.bin` images
+differ in 69 bytes, not four, and the extra 65 are not code: esptool injects a
+32-byte `app_elf_sha256` into the application descriptor and appends a 32-byte
+image SHA-256 plus a checksum byte. Both are hashes *of* the ELF, so neither can
+be in it, and both necessarily change when the build stamp does. A future audit
+that diffs `.bin` files will see 69 bytes and should not go looking for 65 bytes
+of code.
+
+**RTC layout unchanged, and a reorder would not have mattered.** All twelve
+project RTC symbols appear exactly once, in `.rtc.data`, at their old addresses
+and sizes (`0x50000018`–`0x5000004F`, `rtcSleepTest*` last, the `int64_t` pair at
+`…20` and `…28`). A reorder could not have created a new hazard. For stale RTC
+memory to read as valid, the word at the magic's new address would have to
+equal `0xA07011E5`, and the only word that ever holds it is the old magic. So a
+false valid needs the new address to coincide with the old one, which is the
+deployed layout. Any other reorder makes the magic read invalid, which is the
+handled path D-061 relies on. The same holds for `rtcSleepTestMagic` under
+D-011. Whether ESP-IDF v5.5.5's `should_load()` reloads `.rtc.data` on a
+non-deep-sleep reset stays open (D-060). D-061 removed the firmware's dependence
+on it, and this stage did not try to close it.
+
+Record format (version 1, 72 bytes), CRC, D-023, D-057, D-060, D-061 and D-062
 semantics, firmware identity and the command vocabulary are unchanged.
 
 ## Project practice

@@ -418,7 +418,7 @@ filenames or completed extractions**.
 | Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested and **HARDWARE-VALIDATED on clean `eba3b5d`** |
 | LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Extracted 2026-09-24 as `storage`, exactly as this row describes: it uses the record contract and reports log facts, and `autoStorageScanAndRepair()` hands the scan back rather than choosing a sequence. The four-damage-case corruption policy is preserved token for token; no reclamation or storage-full policy was invented (D-058). Host-tested; **healthy-log hardware-smoke validated on clean 1980d94** |
 | Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | **Decision half extracted 2026-10-01 as `sequence_authority`, committed `16a299d`, hardware validated 2026-10-02** (D-062). The module is handed the scan and the reservation and reads neither: no NVS, RTC, LittleFS or `extern`. **Reservation did not move**: `reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater`, and `tests/test_characterization_nvs.py` pins that write token for token, so moving it needed either the first `RTC_DATA_ATTR` in a module, ahead of the retained-state stage, or a changed characterization test. Reservation, `AUTO_SEQ_BLOCK`, the mirror and the NVS read into it wait for the retained-state stage to settle who owns the mirror. The `ensureSequenceReservation()` call after each recovery stays a caller responsibility: the wake cycle calls it too, with `announceNoOp` false |
-| RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
+| RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | **Extracted 2026-10-02 as `autonomous_retained_state`; compiled and host-tested, NOT committed, uploaded or hardware validated** (D-063). It holds the one definition of each of the ten `rtcAuto*` values and `AUTO_RTC_MAGIC`, exported by `extern`, and no function: every writer stayed in the sketch. The `extern` is a named departure from D-047, compensated by a test that pins every writer of all ten. It owns the reservation mirror's definition and lifetime; reservation policy owns the mirror's writes. Power-test RTC state stayed out. The linked image is identical apart from the build stamp |
 | Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
 | Experiment accounting | Tethered interval/experiment state, interval close and checkpoint timing | Planned; calls existing INA/NVS/telemetry interfaces and explicit autonomous-ownership queries |
 | Power tests | Wi-Fi/deep-sleep test state and their separate RTC lifetime | Planned; keep separate from autonomous retained-state ownership. **Attempted out of order on 2026-10-01 and deferred by the user before any code moved.** Today the code calls about 16 sketch-resident names: Wi-Fi control, `autonomousOwnsBoard()`/`autonomousState`/`autonomousTestArmed`/`autonomousTestRunning`, the accounting predicates plus `resumeIntervalAccounting()`/`intervalAccountingBlocked`, boot-wake diagnostics and `experimentId`. The sketch in turn reads `sleepPowerTestRunning`, `rtcSleepTestCycle`, `sleepPowerTestAwakeStartedMs`, `SLEEP_POWER_TEST_AWAKE_MS` and `inaShutdownActive`. Moving it now would need the project's first `extern`s or upward calls. Extract it after retained state, autonomous ownership and accounting, so its dependencies point down |
@@ -661,10 +661,22 @@ undecided. Details: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-a
 
 **Sequence authority's decision half was extracted on 2026-10-01 (D-062)**;
 it is committed as `16a299d` and hardware validated on 2026-10-02. Reservation
-stayed in the sketch with the RTC mirror it writes. **The next structural candidate is the
-RTC-retained autonomous state**, which must also decide who owns
-`rtcAutoSeqHighWater` and therefore where reservation goes. The paragraph
-below is the 2026-09-24 reasoning that chose this stage:
+stayed in the sketch with the RTC mirror it writes.
+
+**The RTC-retained autonomous state was extracted on 2026-10-02 (D-063)**,
+compiled and host-tested, not committed or hardware validated. It answered the
+question D-062 left: retained state owns `rtcAutoSeqHighWater`'s definition and
+lifetime, and reservation policy owns its writes. **The next structural
+candidate is sequence reservation**: `AUTO_SEQ_BLOCK`, `reserveSequenceBlock()`
+and `ensureSequenceReservation()`, as its own module that includes
+`autonomous_retained_state.h`. The user chose to keep it out of the
+retained-state stage because D-055 lists reservation and retained lifetime as
+separate boundaries, and because these rows are not permission to batch them.
+
+Before D-063, the paragraph that chose the retained-state stage read: "The next
+structural candidate is the RTC-retained autonomous state, which must also
+decide who owns `rtcAutoSeqHighWater` and therefore where reservation goes."
+The paragraph below is the 2026-09-24 reasoning that preceded both stages:
 
 **The next structural candidates are sequence authority/reservation and the
 RTC-retained autonomous state**, in that order or with a stated reason for
@@ -677,7 +689,8 @@ place the D-023 log-versus-NVS reconciliation happens.
 | ~~Record format / CRC~~ **BUILT 2026-09-24** | Nothing else moved: no LittleFS, RTC, sequence allocation or scheduling | Done as stated: exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics, now also asserted per field at compile time |
 | ~~LittleFS mechanics~~ **BUILT 2026-09-24** | No sequence-authority or storage-full policy decision | Done as stated. Append/read/recovery behavior is preserved, including the four-case policy and the refusal to repair mid-file damage; `tests/test_characterization_storage_recovery.py` did follow the code, needing only to learn that boot recovery is now two functions. Sequence authority stayed in `autoStorageRecover()` in the sketch and storage-full policy is still undecided (D-058). **Healthy-log hardware smoke passed on clean 1980d94; damaged-log hardware branches remain untested** |
 | ~~Sequence authority decision~~ **BUILT 2026-10-01, `16a299d`, hardware validated 2026-10-02**; reservation still to move | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases executed unchanged through `autoStorageRecover()`; serial message strings byte-identical in the image. Reservation (NVS write failure, duplicate avoidance) did not move and still needs a home; reclamation must revisit authority explicitly |
-| RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
+| ~~RTC-retained autonomous state~~ **BUILT 2026-10-02, D-063, not committed or hardware validated** | No record encoding, filesystem or scheduler. Done as stated: the module defines no function | Single definitions are now test-pinned and confirmed in the image (`nm`: each symbol once, in `.rtc.data`, same addresses). Retained lifetime, session-clock continuity and separate power-test state need the full 2026-09-17 acceptance sequence on hardware |
+| Sequence reservation | `AUTO_SEQ_BLOCK`, `reserveSequenceBlock()`, `ensureSequenceReservation()`: the writes to the mirror, not its definition | Next structural candidate after D-063. Its module can include `autonomous_retained_state.h`. The NVS assertion that the mirror moves only after the write succeeds must survive unchanged, and so must D-063's writer-set test — **both are keyed on function name, so a relocation under the same name leaves them green.** Measured on 2026-10-02 by doing the move in a scratch copy, not inferred (D-063). So **this stage gets no red test for free**: it needs its own positive assertions, the way D-063's single-definition and `extern`-only-header tests were its real evidence. If the stage does change who writes the mirror, D-063's test fails naming the new set, and that change gets stated there rather than absorbed |
 | Autonomous scheduling / policy | Consume mechanics/state through explicit boundaries | Existing deadline, handoff and command-pump contracts; preserve the known overrun xfail until its own fix |
 | Experiment, power-test, session and command concerns | Retain accounting ownership and the separation of transport claims from leases | Scoped characterization, required local gate and later deliberate hardware checks for each move |
 
@@ -755,7 +768,13 @@ them, including lease expiry (step 7), five consecutive unclaimed records
   declared `extern` in the header. Defining one in a header would place a
   separate copy in each translation unit, and the autonomous session clock
   would silently reset. This is the single highest-risk detail in the whole
-  plan.
+  plan. **DONE for the ten `rtcAuto*` values on 2026-10-02 (D-063):** they are
+  defined only in `autonomous_retained_state.cpp`, and
+  `tests/test_characterization_autonomous_retained_state.py` pins one
+  definition each and an `extern`-only header. Precisely: a `static` in a header
+  links cleanly and gives each unit a silent copy. A non-static definition in a
+  header fails to link, but only once a second unit includes it. The power-test
+  pair is still defined in the sketch.
 - **There are twelve `RTC_DATA_ATTR` globals, not eleven, and they split across
   two ownership domains.** Ten are `rtcAuto*` and belong to retained autonomous
   state; `rtcSleepTestMagic` and `rtcSleepTestCycle` belong to power-test state

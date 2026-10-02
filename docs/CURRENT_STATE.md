@@ -1,7 +1,8 @@
 # Current state — BMW Solar Logger
 
-Updated **2026-10-02**, after the `16a299d` hardware acceptance and the cadence
-change. Read the canonical documents in the order required by
+Updated **2026-10-02**, after the `16a299d` hardware acceptance, the cadence
+change, and the reviewed-but-uncommitted D-063 retained-state extraction. Read
+the canonical documents in the order required by
 [AGENTS.md](../AGENTS.md), then verify fresh Git/source and hardware ownership.
 Navigation: [INDEX.md](INDEX.md).
 
@@ -12,23 +13,40 @@ accreted into a log; do not let it do that again.
 
 ## Next action
 
-**Extract the RTC-retained autonomous state**, BACKLOG's documented next
-candidate. Give it a fresh CODE session with a self-contained kickoff, printed in
-a single fenced code block per [CLAUDE.md](../CLAUDE.md).
+**Commit the D-063 retained-state extraction, then upload and run the full
+hardware acceptance.** The extraction is built, host-tested and
+orchestrator-reviewed; it is **not committed and not uploaded**. BACKLOG requires
+more than the short extraction smoke for anything touching retained state: run
+the complete [2026-09-17 acceptance sequence](LAB_NOTES.md#2026-09-17-correctness-stint---six-must-fix-defects-resolved-first-tests-added),
+including lease expiry (step 7), five consecutive unclaimed records (step 8) and
+the refusals (steps 9 and 10). The 2026-10-02 LAB_NOTES entry lists the exact
+transcript lines that would show retained state still works, and the failure
+signature if it does not.
 
-Nothing is blocked. Firmware and tests are committed and clean, and the board is
-running the newest commit.
+After that, the next modularization candidate is **sequence reservation**:
+`AUTO_SEQ_BLOCK`, `reserveSequenceBlock()` and `ensureSequenceReservation()` as
+their own module, which can now include `autonomous_retained_state.h`. D-063
+settled who owns the mirror, which is what was blocking it.
+
+Nothing is blocked.
 
 ## Repository and hardware snapshot
 
-Canonical path: `/Users/afxjzs/dev/projects/solar-charger`. HEAD **`45e07c3`** on
-main, ahead of origin/main; **no fetch and no push**. Index empty.
+Canonical path: `/Users/afxjzs/dev/projects/solar-charger`. HEAD **`65f55d1`** on
+main, **12 commits ahead of origin/main; no fetch and no push.** Index empty.
 
-**The only uncommitted work is the capture-gap stage** (D-059):
-`tools/charger-transitions.py`, `tests/test_charger_transitions.py`, and the
-pandas entries in `pyproject.toml` / `uv.lock`. It is complete and host-tested,
-and has been awaiting a commit-or-drop decision for several days. Nothing else in
-the tree is dirty.
+Two separate pieces of uncommitted work, and they must not be committed together:
+
+- **The D-063 retained-state extraction**, built 2026-10-02 and reviewed the
+  same day. New `Arduino/solar-logger/autonomous_retained_state.{h,cpp}` and
+  `tests/test_characterization_autonomous_retained_state.py`; modified
+  `solar-logger.ino` (one `#include`, the definitions removed, three comment
+  fixes), `sequence_authority.h` (comment only), and the DECISIONS, LAB_NOTES,
+  BACKLOG and CURRENT_STATE entries for it. Ready to commit.
+- **The capture-gap stage** (D-059): `tools/charger-transitions.py`,
+  `tests/test_charger_transitions.py`, and the pandas and tzdata entries in
+  `pyproject.toml` / `uv.lock`. Complete and host-tested, and still awaiting a
+  commit-or-drop decision after several days.
 
 **The board runs `16a299d`**, verified by `VERSION` on 2026-10-02:
 `0.3.0-dev / 16a299d / solar-logger-protocol-ack-v3`. Experiment 3 is intact,
@@ -49,10 +67,15 @@ headroom. That change cleared `rtcAutoMagic` and re-armed, which produced boot i
 | Running totals from an unread log (D-060) | Committed `58a4e09`, hardware validated 2026-10-01 |
 | Retained-state validity (D-061) | Committed `6192c2d`, hardware validated 2026-10-02 |
 | Sequence authority (D-062) | Committed `16a299d`, **hardware validated 2026-10-02** |
+| Retained autonomous state (D-063) | Built and host-tested 2026-10-02, orchestrator-reviewed, **not committed, not uploaded, not hardware validated** |
 | Capture-gap report (D-059) | Implemented and host-tested, **still uncommitted** |
-| Software gate at HEAD | `ALL OK` — **529 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense **8/8** |
+| Software gate, working tree 2026-10-02 | `ALL OK`, exit 0 — **563 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense **9/9**. Run twice: by the CODE stage and independently by the orchestrator |
 
-Sketch: **6,680 lines**. Seven modules extracted.
+Sketch: **6,670 lines**. Eight modules extracted. D-063 changed no byte of the
+image: ten allocated sections identical in address and size, four differing
+bytes in total, all of them the core's compile-time stamp, and identical symbol
+tables. Audit ELFs rather than `.bin` files — see the 2026-10-02 LAB_NOTES entry
+for why a `.bin` diff shows 69 bytes.
 
 ## Latest hardware evidence
 
@@ -89,8 +112,12 @@ All recorded in BACKLOG with reasons:
 - Long diagnostic output is silently truncated; HELP is the usual casualty.
 - Generic `STATUS` reports uninitialized experiment zeros on a timer wake.
 - No storage-full policy.
-- Power-test extraction deferred until its lower layers move: it would need the
-  project's first `extern`, which D-049 forbids.
+- Power-test extraction deferred until its lower layers move. It would need
+  **upward calls** into Wi-Fi control, autonomous ownership and the accounting
+  predicates, which is the part that still blocks it. The `extern` half of that
+  objection is spent: D-063 established the project's first one, deliberately and
+  downward, so a later module may declare its own state rather than reach up into
+  the sketch.
 
 ## Hardware and installation
 
@@ -121,9 +148,14 @@ no disable jumper has been located.
   refuses destructive commands.
 - `tools/storage-smoke.py`, `tools/validate-dump.py`,
   `tools/check-totals-continuity.py` — drive and judge a hardware acceptance.
-- `Arduino/solar-logger/sequence_authority.{h,cpp}` — the newest module, and the
-  cleanest seam in the project: a pure function with no `extern` and no upward
-  call. Use it as the model for the next extraction.
+- `Arduino/solar-logger/sequence_authority.{h,cpp}` — the cleanest seam in the
+  project: a pure function with no `extern` and no upward call. Still the model
+  when a stage moves a *decision*.
+- `Arduino/solar-logger/autonomous_retained_state.{h,cpp}` — the newest module,
+  and the model when a stage moves *state* rather than a decision: one definition
+  of each value in one translation unit, exported `extern`, and no transition.
+  Its header explains why the `extern` is a named departure from D-047 and what
+  test compensates for it.
 - `data/samples.csv` — the only wall-clock reference in the project. Durable
   records carry `epoch=0` and `time=UNKNOWN`. Experiment 3 began
   `2026-09-16T10:07:44`.

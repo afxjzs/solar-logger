@@ -6,6 +6,143 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-10-02: RTC-retained autonomous state extracted as the eighth module (D-063) — NOT committed, uploaded or hardware validated
+
+CODE stage, run against HEAD `65f55d1` plus the uncommitted capture-gap work.
+Software only: no upload, no serial port and no device command. Experiment 3 was
+not touched. The boundary was chosen by the user from three options: move the
+ten definitions and the magic, export them by `extern`, and leave every writer
+and all of reservation in the sketch. See D-063.
+
+**Files.** New: `Arduino/solar-logger/autonomous_retained_state.h`, `.cpp` and
+`tests/test_characterization_autonomous_retained_state.py`. Changed:
+`solar-logger.ino` (the definitions replaced by an `#include`, and three
+comments that named the old location) and a comment-only edit in
+`sequence_authority.h`. **No existing test file changed.**
+
+**Red, then green.** The new file has 34 tests. Before the module existed, 32
+failed and 2 passed:
+
+- Real red evidence came from a second run, with the module files in place and
+  the sketch's definitions not yet deleted. Three tests then failed by name:
+  `solar-logger.ino defines rtcAutoMagic a second time`, `solar-logger.ino
+  defines AUTO_RTC_MAGIC a second time`, and the writer-set test's
+  `rtcAutoMagic is written outside a function body other than at its
+  definition`.
+- The 30 parametrized boundary guards are absence guards. They failed first
+  only because the files did not exist, and they would pass against an empty
+  module.
+- `test_the_module_defines_no_function` and
+  `test_only_the_known_functions_write_retained_state` passed before the move.
+  The second is the compensating control for the `extern`, not evidence that
+  the move happened.
+
+| Gate | Result |
+| --- | --- |
+| Baseline `tools/check.sh` at `65f55d1` plus the capture-gap work | `ALL OK`, exit 0, **529 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense 8/8 |
+| After the move, same tree | `ALL OK`, exit 0, **563 passed / 1 xfailed**, flash **1,106,273 B (unchanged)**, globals 36,332 B (unchanged), IntelliSense **9/9** |
+
+The 34 added passes are the new file. Both gates ran on the combined working
+tree; no isolated gate was run. The strict short-cadence overrun `xfail` is
+still xfailed.
+
+**Token audit (D-047).** The new sketch equals HEAD's sketch with one 66-token
+run removed and `# include "autonomous_retained_state.h"` inserted, checked by
+reconstruction rather than by a diff. The run's magic definition is verbatim in
+the header, and its ten definitions are verbatim and in order in the `.cpp`.
+`sequence_authority.h` is token-identical to HEAD. Sketch: 6,680 lines before,
+6,670 after.
+
+**Image comparison.** Both images are `--clean` builds, without the uploader's
+revision injection; ELF copies were kept in session scratchpads, not in the
+repository. All ten allocated `PROGBITS` sections keep their address and size,
+and **exactly four bytes differ across all of them**: the core's compile-time
+stamp in its "Software Info" string inside `.flash.rodata`. The two symbol
+tables are identical — sorted `riscv32-esp-elf-nm -S` output diffs empty across
+all 9,927 entries. **Measured, not predicted:** before the move the CODE stage
+predicted a few bytes of flash change from cross-unit address loads. That was
+wrong; the change is zero.
+
+Verified independently by the orchestrator on 2026-10-02 from its own pair of
+`--clean` builds, whose stamps were `11:19:42` against `13:10:27`. The CODE
+stage reported `11:05:36` against `13:01:12` from its own builds, and reported
+the symbol count as 7,900, which does not reproduce from `nm -S` (9,927 entries)
+or from a defined code/data filter (7,603). The conclusion reproduces exactly;
+only that one count did not, and it is corrected above.
+
+**Audit ELFs, not `.bin` files.** The two `.bin` images differ in 69 bytes, in
+three clusters, and only four of them are the ELF difference above. The other
+65 are esptool's: a 32-byte `app_elf_sha256` patched into the application
+descriptor, and a 32-byte image SHA-256 plus a checksum byte appended at the
+tail. Both are hashes of the ELF, so neither can be inside it, and both change
+whenever the stamp does. Recorded because a future audit diffing `.bin` files
+will see 69 and should not hunt for 65 bytes of code.
+
+**RTC layout.** All twelve project RTC symbols appear exactly once, in
+`.rtc.data` (section 3), at the same addresses and sizes before and after:
+`0x50000018`–`0x5000004F`, `rtcSleepTest*` last, the `int64_t` totals at
+`0x50000020` and `0x50000028`, both 8-byte aligned. The open ESP-IDF v5.5.5
+`should_load()` question (D-060) was not pursued.
+
+**Kickoff correction.** The kickoff's writer table missed two writers:
+`runAutonomousWakeCycle()` also writes `rtcAutoNextSeq` and `rtcAutoCycleCount`
+by `++`. The orchestrator verified the correction. There are still nine writer
+functions in total.
+
+**Two orchestrator claims corrected by the CODE stage, both checked.**
+
+- The `nm` symbol count of 7,900 *is* reproducible; the fault was not naming the
+  command. It is `riscv32-esp-elf-nm -S --size-sort | wc -l`, which lists only
+  symbols carrying a size, against 9,927 for plain `nm -S`. Confirmed on both
+  ELFs. The record above keeps the identical-symbol-tables form because it
+  states its own command.
+- **The writer-set test survives a relocation, and the orchestrator was wrong to
+  say the reservation stage would have to update it.** Settled by experiment
+  rather than by reading, on the CODE stage's own suggestion: in a scratch copy
+  of the sketch directory, `reserveSequenceBlock()` was cut verbatim out of
+  `solar-logger.ino` into a new `sequence_reservation.cpp`, and the tree was
+  re-read through `firmware_source`. The function was found at its new location,
+  the mirror's writer set stayed `{autoStorageRecover, reserveSequenceBlock}`,
+  and the file-scope-write check held, so the test passes unedited. Two negative
+  cases confirm it is still a guard rather than vacuous: adding
+  `sneakyExtraWriter()` produced a three-name set, and renaming the writer to
+  `reserveSequenceBlockV2` produced the renamed set. Both correctly fail. The
+  consequence is recorded in BACKLOG — the reservation stage gets no red test
+  from this and needs its own positive evidence.
+
+**Not changed, deliberately.** `stopAutonomousTest()` still leaves the running
+totals alone (BACKLOG). One test docstring is now out of date and was left for
+the orchestrator: `tests/test_characterization_sequence_authority.py` says the
+mirror `rtcAutoSeqHighWater` itself was left in the sketch. Its assertions are
+still true; only the mirror's definition moved.
+
+**Hardware acceptance needed, not performed.** Retained state needs the full
+2026-09-17 acceptance sequence, not only the extraction smoke (BACKLOG). The
+image is byte-identical apart from the build stamp, so this checks the build and
+upload, not new code paths. The transcript lines that would show the move kept
+retained state working:
+
+- **Retained lifetime across the wake boundary.** Step 8: five consecutive
+  unclaimed timer wakes with the same `boot_id`, `[AUTO] Cycle:` increasing by
+  one per wake, and record sequences contiguous. A broken retained definition
+  would show up as `[AUTO] WARNING: Timer wake with no valid RTC session
+  state.` on every wake, a new `boot_id` each time, and cycle 0 every time.
+- **Session-clock continuity.** Step 8: `session_elapsed_ms` never decreases
+  while `boot_id` is unchanged (D-033), each `interval_ms` is near the 300 s
+  cadence, and `[AUTO] Commanded sleep for that interval:` is consistent with
+  that cadence. Step 6's RELEASE on a timer wake and step 7's lease expiry
+  must each be followed by a record that continues `session_elapsed_ms` rather
+  than restarting near zero.
+- **Power-test RTC state separate.** Shown at build level, not by the sequence:
+  `rtcSleepTestMagic` and `rtcSleepTestCycle` keep their addresses, stay in the
+  sketch and are absent from the module, which a test pins. Step 10 (`POWER TEST
+  STOP` refused during a rendezvous, next record unaffected) shows only that the
+  power-test path still leaves autonomous state alone. Nothing in the sequence
+  arms a deep-sleep power test. `LOGGER AUTONOMOUS STATUS` on a rendezvous
+  should print `[AUTO] RTC state valid: YES` and a `Cycles this power-on:` count
+  that kept rising since the upload's cold boot.
+- **Refusals.** Steps 9 and 10, as written.
+
 ## 2026-10-01: Sequence authority extracted as the seventh module (D-062) — NOT committed, uploaded or hardware validated
 
 CODE stage, run against HEAD `6192c2d`. Software only: no upload, no serial

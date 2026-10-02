@@ -14,10 +14,12 @@
 // RTC_DATA_ATTR variable and no `extern`: every dependency is a parameter
 // (D-050), and it calls nothing but Serial.
 //
-// WHAT IS NOT HERE. Reserving a block, the block width, and the RTC mirror of
-// the reservation stay in solar-logger.ino: reserveSequenceBlock() and
-// ensureSequenceReservation() write rtcAutoSeqHighWater, which is RTC-retained
-// autonomous state, and its owner is a later stage. Reseeding the RTC running
+// WHAT IS NOT HERE. Reserving a block, the block width, and the writes to the
+// RTC mirror of the reservation stay in solar-logger.ino: reserveSequenceBlock()
+// and ensureSequenceReservation() write rtcAutoSeqHighWater, which is
+// RTC-retained autonomous state. Its definition and lifetime belong to
+// autonomous_retained_state (D-063); reservation policy, which owns its writes,
+// is a later stage. Reseeding the RTC running
 // totals stays in solar-logger.ino's autoStorageRecover() too (D-060, D-061);
 // it shares a caller with this decision, not an owner.
 //

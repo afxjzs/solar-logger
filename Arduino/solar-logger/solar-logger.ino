@@ -35,8 +35,14 @@
 
 // Sequence authority: which sequence the next record gets, reconciled from the
 // boot-recovery scan and the NVS reservation (D-023). Reading the reservation,
-// reserving blocks and the RTC mirror of the reservation stay in this file.
+// reserving blocks and every write to the RTC mirror of the reservation stay in
+// this file; the mirror's definition is in autonomous_retained_state.cpp.
 #include "sequence_authority.h"
+
+// RTC-retained autonomous state: the one definition of each value carried
+// across deep sleep, and the magic that says whether it is valid. WHEN any of
+// them changes is decided in this file; the module owns no transition.
+#include "autonomous_retained_state.h"
 
 // ============================================================================
 // BMW SOLAR LOGGER
@@ -503,30 +509,11 @@ struct AutoSleepPlan
 // to be: it arrives from storage.h with the includes, as AutoRecord arrives
 // from record_format.h.
 
-// ----------------------------------------------------------------------------
-// RTC-retained autonomous state
-// ----------------------------------------------------------------------------
-//
-// Retained across deep sleep, lost on power loss, which is exactly the
-// lifetime of a measurement session. Guarded by a magic value because RTC
-// memory contents are undefined after a cold boot.
-//
-// Everything here that must survive power loss lives in NVS or in the durable
-// log instead.
-// ----------------------------------------------------------------------------
-
-constexpr uint32_t AUTO_RTC_MAGIC = 0xA07011E5;
-
-RTC_DATA_ATTR uint32_t rtcAutoMagic = 0;
-RTC_DATA_ATTR uint32_t rtcAutoBootId = 0;
-RTC_DATA_ATTR uint32_t rtcAutoSessionElapsedMs = 0;
-RTC_DATA_ATTR uint32_t rtcAutoIntervalStartMs = 0;
-RTC_DATA_ATTR uint32_t rtcAutoNextSeq = 0;
-RTC_DATA_ATTR uint32_t rtcAutoSeqHighWater = 0;
-RTC_DATA_ATTR int64_t rtcAutoRunChargeUAh = 0;
-RTC_DATA_ATTR int64_t rtcAutoRunEnergyUWh = 0;
-RTC_DATA_ATTR uint32_t rtcAutoCycleCount = 0;
-RTC_DATA_ATTR uint32_t rtcAutoCommandedSleepMs = 0;
+// The RTC-retained autonomous state, the ten rtcAuto* values and
+// AUTO_RTC_MAGIC, used to be defined here. It arrives from
+// autonomous_retained_state.h with the includes, which defines nothing: the one
+// definition of each is in autonomous_retained_state.cpp. Every function that
+// writes them is still in this file.
 
 bool autonomousTestArmed = false;
 bool autonomousTestRunning = false;
@@ -3032,8 +3019,10 @@ bool loadAutonomousSettings()
 // inside a reserved block abandons the block: the next boot starts past it,
 // producing a visible GAP rather than a silent REUSE.
 //
-// How wide a block is, and the RTC-retained mirror of the reservation, stay
-// here. saveSequenceHighWater() stores the number and reports whether the
+// How wide a block is, and every write to the RTC-retained mirror of the
+// reservation, stay here; the mirror itself is defined in
+// autonomous_retained_state.cpp, which owns its lifetime and none of its
+// writes (D-063). saveSequenceHighWater() stores the number and reports whether the
 // store worked; which of the log tail and the reservation is authoritative is
 // D-023 policy and is decided in sequenceAuthorityNext().
 //
@@ -3241,8 +3230,9 @@ void printAutoRecord(const AutoRecord &record)
 // the append. Which sequence number the next record carries moved to
 // sequence_authority.h / .cpp on 2026-10-01: the D-023 reconciliation of the
 // log against the NVS reservation. What is left here composes the two with the
-// RTC-retained state neither module owns: the mirror of the reservation and the
-// running totals (D-055).
+// RTC-retained state neither module writes: the mirror of the reservation and
+// the running totals (D-055). Their definitions moved to
+// autonomous_retained_state.cpp on 2026-10-02; their writes did not (D-063).
 // ============================================================================
 
 // Boot recovery. Returns the sequence to use for the next record.
