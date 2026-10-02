@@ -6,6 +6,763 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
+## 2026-10-01: Sequence authority extracted as the seventh module (D-062) — NOT committed, uploaded or hardware validated
+
+CODE stage, run against HEAD `6192c2d`. Software only: no upload, no serial
+port and no device command. Experiment 3 was not touched. The boundary was
+chosen by the user: move only the D-023 decision, and leave reservation and the
+RTC mirror in the sketch. See D-062 for the reasoning.
+
+**Files.** New: `Arduino/solar-logger/sequence_authority.h`, `.cpp` and
+`tests/test_characterization_sequence_authority.py`. Changed:
+`solar-logger.ino` (the decision replaced by a call, plus the include and
+comments), comment-only edits in `storage.h` and `storage.cpp` that named the
+old location, and one harness line in
+`tests/test_characterization_storage_recovery.py`. That line adds
+`sequenceAuthorityNext` to `EXTRACTED`, so the host build of
+`autoStorageRecover()` links it; the docstring's function list gained a line
+too. No assertion in an existing test changed.
+
+**Red, then green.** Before the code existed, the new test file failed 30 of 30.
+Only two of those are real red evidence: the decision was "defined 0 times",
+and it had no caller. The other 28 are absence guards, and they failed only
+because the module files did not exist yet. They pass on an empty module too,
+which is why the two positive tests exist.
+
+| Gate | Result |
+| --- | --- |
+| Baseline `tools/check.sh` at `6192c2d` plus others' uncommitted work | `ALL OK`, **499 passed / 1 xfailed**, flash 1,106,195 B, globals 36,332 B, IntelliSense 7/7 |
+| After the move, same tree | `ALL OK`, **529 passed / 1 xfailed**, flash **1,106,273 B (+78)**, globals 36,332 B (unchanged), IntelliSense **8/8** |
+
+The 30 added passes are the new file. Both gates ran on the combined working
+tree. No isolated gate (`6192c2d` plus only this stage's files) was run.
+
+**Image comparison.** Both images were built with `--clean` into a scratch
+directory, without the uploader's revision injection. `.flash.text` +34 B:
+`sequenceAuthorityNext` 244 B is new, and `autoStorageRecover(bool)` went from
+522 to 312 B. No other symbol changed size. `.eh_frame` +44 B, with exactly one
+new FDE (6,356 to 6,357). The 1,757 human-readable rodata strings are identical.
+The raw rodata bytes differ only in address-valued bytes and one time-of-build
+string, 13:11:53 versus 13:14:45. That string does not come from the project
+sources, which contain no `__TIME__`.
+
+**Token audit (D-047).** Five runs, 163 tokens, left the sketch. What came in
+is the `#include`, the function name and its arguments `scan ,
+rtcAutoSeqHighWater`. The module body matches the removed tokens except that
+`rtcAutoSeqHighWater + 1` became `reservedHighWater + 1`, plus `return next`.
+`logIntact` and `fromLog` are now computed after the silent
+`loadSequenceHighWater()` instead of before it, which cannot change their
+values or the output.
+
+**Sketch:** 6,735 lines before, 6,680 after.
+
+**Hardware acceptance needed, not performed.** This stage needs the normal
+smoke after an extraction (BACKLOG "Hardware smoke test after an extraction
+group"). The INFO path does not run this code. The cold-boot and arm paths do,
+so check the boot transcript's `[STORAGE] Next sequence from log: …, from NVS
+reservation: …, using: …` and the provably-intact line, and confirm the next
+record continues the log with no gap. Damaged-log branches stay host-tested
+only.
+
+## 2026-10-01: Recovery is told whether the retained totals were valid (D-061) — NOT committed, uploaded or hardware validated
+
+CODE stage. Software only: no upload, no serial port, no reset, clear, erase or
+corruption injection. Experiment 3 untouched. Two files changed in the working
+tree: `solar-logger.ino` (`autoStorageRecover()` and its four call sites) and
+`tests/test_characterization_storage_recovery.py`. The kickoff reports that the
+board runs `58a4e09` after a passed healthy-log acceptance today. That
+acceptance is not recorded in these docs yet; this stage did not check it.
+
+### The change
+
+`autoStorageRecover()` now takes `bool retainedStateValid`. Each call site
+captures `rtcAutoMagic == AUTO_RTC_MAGIC` into a local immediately before it
+sets the magic, and passes that local in. When the scan could not read the log
+(`openFailed || readError`):
+
+- valid: the totals are carried, as under D-060, and a new line says the
+  retained state was valid
+- not valid: the totals are set to 0, and two lines say the retained state was
+  not valid and that the totals restart at zero
+
+Every readable log reseeds from its last record exactly as before. Policy: D-061.
+
+**Why a parameter.** The validity exists only at the call site, for one
+statement, before the magic is set. A parameter makes each of the four callers
+state it, and the compiler rejects a caller that does not. Moving the magic
+assignment after the call and reading the global inside recovery would have
+worked too, but it would hide an ordering rule in four places. BACKLOG calls
+that kind of latent ordering dependency the worst thing to carry across a file
+split. The harness also needs no model of `rtcAutoMagic`: it passes the bool
+from a new eighth argument, which defaults to invalid, as after a power-on
+reset. The return type is still `uint32_t`, so the slice-by-name assertion is
+unchanged.
+
+### Is the cold-boot resume reachable with valid retained state? Yes, in two ways
+
+Read from the source, not observed. The resume site in `setup()` is the
+`else` branch after `autonomousColdBootMaintenanceWindow()`.
+
+1. **A reset that is not a deep-sleep wake**, if RTC memory survives it. That
+   is exactly the ESP-IDF `should_load()` question D-060 could not close. The
+   firmware no longer needs the answer: valid carries and says so, invalid
+   zeroes and says so.
+2. **A timer wake whose first NVS load reads "not armed"**. `setup()` loads the
+   armed flag twice, once in the timer-wake branch and again during ordinary
+   initialization. `loadAutonomousConfig()` turns a namespace that will not
+   open into "not armed" with no signal (BACKLOG, "NVS load failures become
+   plausible defaults with no signal"). If the first load fails and the second
+   succeeds, the timer branch is skipped with the magic still valid, and the
+   resume runs. That needs a transient NVS failure and has never been seen.
+
+It is reached with **invalid** state by a timer wake that lost RTC state and
+then failed its storage mount, which falls through on purpose.
+
+A timer wake claimed by a host does **not** reach the resume. The claim sets the
+USB transport bit, `anyHostConnected()` reads only that bit, and only
+`connectionRelease()` clears it. Nothing between the rendezvous return and the
+resume calls `connectionRelease()`, so the "host session is held" branch is
+taken. A wake disarmed during its rendezvous does not reach it either, because
+`autonomousTestArmed` is false. A failed sleep (`esp_sleep_enable_timer_wakeup`
+or `esp_deep_sleep_start` returning) returns from `setup()` before the resume.
+
+### Behavior that changes from 58a4e09
+
+Only when the log cannot be read. A healthy, repaired-tail or mid-file-damaged
+log reseeds as before, and no new line is printed.
+
+- **Timer-wake RTC-loss rebuild and handoff rebuild:** both sit inside
+  `rtcAutoMagic != AUTO_RTC_MAGIC`, so they now zero instead of carrying. This is
+  the case the kickoff named.
+- **Arm (`LOGGER AUTONOMOUS ON`):** the magic is ordinarily 0 here, because
+  `stopAutonomousTest()` clears it and so does the image initializer. A re-arm
+  after an in-session `LOGGER AUTONOMOUS OFF` used to carry the previous
+  session's totals under D-060. It now zeroes them and says so. The values are
+  still in RTC memory, but the firmware's own guard has declared them invalid,
+  and this stage follows the guard.
+- **Cold-boot resume:** follows whatever the magic was, as above.
+
+Sequence selection, D-023 and the NVS floor are unaffected. The next sequence
+was identical in each valid/invalid pair below.
+
+### Tests first, and the red-check
+
+Written before the firmware change. They replace D-060's two retained-totals
+tests:
+
+- `test_an_unread_log_carries_valid_retained_totals_and_says_so`,
+  parametrized `open-failure` / `short-read`
+- `test_an_unread_log_zeroes_invalid_retained_totals_and_says_so`, same
+  parametrization
+- `test_a_readable_log_still_replaces_whatever_the_totals_held`, now seeded
+  VALID, so an implementation that preferred valid retained totals over a
+  readable log would fail it
+- `test_every_recovery_call_is_told_whether_retained_state_was_valid`, a source
+  test. The harness runs recovery, not its callers, and validity read after the
+  magic is set is always true. So it pins capture, then set, then call, at each
+  of exactly four sites.
+
+Red-check: the new driver calls `autoStorageRecover(retainedValid)`, which
+`58a4e09` cannot compile, and erroring is not failing. Staged in a detached
+worktree at `58a4e09`: the new test file copied in, and only the definition
+widened to an **unnamed** `bool`. An unnamed parameter cannot be read, so the
+body under test is exactly `58a4e09`'s. The call sites were left unchanged; the
+harness does not compile them. The firmware itself was unedited at the time
+(`git diff HEAD -- Arduino/` empty). Result: **5 failed, 1 passed**.
+
+- invalid, both cases: `(5555, 6666) == (0, 0)` failed. The defect.
+- valid, both cases: failed only on the new validity line. The values were
+  already carried, which is D-060's half that stays.
+- source-order test: failed, because no call passes validity.
+- healthy log: passed, as it must.
+
+After the fix the storage file runs **88 passed** (85, minus the 3 replaced,
+plus 6). The script was a scratch copy of the September 29 `redcheck.sh`
+technique. It is not preserved in `logs/evidence/`, which this stage did not
+touch.
+
+Serial from the fixed harness, disposable fixtures, retained seeded 5555/6666:
+
+```text
+[STORAGE] Running totals could NOT be recovered: the log could not be opened, so none of it was read.
+[STORAGE] Retained RTC state was valid before recovery, so its totals are the best figure available.
+[STORAGE] Carrying the retained totals instead: Qsum_uAh=5555 Esum_uWh=6666. These were NOT checked against the log.
+```
+
+```text
+[STORAGE] Running totals could NOT be recovered: a short read stopped the scan before the end of the log.
+[STORAGE] Retained RTC state was NOT valid before recovery, so there are no totals to carry.
+[STORAGE] Restarting the running totals at Qsum_uAh=0 Esum_uWh=0. The next record does NOT continue the log's totals.
+```
+
+The other two combinations print the same lines with the other reason.
+
+### Gate
+
+`tools/check.sh`, each `ALL OK`, exit 0, all seven steps PASS:
+
+| Scope | pytest | Flash / globals |
+| --- | --- | --- |
+| Isolated baseline: detached worktree at clean `58a4e09` | 472 passed, 1 xfailed | 1,105,707 B / 36,332 B |
+| Isolated fix: that worktree plus only the two changed files | **475 passed, 1 xfailed** | **1,106,195 B** / 36,332 B |
+| Combined working tree before the change | 496 passed, 1 xfailed | 1,105,707 B / 36,332 B |
+| Combined working tree after the change, including other stages' uncommitted work | 499 passed, 1 xfailed | 1,106,195 B / 36,332 B |
+
+Flash rose 488 bytes, which covers the new branch and its three strings. It was
+not broken down by symbol. Globals are unchanged. Pyright 0/0/0, IntelliSense
+7/7. The worktree was removed afterwards.
+
+### Hardware acceptance still needed
+
+A healthy-log smoke only. After upload, boot recovery must still reseed the
+totals from the last record and print neither "could NOT be recovered" nor
+"Retained RTC state". New records' Qsum/Esum must continue from the preceding
+record. Both unreadable branches are host-injected only, which does not show
+what a physical LittleFS open or read fault does. One must not be produced by
+damaging the Experiment 3 log.
+
+## 2026-09-29: D-060 reviewed and committed as 58a4e09 — one OPEN issue found, one citation corrected
+
+Orchestrator review and close of the D-060 CODE stage recorded in the entry
+below. No board was touched. The board still runs `1980d94` and has now not run
+two commits, `44d8b27` and `58a4e09`.
+
+### Gate re-run on the working tree
+
+`tools/check.sh` exit 0, `ALL OK`, all seven steps PASS. pytest **496 passed,
+1 xfailed** in 55.87 s; pyright 0/0/0; warning-free `--clean` compile;
+IntelliSense 7/7. Flash **1,105,707 B** (84%), globals **36,332 B** (11%). Every
+figure the CODE stage reported reproduces here, including the **+434** flash
+delta over `44d8b27`.
+
+### Verified against the source, not the report
+
+- **`Print` really does take `long long`.** The new message casts the totals to
+  `long long`, and a warning-free compile would not distinguish an integer
+  overload from a silent promotion to `double`. Core 3.3.11's `Print.h` declares
+  `size_t print(long long, int = DEC)` at line 91, so the integer overload is
+  what binds. Checked in the installed header, not from memory.
+- **The CODE stage's caveat about the cold-boot resume is correct.** Line 6337
+  sets `rtcAutoMagic = AUTO_RTC_MAGIC` unconditionally and then calls recovery,
+  with no prior test of the magic. The kickoff had asserted that all four sites
+  setting the magic meant recovery only ran when retained state was invalid.
+  That inference does not follow and was wrong in the kickoff; the CODE stage
+  caught it.
+
+### Citation corrected: the ESP-IDF version does not match the toolchain
+
+D-060 cited `should_load()` "read from the v5.4 source". The installed core
+3.3.11 bundles **ESP-IDF v5.5.5**, pinned from
+`~/Library/Arduino15/packages/esp32/tools/esp32c3-libs/3.3.11/include/esp_common/include/esp_idf_version.h`
+(MAJOR 5, MINOR 5, PATCH 5). Only headers and prebuilt libraries are installed
+locally, so v5.5.5's `should_load()` has not been read by anyone. D-060 now
+names the gap instead of implying the versions match. The zero-after-reset
+behavior is EXPECTED, not measured, and has never been observed on this board.
+
+### OPEN issue found in review
+
+`rtcAutoMagic` is the firmware's own answer to "is retained state valid", which
+D-011 introduced because RTC memory is undefined after a power-on reset.
+Recovery cannot read it: all four call sites overwrite it immediately before
+calling. Two of them reach recovery *because* it was invalid, and one says in
+its own comment not to guess the running totals on that path — which is exactly
+what `58a4e09` now carries there when the log is unreadable.
+
+Bounded, not silent: the new message prints the carried value and says it was
+not checked against the log. Filed as its own BACKLOG item rather than absorbed
+into this stage, together with the unproven reachability of the line 6337 site.
+
+### Commit
+
+`58a4e09`, two files, +102/-4, on main, **not pushed**. Documentation remains
+uncommitted, still interleaved with other stages' prose.
+
+### Still outstanding
+
+The healthy-log hardware smoke, now covering two unvalidated commits rather than
+one.
+
+## 2026-09-29: Running totals are no longer reseeded from an unread log (D-060) — NOT committed, uploaded or hardware validated
+
+CODE stage. Software only: no upload, no serial port, no reset, clear, erase or
+corruption injection. Experiment 3 untouched; the board still runs `1980d94`.
+Two files changed in the working tree: `solar-logger.ino`
+(`autoStorageRecover()` only) and `tests/test_characterization_storage_recovery.py`.
+
+### The change
+
+When `scan.openFailed || scan.readError`, `autoStorageRecover()` no longer
+assigns `rtcAutoRunChargeUAh` / `rtcAutoRunEnergyUWh`. It prints why and what it
+carries instead. Every other outcome reseeds as before. Policy: D-060.
+
+### Tests first, and the red-check
+
+Three tests, written before the firmware change. The harness gained one optional
+argument pair that seeds the retained totals before recovery. Without it the
+failed-open case cannot be tested on values, because "left alone" and
+"overwritten with the scan's zero" both give 0/0 from a zero start. It also
+gained a `print(long long)` overload on the recording Serial, matching the
+sketch's `Serial.print(static_cast<long long>(...))` idiom.
+
+- `test_an_unread_log_leaves_the_retained_running_totals_alone_and_says_so`,
+  parametrized `open-failure` (`deny_log_open`) and `short-read`
+  (`phantomBytes=72`); retained seeded to 5555/6666, log records 100/200 then
+  300/400.
+- `test_a_readable_log_still_replaces_whatever_the_totals_held`: the same log,
+  read cleanly, still reseeds 300/400 over the seeded value and prints no
+  recovery-failure line.
+
+Red-check: no struct member was added, so the new tests compile against the
+unmodified `44d8b27` sketch directly and no staging was needed. Run in the main
+tree before the sketch was edited (`git diff HEAD -- Arduino/` empty): **both
+failure-mode cases FAILED**, `(0, 0) == (5555, 6666)` for the failed open and
+`(300, 400) == (5555, 6666)` for the short read, the stale last-reached record.
+The healthy-log test and the two existing reseed tests
+(`test_a_valid_log_reseeds_the_running_totals_from_its_last_record`,
+`test_running_totals_are_reseeded_past_the_damage`) passed, and are unedited.
+After the fix the storage file runs **85 passed** (82 before plus 3).
+
+Serial from the fixed harness, disposable fixture:
+
+```text
+[STORAGE] Running totals could NOT be recovered: the log could not be opened, so none of it was read.
+[STORAGE] Carrying the retained totals instead: Qsum_uAh=5555 Esum_uWh=6666. These were NOT checked against the log.
+```
+
+```text
+[STORAGE] Running totals could NOT be recovered: a short read stopped the scan before the end of the log.
+[STORAGE] Carrying the retained totals instead: Qsum_uAh=5555 Esum_uWh=6666. These were NOT checked against the log.
+```
+
+The healthy log's recovery serial has no new line.
+
+### Which deployed paths actually change
+
+All four call sites (`beginAutonomousSleepFromHostSession` rebuild, arm, the
+timer-wake RTC-loss rebuild and the cold-boot resume) set `rtcAutoMagic`
+immediately before calling recovery. The first and third are inside an explicit
+`rtcAutoMagic != AUTO_RTC_MAGIC` test. The arm path runs with the magic 0 (set
+by `stopAutonomousTest()` or the image initializer). **The cold-boot resume
+does not test the magic.** A timer wake reaches it after an earlier error. I
+did not prove it unreachable with valid retained state; if it is reachable, the
+new behavior carries live totals there rather than overwriting them.
+
+- Any reset that is not a deep-sleep wake: the totals are the image initializer,
+  0. That is verified against the bootloader source (D-060). Open failure: the
+  value is unchanged at 0, and the two lines are new. Short read: the value
+  changes from the stale last-reached record to 0, plus the two lines.
+- Re-arm after an in-session `LOGGER AUTONOMOUS OFF`, or a timer wake with an
+  invalid magic: the previous session's totals are carried and printed, instead
+  of 0 or a stale partial value.
+- A healthy, repaired-tail or mid-file-damaged log: unchanged.
+
+Nothing here reached the records' format, the CRC, D-023 sequence authority or
+the NVS floor, and the firmware identity is unchanged.
+
+### Gate
+
+`tools/check.sh`, three scopes, each `ALL OK`, exit 0, every step green:
+
+| Scope | pytest | Flash / globals |
+| --- | --- | --- |
+| Isolated baseline: detached worktree at clean `44d8b27` | 469 passed, 1 xfailed | 1,105,273 B / 36,332 B |
+| Isolated fix: that worktree plus only the two changed files | **472 passed, 1 xfailed** | **1,105,707 B** / 36,332 B |
+| Combined working tree after the change, including other stages' uncommitted work | 496 passed, 1 xfailed | 1,105,707 B / 36,332 B |
+
+Flash rose 434 bytes. That covers the new branch and its three message strings;
+it was not broken down by symbol. Globals are unchanged. IntelliSense 7/7,
+pyright 0 errors, 0 warnings, 0 informations. A working-tree gate also ran
+before the change and exited 0 with pytest 493 passed / 1 xfailed. Its later
+steps overlapped the start of these edits, so only its pytest count is a clean
+pre-change figure, and the isolated baseline above is the clean one. Both
+worktrees were removed afterwards.
+
+### Hardware acceptance still needed
+
+A healthy-log smoke only: after upload, boot recovery must still reseed the
+totals from the last record and print no "could NOT be recovered" line, and new
+records' Qsum/Esum must continue from the preceding record. The failure branches
+are host-injected only. That does not show what a physical LittleFS open or
+read fault does, and one must not be produced by damaging the Experiment 3 log.
+
+## 2026-09-29: Scan-open fix reviewed, red-checked and committed as 44d8b27 — still NOT hardware validated
+
+Orchestrator close of the CODE stage recorded in the entry below. No board was
+touched: no upload, no serial port, no reset or storage clear. Experiment 3 is
+untouched, and the uploaded image is still `1980d94`, which HAS the defect.
+
+### Gate re-run on the working tree
+
+`tools/check.sh` exit 0, `ALL OK`. pytest **493 passed, 1 xfailed** in 51.58 s;
+pyright 0 errors, 0 warnings, 0 informations; py_compile; warning-free `--clean`
+compile; IntelliSense **7/7**; shell syntax; whitespace. Flash **1,105,273 B**
+(84%), globals **36,332 B** (11%). Every figure reproduces the CODE session's,
+so what that report listed as predicted is now observed.
+
+The IntelliSense step printed two stale-directory notices, for
+`.vscode/arduino-build` and the old-layout contents of `build/intellisense`.
+Both are dead, neither is a failure, and no cleanup was performed.
+
+### Red-check — the CODE report's form of it does not reproduce
+
+That report claimed 5 of the 7 new tests fail against pre-fix code, without
+saying how it was staged. **Run directly, it does not compile**: `reportScan()`
+reads `scan.openFailed`, which `1980d94`'s `AutoLogScan` has no member for, so
+all seven ERROR at fixture setup instead of failing.
+
+Staged instead in a detached worktree at `1980d94` with the new test file copied
+in and **only the `openFailed` field declared** in `storage.h` and never set, so
+the behavior under test stays pre-fix. `AutoLogScan scan = {}` value-initializes
+it to false, so the staging is deterministic. Result: **5 failed, 2 passed**.
+The 2 that pass are the conservative half the entry below already recorded —
+the file is untouched and the NVS floor is applied.
+
+The second defect reproduced verbatim on that pre-fix tree, which is the
+measured form of the argument made in the entry below:
+
+```text
+[STORAGE] ERROR: Could not open the log for scanning.
+[STORAGE] Rewriting the log to its valid prefix: 0 of 0 bytes.
+[STORAGE] ERROR: Could not open the log for recovery.
+```
+
+`autoStorageTruncateToValid()` announced the rewrite and proceeded; only its own
+source open failing, for the same reason the scan's had, stopped it.
+
+The worktree was removed afterwards and the working tree verified unchanged.
+
+### Review
+
+Every consumer of `readError` was enumerated, because setting it on an open
+failure changes each one. The rewrite's own guard in `storage.cpp`
+(`scan.validAfterInvalidRecords > 0 || scan.readError`) now refuses; `logIntact`
+in `autoStorageRecover()` drops to the NVS floor, which the `nextSeq == 5001`
+test pins; `autoStorageScanAndRepair()`'s `else if (scan.readError)` is ordered
+behind the new `openFailed` branch; and `printStorageInfo()`'s `readError`
+branch is unreachable for this case because of the early return above it. Those
+are all of them in the firmware.
+
+### Commit
+
+`44d8b27`, four files, +296/-17, on main, **not pushed**. The documentation
+describing the fix was deliberately left out, because it is interleaved with the
+capture-gap stage's prose in the same files, and it remains uncommitted.
+
+### Still outstanding
+
+The healthy-log hardware smoke, which is the only check that matters for this
+change: it must not have moved the path it does not touch. The open-failure
+branch needs a real filesystem fault and must not be obtained by damaging the
+Experiment 3 log.
+
+## 2026-09-29: An unread log no longer reports an intact tail — NOT hardware validated
+
+A bounded correctness fix to the open-for-scan diagnostic recorded in BACKLOG
+on September 29. Nothing was uploaded, no serial port was opened and no board
+was touched. Experiment 3 was not reset, cleared or read. Every failure in this
+work is staged in a pytest temporary directory.
+
+**This is not a hardware result.** The image was compiled and the host tests
+were run. A physical open failure has never been observed on this board, and
+the harness produces one by refusing the read-open while leaving the file
+untouched — software failure injection, which does not establish what a real
+LittleFS fault does.
+
+### The defect, as the code had it
+
+`autoStorageScan()` printed `[STORAGE] ERROR: Could not open the log for
+scanning.` and returned the zero-initialized `AutoLogScan` with `readError`
+still false. Every count in it was zero because nothing had been read, and both
+callers read those zeros as measurements:
+
+| Caller | What it said about a log it had never opened |
+| --- | --- |
+| `autoStorageScanAndRepair()` | `File bytes: 0`, `Valid records: 0`, then `Log tail is intact: ALL OK` |
+| `printStorageInfo()` | `Log bytes: 0`, `Valid records: 0`, `Trailing bytes: 0`, `Tail status: INTACT`, and `CMD_RESULT,LOGGER STORAGE INFO,OK` |
+
+A readable empty log produces exactly those numbers and that tail status, and
+truthfully. The two were indistinguishable to a caller and to an operator.
+
+The conservative half was real and is unchanged: `logIntact` already required
+`validRecords > 0`, so the NVS reservation floor applied, and `trailingBytes`
+being zero meant `autoStorageScanAndRepair()` never entered its repair branch.
+No log bytes were at risk through the normal path.
+
+### A second defect, found by the regression test rather than by reading
+
+Driven **directly** against an unopened log — which is what the `force-truncate`
+harness command exists to do — `autoStorageTruncateToValid()` printed
+
+```text
+[STORAGE] Rewriting the log to its valid prefix: 0 of 0 bytes.
+[STORAGE] ERROR: Could not open the log for recovery.
+```
+
+It announced the rewrite and proceeded. The only thing that stopped it was its
+own source open failing for the same reason the scan's had. Had the fault
+cleared in between, it would have copied `keepBytes` — zero — into the temporary
+file, removed the log and renamed the empty file over it, destroying every
+record on the strength of a scan that read nothing.
+
+`autoStorageScanAndRepair()` cannot reach that branch for an unopened log,
+because `else if (scan.trailingBytes > 0)` is false. That is the caller's
+`else if` chain, not this function's own guarantee, and it is precisely the
+argument D-058 made for keeping the refusal compiled in the function instead of
+letting the compiler infer it from the one call site.
+
+### What changed
+
+`AutoLogScan` gains one field, `openFailed`, and a failed read-open sets it
+together with `readError`.
+
+- **`readError` is what carries the case into the existing refusals.** The
+  rewrite's guard is `validAfterInvalidRecords > 0 || scan.readError`, and
+  `logIntact` includes `!readError`. Setting it is what makes those cover an
+  unopened log without either of them learning a new condition.
+- **`openFailed` carries what `readError` cannot.** A short read has real
+  partial counts; a failed open has none. The distinction decides whether a
+  number may be printed at all.
+- `autoStorageScanAndRepair()` reports the size, record count and sequence range
+  as UNKNOWN rather than zero, and names the tail **UNREAD** — neither intact
+  nor damaged — before the read-error branch, whose "could not be read to the
+  end" understates this and whose advice to run `LOGGER STORAGE DUMP` would open
+  the same file and fail the same way.
+- `printStorageInfo()` prints `Tail status: UNREADABLE`, prints no figure it did
+  not measure, and **returns false**, so the command answers
+  `CMD_RESULT,...,ERROR`. Under D-041 a command that did not do what was asked
+  does not report `OK`, and the mount failure directly above it already reported
+  itself that way.
+- D-023 authority, the healthy-log path and the record format are untouched.
+
+What an operator now sees for a log that will not open:
+
+```text
+[STORAGE] ERROR: Could not open the log for scanning. The log exists and none of it was read, so nothing is known about its contents and nothing will be repaired automatically.
+[STORAGE] Scanning durable log...
+[STORAGE] The log exists but could not be opened. Its size, record count and sequence range are UNKNOWN, not zero.
+[STORAGE] The log was never read, so its tail is neither intact nor damaged: it is UNREAD. NOTHING WAS DISCARDED, and nothing will be repaired automatically while this persists.
+[STORAGE] Appending continues normally, and the NVS reservation floor decides the next sequence because the log proved nothing.
+[STORAGE] Next sequence from log: 1, from NVS reservation: 5001, using: 5001
+[STORAGE] Log tail is NOT provably intact, so the NVS reservation floor applies.
+```
+
+### Tests
+
+Seven added to `tests/test_characterization_storage_recovery.py`, all executing
+the firmware's own compiled functions. **No existing test was changed**; the
+harness gained one staging control beside the existing phantom-bytes one, which
+fails read-opens of the log and leaves the file alone, so a test can prove the
+bytes were never touched.
+
+**Five of the seven fail against the code they replace**, and the two that pass
+are the conservative half above — the log is left alone, and the NVS floor
+applies — which is exactly what the BACKLOG finding said was already true and is
+worth pinning so a later change cannot quietly lose it.
+
+| Test | Pre-fix |
+| --- | --- |
+| the scan reports it unreadable, not scanned | FAIL |
+| it is never called intact | FAIL |
+| it is left exactly as it was | pass |
+| it keeps the NVS reservation floor | pass |
+| INFO reports UNREADABLE and answers ERROR | FAIL |
+| absent, empty and unopenable are three answers | FAIL |
+| the rewrite refuses it even when called directly | FAIL |
+
+### Gates
+
+Both run in full, with their scopes stated rather than mixed:
+
+| Gate | Scope | Result |
+| --- | --- | --- |
+| Before, working tree | the tree as found, including the uncommitted host capture-gap work | `ALL OK` — **486 passed, 1 xfailed** |
+| After, working tree | the same tree plus this change | `ALL OK` — **493 passed, 1 xfailed** |
+| After, isolated snapshot | `1980d94` plus only the four files this change touches, with the host tool, its tests and the pandas dependency excluded | `ALL OK` — **469 passed, 1 xfailed** |
+
+469 is 462 plus these seven, against the September 29 isolated storage baseline.
+493 is 486 plus the same seven. pyright, py_compile, the warning-free clean
+Arduino compile, IntelliSense 7/7, shell syntax and tracked whitespace passed in
+both. The strict `xfail` is the unrelated short-cadence autonomous overrun
+defect; it was not touched. No dependency or tooling change was made.
+
+### Flash, accounted for rather than accepted (D-047)
+
+Program storage **1,104,313 → 1,105,273 bytes, +960**. Global variables
+**36,332, unchanged**. Both images were rebuilt clean into separate output
+directories and the baseline reproduced `HEAD` exactly.
+
+| Section | Before | After | Delta | What it is |
+| --- | ---: | ---: | ---: | --- |
+| `.flash.text` | 826,966 | 827,082 | **+116** | three symbols, and only three |
+| `.flash.rodata` | 168,508 | 169,348 | **+840** | the new messages |
+| `.eh_frame` | 30,316 | 30,320 | **+4** | one existing FDE |
+| | | | **+960** | |
+
+Every other section is byte-identical, including all four `.dram0`/`.noinit`
+sections that make up the globals figure.
+
+**The 116 code bytes are the three functions this change edits, and nothing
+else.** A per-symbol comparison of the two ELFs finds exactly three that changed
+size: `printStorageInfo()` +58, `autoStorageScanAndRepair()` +52,
+`autoStorageScan()` +6. No symbol was added or removed, which the identical FDE
+count of **6,356** confirms independently, so the `.eh_frame` +4 is one existing
+FDE whose CFI grew with the body it describes.
+
+`autoStorageTruncateToValid()` is **0x266 = 614 bytes and type `T` in both
+images**, the same figure D-058 recorded. Its refusal is still compiled, which
+is measured here rather than reviewed, as D-058 requires.
+
+**The 840 rodata bytes are message text.** Comparing the two images'
+NUL-terminated string tables as multisets: 908 bytes of strings arrived, 74 left,
+net **834**. The remaining 6 are packing in the merged string pool. Of the
+arrivals, 9 bytes are the core's build timestamp and not this change's. One
+departure needs saying: the bare `"UNREADABLE"` literal disappears from the
+table because the linker now stores it as the suffix of
+`"[STORAGE] Tail status:      UNREADABLE"`. It still occurs exactly once as
+`UNREADABLE\0` in both images, so the short-read branch that prints it did not
+lose its string.
+
+### Found and not fixed
+
+`autoStorageRecover()` still ends with
+`rtcAutoRunChargeUAh = scan.lastRunChargeUAh` and its energy equivalent. On this
+outcome those are zero, so the RTC-retained running totals silently restart at
+zero for a log nothing read, and nothing says so. It is a silent deviation
+rather than a false report, and the same thing happens on the pre-existing
+short-read path where at least a prefix was read. Changing it alters deployed,
+characterized accounting behavior on both paths, so it is recorded in BACKLOG as
+its own stage rather than carried inside a diagnostic fix. These are the
+test-local totals D-017 keeps separate from experiment state; no stored record
+is affected.
+
+Two smaller observations, neither changed: `autoStorageScan()`'s error line
+prints **before** `autoStorageScanAndRepair()`'s "Scanning durable log..."
+banner, because the scan runs before the banner; and `dumpStorage()` still
+returns true after breaking on a short read mid-dump, having printed the error.
+The first is cosmetic ordering, the second is a separate completion-semantics
+question from the one fixed here.
+
+### Ownership and what was left alone
+
+Firmware, tests and the four files above are this stage's. The uncommitted host
+capture-gap work (`tools/charger-transitions.py`,
+`tests/test_charger_transitions.py`) and the pandas dependency changes were not
+touched, and the isolated gate deliberately excludes them so the firmware figure
+is not a mixed snapshot. The sealed September 29 hardware evidence was not
+altered. Nothing was committed, staged or pushed. Firmware identity is unchanged
+at `0.3.0-dev` / `solar-logger-protocol-ack-v3`; the record format stays version
+1 at 72 bytes.
+
+**Hardware acceptance, PENDING — nothing below has been run.** The healthy-log
+path is the check this change most needs, because it is the path it must not
+have moved: upload, then confirm `LOGGER STORAGE INFO` still reports the
+Experiment 3 log with `Tail status: INTACT`, zero trailing bytes and at least as
+many records as before, and that `LOGGER STORAGE DUMP` still decodes them with
+invalid 0. The open-failure branch cannot be exercised without a real filesystem
+fault, and **must not** be exercised by damaging the Experiment 3 log. If an
+unexpected `UNREADABLE` or any storage error appears during that smoke, stop
+acceptance and diagnose rather than continuing.
+
+## 2026-09-29: Storage 1980d94 passes healthy-log hardware smoke
+
+This session performed the deliberate hardware stage, following the startup
+handoff and canonical docs. Git stayed on main at **1980d94**, empty index,
+clean firmware/tools; source hashes remained unchanged. Existing host analysis,
+dependencies and older docs/evidence remain uncommitted. App inventory found no
+other active BMW chat, but process inspection found two Claude Code processes
+with this repo as cwd; the user explicitly confirmed those CODE sessions idle.
+No host logger or pending serial/upload marker was present. Initial sandboxed
+process inspection was denied; the permitted escalated read established ownership.
+
+**Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
+1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
+full pre/post dumps preserve all 10,659 preflight record lines exactly, and
+post-upload boot 36 adds 3 records, 12073–12075. Final dump: 10,664 records,
+1412–12075, board invalid 0; observed INFO scans have trailing 0 and INTACT tails
+with no storage errors. [Raw evidence, checksums and limits](../logs/evidence/2026-09-29/storage-hardware/README.md).
+Damaged-log branches remain host/synthetic tested only. No standalone reset,
+storage clear, whole-flash erase or corruption injection was performed.
+
+
+### Preflight and upload
+
+Read-only VERSION reported **eba3b5d-dirty / 0.3.0-dev /
+solar-logger-protocol-ack-v3**. NVS-backed autonomous status reported Experiment 3,
+boot 35, armed YES, cadence 60 s. INFO at 09:00 PDT: 10,650 valid records,
+766,800 bytes, 1412–12061, record size 72, trailing 0, INTACT. The complete
+09:09 dump held 10,659 records through 12070; all exp=3, consecutive, invalid 0.
+All 5,756 September 25 record lines matched exactly. BEGIN/END, count summary,
+ACK and matching RESULT OK were verified before upload. The port disappeared
+only after completion and normal unclaimed-rendezvous sleep. The sender's generic
+“expected for RELEASE” stop text also appears for this DUMP; no RELEASE was sent
+in preflight. Decoded output is preserved byte-for-byte, not a binary flash image.
+
+Canonical `tools/upload.sh` ran only after that evidence was sealed. It compiled
+clean revision 1980d94 and uploaded successfully on attempt 1 at 09:11 PDT.
+Post-upload VERSION independently reported **1980d94**, with the unchanged version
+and build ID. The injected build used 1,104,265 flash bytes and 36,332 global
+bytes; this is distinct from the prior uninjected check build's 1,104,313 bytes.
+Uploader performed its normal bootloader reset, targeted firmware-region erase/
+program and restart; no separate reset, NVS/LittleFS erase or whole-flash erase
+was requested. The upload log records all programmed addresses.
+
+### Retention, session handoff and autonomous growth
+
+| Observation | Valid/read count | Newest sequence | Notes |
+| --- | ---: | ---: | --- |
+| Preflight dump | 10,659 | 12070 | all exp=3, invalid 0 |
+| Post-upload INFO | 10,661 | 12072 | 767,592 B; 72-byte records; trailing 0; INTACT |
+| After session RELEASE, next autonomous wake INFO | 10,663 | 12074 | 767,736 B; trailing 0; INTACT |
+| Final complete dump | 10,664 | 12075 | all exp=3; invalid 0; exact preflight prefix |
+
+The old image added 12071/12072 before upload. New boot **36** starts at
+**12073**, flags **0x4 FIRST_AFTER_BOOT**, then advances through **12075** with
+flags **0x0**. All 3 new-boot records have interval_ms 60004. Counts describe
+successive captures, not loss or contradictory summaries. Sequence numbers are
+unique/consecutive here; this does not remove D-023's permitted reservation gaps.
+Record version 1/72-byte contract is unchanged in the clean source; hardware INFO
+reports 72 and DUMP validates records. Binary CRCs were not recomputed from rounded
+text; invalid 0 is the board validator's report.
+
+HOLD, KEEPALIVE, STATUS, SESSION STATUS and RELEASE each returned matching ACK and
+RESULT OK. HOLD restored **Experiment 3, interval 479**, charge 86.901199 mAh,
+energy 1248.362325 mWh; held STATUS agreed. RELEASE closed a **3.788 s** tethered
+interval, saved checkpoint **480**, and resumed armed autonomous sleep with
+**59,750 ms** remaining. New autonomous records appeared after that release.
+The final dump ended after RESULT OK and the normal autonomous return to sleep.
+No Python logger was started; no held lease remains from this test.
+
+### Diagnostics and evidence limits
+
+- **General STATUS during an unclaimed timer wake reported zeros**, including
+  Experiment ID 0. Source confirms `printStatus()` reads experiment globals before
+  the later `loadCheckpoint()` path restores them; NVS-backed AUTONOMOUS STATUS
+  and every record say exp=3. Held STATUS correctly reports 3. This is a pre-existing
+  diagnostic defect, not lost experiment state or an extraction regression; track
+  a separate correction in BACKLOG. Do not rely on generic STATUS at that phase.
+- Immediate post-upload AUTONOMOUS STATUS ran in the cold-boot maintenance window:
+  armed YES but running NO, boot/next seq 0, RTC invalid. Later boot-36 records
+  establish initialization and actual autonomous progress; those early zeros do
+  not identify a failed recovery.
+- HOLD and RELEASE each printed accumulator-reset readback **ENERGY=0 CHARGE=-1**.
+  The existing sensor code warns on nonzero readback and returns success after
+  readable registers; continuous conversion is a possible explanation, not a
+  measured cause. These are retained sensor observations, not storage errors or
+  induced-overflow/accumulator-reset proof.
+- No storage error, invalid record, tail repair or corruption was observed.
+  Torn/invalid-tail repair, mid-file/read-error refusal, the known open-for-scan
+  diagnostic defect, storage-full behavior and crash/lease-expiry paths were
+  not exercised by this healthy-log smoke. No physical fault was injected.
+- All dumped epochs remain 0/time UNKNOWN. Retained elapsed values are not exact
+  wall-clock coverage. The canonical sender normalizes serial lines and may
+  discard pre-ACK chatter; this is not a complete raw serial/boot recording.
+
+No firmware/source/test/dependency edit, commit or push was made. Documentation
+and dated evidence were updated; no unnecessary unit tests/full software gate
+were rerun for prose. Prior isolated 462/1 and combined 486/1 gates remain valid
+within their recorded scopes. Fresh checks here: hardware protocol/completeness,
+full decoded-prefix comparison, source hashes, checksum manifests and whitespace.
+
 ## 2026-09-29: Storage extraction reviewed and committed separately — hardware pending
 
 The storage-only change was reviewed against **43c3baf** and committed separately
@@ -43,12 +800,521 @@ zero, and no automatic tail repair runs on this outcome. Track explicit unreadab
 scan status and an open-failure fixture as a separate correctness stage; do not
 interpret an INTACT line as sufficient if any storage error was printed.
 
-[Move audit and isolated gate](evidence/2026-09-29/README.md). No upload or serial
+[Move audit and isolated gate](../logs/evidence/2026-09-29/README.md). No upload or serial
 command was run. Experiment 3 was not reset or cleared. Storage hardware smoke
 is deliberately the next session's bounded task: capture current VERSION and
 healthy storage/experiment evidence before upload, use canonical tools/upload.sh,
 and verify historical decoding plus new autonomous records afterward. Do not
 inject corruption or begin another firmware extraction during that smoke.
+
+## 2026-09-28: Capture-gap and initial-state reporting completed — host only
+
+The user authorized continuation after the pending CODE-agent ownership question.
+Fresh Git/source checks still showed main at **43c3baf**, nothing staged, and the
+original positional-index fix only. Source/docs matched the September 25 baseline
+apart from this task's checkpoint addendum; telemetry had grown. The previously
+tested scratch draft was reviewed, applied to `tools/charger-transitions.py`
+and tested in the canonical repo with `tests/test_charger_transitions.py`.
+Storage/firmware/dependencies were preserved byte-for-byte against that baseline.
+Nothing was committed, uploaded, reset or cleared; no serial command was issued.
+
+The tool now reports initial state, post-gap state and contiguous edges separately
+(D-059). Every capture segment is printed; gaps, experiment changes and repeated/
+backward host timestamps restart persistence. Five classified samples per state
+and a configurable 2 s inclusive maximum spacing are provisional analysis defaults.
+Ambiguous rows break persistence; stale confirmed state cannot qualify a timed
+edge. First supporting sample and fifth-sample confirmation are reported
+separately, as is the adjacent host-sample bracket for a contiguous edge.
+Input errors fail explicitly; context is clipped to the capture segment.
+
+**Fresh CSV analysis:** 26,674 rows, all exp=3, from September 16
+10:07:44.231779 to September 27 22:21:22.306909 (UTC-07:00). At defaults:
+**81 segments / 80 gaps**, **2 contiguous transitions**, and **39 state
+observations without a timed edge** (one initial, 38 after gaps). There are
+46 UNKNOWN and 1,131 TRANSITION samples. Positive timestamp-spacing median is
+1.000138 s. These counts describe captured evidence under the selected rule,
+not physical charging-state truth or uninterrupted measurement coverage.
+
+| Edge | Last preceding host sample | First supporting host sample | Confirmed at |
+| --- | --- | --- | --- |
+| ON-like | Sep 24 14:09:49.468777, -0.628 mA | 14:09:50.468071, +178.692 mA | 14:09:54.468872 |
+| OFF-like | Sep 24 14:48:16.097899, +62.708 mA | 14:48:17.099301, -0.624 mA | 14:48:21.103139 |
+
+These preserve the previously documented two contiguous edges; they do not add
+LED correlation or identify causes. The old five-entry report conflated one
+initial and two post-gap observations with those two edges. The corrected
+report also exposes capture gaps where the observed state did not change.
+
+**New capture since the earlier audit:** 77 morning rows on September 25,
+08:27:12.636615–08:28:28.636627, follow a 49,337.521779 s gap. A further 165
+rows on September 27, 22:18:38.306874–22:21:22.306909, follow a 222,609.670247 s
+gap. Later capture does not establish overnight/weekend continuity or alter the
+user's earlier statement that the host logger was stopped overnight.
+
+**Validation actually run:** fresh `tools/check.sh` exit 0, **ALL OK** —
+**486 passed, 1 xfailed**, pyright and py_compile clean, warning-free clean
+Arduino compile, IntelliSense **7/7**, shell syntax and tracked whitespace pass.
+The 24 new tests cover the reporting behavior with synthetic data and no device.
+The existing short-cadence overrun is still the strict xfail. Flash is
+**1,104,313 bytes**, globals **36,332 bytes**; storage is still unuploaded and
+not hardware validated. The clean compile is not new board evidence.
+
+Failures were not omitted: the first gate could not find `uv`/`uvx` on this
+session's PATH (three Python steps exited 127; other steps passed). The installed
+`/Users/afxjzs/.local/bin` was added for the rerun. A targeted type check then
+found a nullable candidate-state annotation and an invariant list annotation in
+the new test helper; using the current classified string and a read-only Sequence
+resolved both before the final full gate. No dependency/tooling changes were made.
+
+[Preserved report, final gate and input fingerprint](../logs/evidence/2026-09-28/README.md).
+Next bounded stage: review/commit the existing storage extraction separately
+from this host-analysis change, then a deliberate preservation-safe hardware
+smoke. Exact board VERSION must be established then; Experiment 3 remains active.
+
+## 2026-09-25: Full dump preserved; hardware identity and session continuity repaired
+
+The user supplied the completed storage dump and the INA228 purchase-listing
+screenshot. Originals are now preserved under
+[evidence/2026-09-25/](../logs/evidence/2026-09-25/README.md), with SHA-256 checksums.
+Temporary attachment paths are no longer the only source. This was documentation
+and offline text validation only: no upload, serial command, code change, reset,
+storage clear or physical hardware modification was performed by this session.
+
+**Dump completeness:** 5,756 decoded record lines; indices 0–5755; sequences
+**1412–7167**, consecutive and unique; **all Experiment 3**. The board reports
+**Records read: 5756, invalid: 0**, followed by machine RESULT OK and a complete
+END DUMP marker. Capture ended on quiet, not the 120-second cap. The observed
+count is 156 more than the earlier morning INFO (5,600 / 7011), and 1,106 more
+than the previous historical dump (4,650 / 6061). These are successive captures.
+CRC validity is board-reported; this audit did not recompute binary CRCs from
+rounded printed measurements. The text contains no firmware VERSION identity.
+
+**Latest boot, 34:** 1,101 records, sequences **6067–7167**, all exp=3,
+interval_ms=60004, epoch=0/time=UNKNOWN. Current snapshots range
+**−0.671 to −0.559 mA**, voltage **13.071289–13.220507 V**, and every stored
+interval charge is **−10 µAh**. FIRST_AFTER_BOOT is set for 6067 and clear for
+the following 1,100 records, whose flags are zero. None of those snapshots
+shows positive charging current. These observations do not prove why the
+controller was off or that no brief charging occurred between snapshots.
+
+Boot 34's first/last elapsed_ms are 78,678 / 78,441,614, a reported span of
+about 21.77 hours. That is not an independently measured wall-clock duration
+or uninterrupted autonomous coverage: the largest adjacent elapsed jump is
+10,553,359 ms between sequences 6113 and 6114. Session/timing history must be
+examined before interpreting gaps. Boot 34 also postdates the recorded boot-33
+recovery smoke; no new firmware identity is inferred from the boot number.
+
+**Hardware identity omission corrected:** the screenshot identifies the
+**Ubxvamm storefront** and title containing **“5832 INA228.”** It does not
+establish the actual PCB manufacturer or revision, and “5832” must not be
+promoted to a revision. HARDWARE_WIRING now has a sourced hardware identity
+register that distinguishes these facts. Existing Adafruit links are examples,
+not verified documentation for the purchased board. The nominal R015 shunt in
+the listing remains distinct from the project's 15.62 mΩ calibration.
+
+**Session continuity:** root AGENTS.md now records operating rules and requires
+maintenance of docs/CURRENT_STATE.md. INDEX links that compact current checkpoint;
+the checkpoint links detailed canonical history and raw evidence. At every
+meaningful handoff, record completed work, next action, ownership, validation
+scope, unresolved questions and exact evidence paths. Refresh live Git state at
+startup; do not treat the checkpoint's dated snapshot as a permanent fact.
+The handoff does not waive the user's canonical-document read order.
+
+## 2026-09-25: Supplied morning storage INFO — log advanced and tail intact
+
+The user supplied a `tools/send.sh --wait LOGGER STORAGE INFO` transcript,
+with terminal time approximately 08:28. The Python logger was not running.
+The sender waited through at least 45 seconds of absent USB, caught
+`/dev/cu.usbmodem1101`, and observed both machine ACK and RESULT OK. The
+response completed on the 600 ms quiet threshold, not the capture cap.
+
+| Reported field | Value |
+| --- | ---: |
+| Filesystem total | 1,441,792 bytes |
+| Used / free | 413,696 / 1,028,096 bytes |
+| Record size / log bytes | 72 / 403,200 bytes |
+| Valid records | 5,600 |
+| Oldest / newest sequence | 1412 / 7011 |
+| Trailing bytes | 0 |
+| Tail status | INTACT |
+| Reported arithmetic capacity estimate | 14,279 more records / 9 days at 60 s |
+
+The count and newest sequence are both **950 greater** than the last documented
+4,650-record dump through sequence 6061. This establishes that the durable log
+advanced while host CSV was absent for part of the elapsed time. INFO alone does
+not identify every overnight record's experiment, duration, flags or readings,
+or establish exact wall-clock coverage; a decoded dump is the next inspection.
+The count equals 7011 − 1412 + 1, consistent with the reported sequence span.
+The capacity estimate is filesystem free-space arithmetic, not a tested fill
+limit. Reclamation/storage-full policy remains unimplemented.
+
+The board was in its autonomous rendezvous and reported no host claim. The
+transcript does not include VERSION, so no new firmware identity or validation
+of the unuploaded storage extraction is inferred. No upload, reset, storage
+clear or new hardware modification was performed in this documentation work.
+
+## 2026-09-25: Transition report audit — overnight CSV coverage missing
+
+The user reports leaving the setup running overnight and supplied a five-entry
+`charger-transitions.py` report. Read-only inspection of the canonical repo's
+CSV found **26,432 samples**, ending **2026-09-24 18:44:55.114836 −07:00**.
+There are **no September 25 samples** in this file at this inspection. The
+report lists state changes, not the capture end, so the report alone cannot
+establish overnight coverage. **User clarification:** only the board stayed powered overnight; the Python
+logger did not stay running. The missing overnight host CSV is therefore
+expected, not evidence of a capture-tool failure. If autonomous mode remained
+armed and writes succeeded, LittleFS records may cover time absent from host
+CSV; no board query was made, so that coverage is not claimed. Experiment 3 was
+not reset or cleared.
+
+The five printed entries have different evidence:
+
+| Reported time (UTC−07:00) | Evidence category |
+| --- | --- |
+| Sep 16 10:14:47 | First confirmed state in the tool's run; no confirmed preceding opposite state |
+| Sep 23 09:55:29 | State after a capture gap from Sep 16; transition instant unknown |
+| Sep 23 12:21:10 | State after a capture gap from 09:56:44; transition instant unknown |
+| Sep 24 14:09:50 | Contiguous ON-like current edge, previously recorded |
+| Sep 24 14:48:17 | Contiguous OFF-like current edge, previously recorded |
+
+After the September 24 OFF-like edge, the inspected CSV contains **9,445
+samples**, all Experiment 3, through 18:44:55. Current ranges from **−0.684 to
+−0.552 mA**, voltage from **13.109375 to 13.312891 V**. The largest adjacent
+capture gap in this suffix is **1,640.236589 seconds** (about 27 minutes).
+These describe the observed samples, not uninterrupted coverage or a proof that
+no intervening state changes occurred. Capture-gap handling remains absent
+from the analysis script despite the earlier green software gate.
+
+**Cause hypotheses, proposed by the user:** panel disconnected, insufficient
+sunlight, or battery full/controller charge completion. These are useful
+candidates, not an exhaustive diagnosis or identified causes of these edges.
+Keep measured output state separate from an inferred reason, with explicit
+UNKNOWN/ambiguous results. Time of day can inform a hypothesis; it does not
+measure light at this window, establish that a cable is connected, or prove
+battery state of charge. Several limiting conditions can coexist. The reason
+for the 14:48 OFF-like edge remains unverified.
+
+For later characterization, correlate continuous INA samples with timestamped
+LED observations, panel/connection observations and known changes. The exact
+SUNER model should be established before using its LED codes as labels.
+SUNER's [BC-20W product documentation](https://sunerpower.com/products/bc-20w-poly-solar-battery-charger)
+distinguishes charging, full, error and no-output indications; that is a model
+example, not confirmation of the installed unit or its state.
+
+**Additional user observations, September 25:** the panel remained connected
+throughout the overnight run. It is currently cloudy and the user reports no
+charging; no precise LED color/state or time was supplied. Disconnection is not
+a supported explanation for this reported overnight setup. The user proposes
+that a mostly topped-up battery may not trigger charging under cloudy conditions
+when a lower battery would. This is a plausible interaction between available
+panel power and controller restart/charge-demand behavior, not a measured rule.
+The exact controller model, restart threshold/hysteresis and panel-side power
+remain unverified. Time of day and cloud observations must not be promoted to
+measured input-power availability or battery-full proof.
+
+Next: inspect durable storage for overnight records before another upload,
+correct gap/initial-state reporting, then close the existing storage
+review/commit/hardware-smoke stage before adding firmware inference. Current
+autonomous records use epoch 0 / UNKNOWN time; sequence and session-relative
+fields do not by themselves give exact night/dawn wall-clock event times, and
+wake snapshots cannot resolve a transition between wakes to one second.
+No firmware or Python source was changed in this audit.
+
+## 2026-09-24: Continuation audit — current tree and continuous OFF-like transition
+
+Read-only source/git/CSV inspection, followed by documentation corrections. No
+firmware or analysis code was edited, no gate was rerun, and no upload or serial
+command was issued. Experiment 3 was not reset or cleared.
+
+**Repository snapshot:** `main` at `43c3baf` (`Fix durable log recovery and
+reconcile project docs`), with nothing staged. Recovery is now committed;
+`eba3b5d-dirty` remains the identity of the previously supplied hardware smoke,
+not a claim that clean `43c3baf` was uploaded. Storage extraction remains in the
+working tree: `storage.h`/`storage.cpp` are untracked, with sketch and recovery
+harness changes. Concurrent SUNER work includes `tools/charger-transitions.py`,
+`pyproject.toml`/`uv.lock` changes adding pandas, and documentation changes.
+The latest reported extraction result is 462 passed / 1 xfailed, 7/7 translation
+units, with its full gate red on the concurrently introduced pyright error.
+The CODE agent owns the Python correction and capture-gap handling; this audit
+does not certify their completion or a new gate result.
+
+**Subsequent coding-agent addendum, supplied by the user:** the pyright failure
+is resolved by enumerating row positions and using `.iloc` consistently instead
+of mixing index labels and positions. The agent reports byte-identical output
+against its pre-fix sample capture (5 transitions, 85 lines), and a complete
+`tools/check.sh` pass: exit 0, ALL OK; 462 passed / 1 xfailed; pyright,
+py_compile, warning-free clean firmware compile, IntelliSense 7/7, shell syntax
+and whitespace all pass. Reported flash is 1,104,313 bytes and globals 36,332
+bytes. This supersedes the red-gate snapshot above. These are supplied test
+results, not another gate run by this audit.
+
+Source inspection confirms the positional fix. **Capture-gap handling remains
+unimplemented:** the loop does not check timestamp spacing or experiment
+boundaries before carrying candidate/confirmed state forward, and initial
+state acquisition is still printed as a transition. The all-green gate does not
+establish continuity-aware analysis. Storage extraction remains uncommitted and
+not uploaded; its hardware smoke is still owed.
+
+**CSV evidence, independently read from `data/samples.csv`:** all rows below
+belong to Experiment 3. Times are host capture times on 2026-09-24, UTC−07:00;
+they bracket observed changes at roughly one-second resolution, not exact
+controller switching instants.
+
+| Host time | Current (mA) | Voltage (V) | Observation |
+| --- | ---: | ---: | --- |
+| 14:09:49.468777 | -0.628 | 12.989648 | Before ON-like step |
+| 14:09:50.468071 | +178.692 | 12.994336 | First positive sample |
+| 14:09:51.469187 | +262.236 | 12.998047 | Positive charging current continues |
+| 14:48:15.098515 | +68.748 | 13.318555 | Before OFF-like step |
+| 14:48:16.097899 | +62.708 | 13.318555 | Last positive sample in inspected capture |
+| 14:48:17.099301 | -0.624 | 13.312891 | First near-zero/reverse sample |
+| 14:48:18.099522 | -0.644 | 13.311719 | Near-zero/reverse current continues |
+| 14:48:19.103015 | -0.636 | 13.310547 | Near-zero/reverse current continues |
+
+The OFF-like step spans **1.001402 seconds** between adjacent captured samples,
+so it is not a before/after comparison across a capture gap. The inspected
+suffix contains **1,728 samples through 15:17:04.967150**, ranging from
+**−0.684 to −0.564 mA**. This supersedes the kickoff's latest-known statement
+that charging continued and no continuous OFF transition had been captured.
+It establishes a sustained current change, not its cause or the controller's
+internal cutoff rule. A matching LED observation has not yet been supplied.
+
+The user additionally reports approximately **3.5 minutes** from connecting the
+series resistor load to charging resuming. This refines the earlier "few
+minutes" report; the load-attachment timestamp and resistor temperature were
+not independently measured here. The resistor heat observation remains
+qualitative. Production charger-output detection is intended to operate directly
+on INA readings in firmware; CSV analysis is characterization only. Thresholds,
+persistence and sleep/sampling integration remain undecided.
+
+**Documentation drift corrected:** PROJECT's next-stage paragraph still placed
+LittleFS in the sketch; BACKLOG's recovery entry still put scan/truncation there;
+STORAGE_SYNC_DESIGN called 429/1 the latest gate and its lifecycle diagram still
+put DIAG_ALRT after CHARGE/ENERGY. The diagram now matches the implemented order.
+Older dated lab entries retain their at-the-time status and are superseded by
+D-058/current module inventory for storage extraction. No new hardware validation
+is claimed.
+
+## 2026-09-24: SUNER addendum — first contiguous charger-ON transition
+
+**OBSERVED, as supplied by the user:** this adds timing and sample-analysis
+results to the earlier resistor-load experiment below. The analysis run and
+physical observations were supplied; this documentation stint did not rerun the
+tool, perform a new hardware test, upload or access serial. Source inspection
+confirms the analysis tool's current behavior and its capture-gap limitation.
+
+### Load timing and heat — approximately 3.5 minutes
+
+The two **6 Ω / 50 W aluminum resistors in series** formed a nominal **12 Ω**
+load. At 12.9–13.2 V, the calculated load remains **1.075–1.100 A**, about
+**14 W total / 7 W each**, as detailed in the earlier entry; these are nominal
+calculations, not measured resistor-branch current.
+
+After only **about 3.5 minutes**, the resistors were **SCALDING / VERY HOT in
+free air**, and the battery had been pulled down enough for the SUNER to resume
+its **blinking red charging indication**. The load was disconnected early for
+both reasons: the desired transition had occurred and the resistors were
+extremely hot. The original plan was up to 15 minutes, not the observed duration.
+
+No resistor case temperature was measured. A 50 W aluminum-resistor rating does
+not mean it stays cool at approximately 7 W in free air; chassis/heatsink
+assumptions matter. No precise temperature or free-air power limit is inferred.
+
+### First directly observed NOT_CHARGING → CHARGING transition
+
+The logger was running continuously before the load was connected. The supplied
+`samples.csv` analysis identified this contiguous transition on **2026-09-24**:
+
+| Timestamp as supplied | Voltage (V) | Current (mA) | Power (mW) | Analysis state |
+| --- | ---: | ---: | ---: | --- |
+| 2026-09-24 14:09:47.468 | 12.998438 | −0.608 | 7.9104 | NOT_CHARGING |
+| 2026-09-24 14:09:48.468 | 12.994141 | −0.624 | 8.1024 | NOT_CHARGING |
+| 2026-09-24 14:09:49.469 | 12.989648 | −0.628 | 8.1792 | NOT_CHARGING |
+| 2026-09-24 14:09:50.468 | 12.994336 | +178.692 | 2322.8032 | CHARGING |
+| 2026-09-24 14:09:51.469 | 12.998047 | +262.236 | 3408.5504 | CHARGING |
+| 2026-09-24 14:09:52.467 | 12.996289 | +261.340 | 3396.4544 | CHARGING |
+
+The excerpt supplies no UTC offset; these timestamps are reproduced without
+conversion. The first positive charging sample is **14:09:50.468**, following
+−0.628 mA at 14:09:49.469, then +262.236 mA one sample later. The change is
+observed between adjacent approximately one-second samples; the exact physical
+switching instant within that interval is not established. Analysis-state labels
+are not new firmware telemetry fields.
+
+The SUNER **blinking red LED was observed during the charging regime**, strongly
+correlating positive INA current with controller output. No precisely timestamped
+LED edge was supplied. This is direct evidence for an INA-based **CHARGER_OUTPUT**
+state (`CHARGING`, `NOT_CHARGING`, `UNKNOWN / TRANSITION`), not proof of
+**SOLAR_AVAILABLE**. Near-zero output can still mean full-battery/controller
+cutoff, nighttime, panel disconnection or controller fault.
+
+**At the supplied observation cutoff the SUNER was STILL CHARGING.** Today's
+continuous CHARGING → NOT_CHARGING transition had not yet been captured. Capture
+that OFF edge and correlate it with the LED before claiming both directions are
+characterized. This is a dated observation, not a live board-status assertion.
+
+**Later evidence, preserved separately:** the concurrent continuation audit above
+records an OFF-like current step at **14:48:17.099301 −07:00**. A read-only CSV
+spot-check in this stint confirms +62.708 mA at 14:48:16.097899 followed by
+−0.624 mA, with 1,728 near-zero/reverse samples through 15:17:04.967150
+(−0.684 to −0.564 mA). This supersedes the brief's missing-current-edge status,
+not its missing LED correlation. The cause/controller state is still unverified
+by a matching LED observation; both directions are not fully characterized.
+
+### Characterization tool, capture gaps and future firmware
+
+[tools/charger-transitions.py](../tools/charger-transitions.py) now exists and
+the supplied run found the ON transition above. It analyzes `data/samples.csv`
+with provisional current/voltage classification and consecutive-row persistence,
+then prints state changes and surrounding samples. These are **characterization
+tools**, not the intended production dependency. Future firmware would infer
+charger output directly from INA228 readings on the ESP32, after characterizing
+ON/OFF shapes, thresholds, hysteresis, persistence/debounce, noise and ambiguous
+regions. No firmware thresholds or final algorithm have been decided.
+
+**OPEN tool issue: consecutive rows need not be contiguous in time.** Source
+inspection shows no elapsed-time gap check or separate initial-state category.
+Historical capture included CHARGING around **2026-09-23 09:56**, then no samples
+until roughly **12:21**, when the first later samples were NOT_CHARGING. A state
+change occurred somewhere in the gap; its exact time is **UNKNOWN**. Neither
+the first post-gap sample nor the first state in a file is a precisely observed
+transition. Add distinct `INITIAL STATE`, `STATE AFTER CAPTURE GAP` and
+`OBSERVED CONTIGUOUS TRANSITION` reports, requiring sufficiently contiguous
+evidence on both sides of an observed edge. Gap and persistence criteria remain
+to be characterized; no numeric maximum gap is chosen here.
+
+While the ESP32 is **awake**, successive INA readings can support high-resolution
+transition detection. In normal autonomous **deep sleep**, the INA keeps operating
+but the ESP is not continuously evaluating samples. Without a future hardware
+alert/wake mechanism, state can only be assessed at normal wake/sample points;
+the wake snapshot does not establish second-level timing of a change during
+sleep. INA228 alert-pin wake is a possible later investigation, **not implemented
+or decided**. The INA-OFF power-test variant is a separate mode that deliberately
+stops INA measurement.
+
+Placement remains **INFERRED, NOT YET PHYSICALLY TRACED**: the nominal ~1.07 A
+load did not appear as an approximately −1 A INA shift, while positive controller
+charge current was observed. This suggests controller charging-path current,
+not total battery net current; no terminal/polarity map is established. Wiring
+is unchanged. See [HARDWARE_WIRING.md](HARDWARE_WIRING.md) and the
+[characterization backlog](BACKLOG.md#characterize-suner-charger-state-inference-from-samplescsv).
+
+## 2026-09-24: SUNER controller restart under a temporary resistor load
+
+**OBSERVED, as reported by the user:** this records an already completed bench
+experiment and the supplied telemetry excerpts. No new hardware test or CSV
+analysis was performed by this documentation stint. Exact event timestamps,
+restart/cutoff thresholds and a complete OFF transition are not established by
+these excerpts. Existing firmware-validation history remains separate.
+
+### Purpose and temporary load
+
+The battery had been near the SUNER controller's full/cutoff-like state:
+approximately **13.1 V, −0.6 mA**, and **8 mW magnitude** at the INA228. A
+temporary resistive load was applied to lower battery voltage and observe the
+controller restarting charge. The logger was already running before the load
+was applied, so continuous telemetry captured the transition.
+
+Two newly arrived **6 Ω, 50 W aluminum-housed power resistors** were connected
+**in series**, giving a nominal **12 Ω** load. Exact attachment points and
+high-current routing were not supplied as a physical trace.
+
+**CALCULATED, not measured load current or temperature:** for 12.9–13.2 V across
+the nominal 12 Ω series pair, `I = V/R` and `P = V²/R` give:
+
+| Quantity | At 12.9 V | At 13.2 V |
+| --- | ---: | ---: |
+| Load current | 1.075 A | 1.100 A |
+| Total dissipation | 13.8675 W | 14.5200 W |
+| Dissipation per equal 6 Ω resistor | 6.93375 W | 7.2600 W |
+
+Thus the expected load was roughly **1.07–1.10 A**, **14 W total**, or **7 W per
+resistor**. These estimates use nominal resistance; they are not INA readings
+of the resistor branch.
+
+**THERMAL OBSERVATION:** the resistors became **VERY HOT in free air**. No case
+temperature was measured. The practical lesson is that a 50 W headline rating
+does not mean a resistor stays cool at lower power: aluminum power resistors
+can become very hot without substantial heat sinking/chassis mounting. This
+experiment does not establish the particular parts' permitted free-air power.
+
+The SUNER returned to its **blinking red charging indication within a few
+minutes**. The resistors were then disconnected; the intended transition had
+occurred, so there was no need to continue the planned 15-minute load.
+
+### Charging telemetry and behavior after removing the load
+
+Blinking red was visually observed as the controller's charging indication,
+correlated with approximately **12.883 V, +154–160 mA and 1.99–2.05 W**.
+A representative interval excerpt was:
+
+```text
+CSV_DATA,3,273,60.000,12.884375,154.916000,1995.993600,...
+```
+
+The ellipsis denotes omitted fields; this is not a complete CSV row.
+
+After load removal the controller remained blinking red. Voltage rose from
+roughly **13.2154 V to 13.2205 V**, while current remained **+163–167 mA** and
+power **2.16–2.21 W**. Representative supplied samples:
+
+| Voltage (V) | Current (mA) | Power (mW) |
+| ---: | ---: | ---: |
+| 13.215430 | 164.432 | 2173.0304 |
+| 13.216211 | 163.880 | 2165.8752 |
+| 13.218945 | 166.128 | 2196.0192 |
+| 13.220117 | 166.932 | 2206.8352 |
+| 13.220508 | 166.316 | 2198.7840 |
+
+Charging persisted while voltage rose after the temporary load was removed,
+consistent with the controller remaining latched in active charging. This does
+not determine its internal control logic or numeric restart/cutoff hysteresis.
+The live chart showed the major load/controller transition and a later narrow
+dip associated in time with physically checking the LED. **The narrow dip's
+cause is unknown**; temporal association is not a causal explanation.
+
+### OBSERVED INFERENCE FROM TELEMETRY — current-path interpretation
+
+The nominal resistor load was approximately 1.07 A. If the INA228 measured
+total net battery current including that load, connecting it would be expected
+to produce an approximately −1 A shift, other contributions being comparable.
+Instead, reported current during charging was approximately **+150–170 mA**.
+
+This strongly indicates that the present INA228 placement measures the
+**SUNER/controller charging path rather than total net battery current including
+the temporary resistor branch**. It is an **observed inference from telemetry**,
+not a fully traced wiring fact. Exact controller/shunt/battery polarity and
+routing remain OPEN pending physical setup/photo/wiring trace. See
+[HARDWARE_WIRING.md](HARDWARE_WIRING.md#current--high-current-measurement-path).
+
+### Charger-output inference — promising, not implemented or fully characterized
+
+The observed full/cutoff-like regime near **−0.6 mA** and active charging near
+**+155–167 mA** differ by more than two orders of magnitude in current magnitude.
+The simultaneous blinking-red indication strongly correlates with the positive
+charging regime. A future classifier could describe **CHARGER_OUTPUT** as
+`CHARGING`, `NOT_CHARGING`, or `UNKNOWN / TRANSITION`.
+
+Do not call that result **SOLAR_AVAILABLE**. Near-zero controller-output current
+could mean a full battery/controller cutoff in bright sun, nighttime, a
+disconnected panel, or controller fault. This current alone cannot distinguish
+those causes. The narrower question is: **is the SUNER currently delivering
+charging current?** It is not a battery state-of-charge measurement either.
+
+**No production thresholds are decided.** Illustrative future logic could use
+hysteresis and persistence: sustained current well above zero suggests charging;
+near-zero/slight reverse current suggests not charging; intermediate/noisy
+values could mean transition or retention of the prior state. This is a proposal,
+not an implemented detector or a chosen threshold policy.
+
+Next, analyze `data/samples.csv` for sustained current step changes, using a
+rolling median or similar smoothing and a configurable delta threshold. Report
+timestamps and before/after current, voltage and power, with surrounding samples
+for inspection. The OFF transition is **not yet fully captured/correlated**:
+compare the LED transition to not-charging with the matching INA-current step
+before declaring an INA-only classifier fully characterized. The work is tracked
+in [BACKLOG.md](BACKLOG.md#characterize-suner-charger-state-inference-from-samplescsv).
+No formal architecture decision or firmware/UI feature was added.
 
 ## 2026-09-24: Hardware validation addendum — clean record format and working-tree recovery
 

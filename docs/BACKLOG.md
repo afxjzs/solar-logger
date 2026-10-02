@@ -15,6 +15,66 @@ The boundary that matters most is the last one. Everything under "Longer-term id
 
 # Current and near-term work
 
+## Characterize SUNER charger-state inference from samples.csv
+
+**Analysis started; characterization remains OPEN (2026-09-24).**
+[tools/charger-transitions.py](../tools/charger-transitions.py) exists and the
+supplied run identified the [continuous ON transition](LAB_NOTES.md#2026-09-24-suner-addendum--first-contiguous-charger-on-transition) at the first charging sample,
+14:09:50.468. It uses provisional classification and consecutive-row persistence,
+not a completed production policy. Capture-gap/initial-state reporting was
+implemented and validated on 2026-09-28 (D-059); the full gate passed with
+486 tests and the existing one strict xfail. See the latest LAB_NOTES entry.
+
+`data/samples.csv` and this script are characterization aids. The future goal is
+direct INA228-based state inference on the ESP32, with no production dependency
+on a CSV file. Before adding firmware policy:
+
+- **Complete OFF validation:** at the supplied ON-brief cutoff the SUNER was
+  still charging and OFF was missing. The later continuation audit records a
+  continuous OFF-like current step at 14:48:17 −07:00, verified in the CSV;
+  a matching LED observation remains missing. Correlate/repeat that edge with
+  the LED before identifying its cause or declaring both directions characterized.
+- **Capture-gap reporting DONE, 2026-09-28:** initial state, post-gap state and
+  contiguous edges are separate; persistence resets at gaps, experiment changes
+  and non-increasing timestamps. Ambiguous samples cannot bridge a timed edge.
+  The configurable default is 2 s maximum adjacent spacing, derived as two
+  nominal one-second capture periods, with five classified samples on each side
+  of an observed edge. This is provisional analysis policy, not a production
+  threshold or a physical continuity guarantee. Every segment and gap is shown,
+  including same-state reacquisition and segments with no confirmed state.
+  CHARGING near Sep 23 09:56 followed by NOT_CHARGING near 12:21 remains a
+  post-gap observation. The user authorized continuation after the CODE ownership
+  question; this session completed the isolated host stage. See D-059/PROJECT.
+- Characterize ON/OFF shapes, useful current thresholds, hysteresis,
+  persistence/debounce, noise and intermediate regions. The current tool's
+  settings are analysis settings, not firmware decisions. Evaluate smoothing
+  such as a rolling median if needed; do not claim it is already implemented.
+- Report transition candidates with timestamps and before/after current,
+  voltage and power plus surrounding samples. Keep timestamps/timezones and
+  distinguish the first changed sample from later persistence confirmation.
+- Separate narrow transients from sustained state changes. The dip near the
+  physical LED check still has no established cause.
+- **Inspect overnight autonomous records (2026-09-25):** the user confirmed
+  only the board stayed powered, so host CSV ending September 24 at 18:44:55
+  is expected. Verify storage contents before drawing night/dawn conclusions;
+  autonomous records currently have UNKNOWN absolute time and only wake-point
+  snapshots. See the September 25 LAB_NOTES audit. The panel remained connected;
+  cloudy conditions and no charging are user-reported, with a possible combined
+  light/restart-threshold effect still uncharacterized.
+- **Characterize likely causes separately from output state:** the proposed
+  candidates are disconnection, insufficient light and controller charge
+  completion/full indication. Retain unknown/ambiguous outcomes and the
+  possibility of faults or overlapping conditions. Timestamped LED and known
+  panel/connection observations provide labels; time of day is supporting
+  context, not proof. No cause classifier is implemented or validated.
+
+The intended state is **CHARGER_OUTPUT**, not **SOLAR_AVAILABLE**: near-zero
+output can accompany bright-sun cutoff, nighttime, panel disconnection or fault.
+Keep `UNKNOWN / TRANSITION` possible. INA placement remains **INFERRED, NOT YET
+PHYSICALLY TRACED**, not proof of total battery net current or state of charge.
+Future firmware/UI exposure remains a conditional idea below; no final algorithm
+or production thresholds are decided.
+
 ## Installed-system work — settled direction, implementation and research pending
 
 The scope is D-052–D-054 in [DECISIONS.md](DECISIONS.md), summarized in
@@ -35,6 +95,82 @@ It remains permanently available as a backup and explicit user-access path.
 The first BLE version may use a reset/manual-button-initiated awake window;
 the exact button/wake circuit and window timing are not chosen. Do not assume
 a phone can remotely wake a fully sleeping radio.
+
+### Enclosure — a required deliverable, not yet specified. Added 2026-10-01
+
+Nothing about the physical container has been chosen, measured or ordered. It is
+called out here because it is a deliverable the installed version cannot ship
+without, and it was previously present only as the negative constraint above
+("not planned for the engine bay").
+
+What it must hold, from the current bench rig in HARDWARE_WIRING: the Seeed XIAO
+ESP32-C3, the INA228 breakout, and the wiring from the car's 12 V. Dimensions
+are unmeasured.
+
+**It must expose the USB port, or make it reachable without disassembly.** This
+is a functional requirement, not a convenience. D-054 makes manual SYNC a
+permanent access path, and until BLE and the phone app exist, USB is the ONLY
+way to read the log. An enclosure that seals the port makes the logger
+write-only.
+
+**Operator's intended shape, stated 2026-10-01.** Both the XIAO and the INA228
+breakout live in one box. The only things crossing the wall are a battery
+connector, a solar-panel connector, a USB-C port and probably a reset switch.
+Until BLE and the iOS app exist, the workflow is to disconnect the box, carry it
+indoors and plug it into a laptop to read the log. Nothing here is built or
+ordered; this records the target so the open questions below can be answered
+against it.
+
+That shape is feasible, and it resolves the shunt question above by putting the
+shunt inside the box: with the panel side and the battery side both entering the
+enclosure, the measurement path passes through it, which also keeps the I2C bus
+short. Five things follow from it that are NOT yet answered.
+
+**1. Where does the SUNER controller go? ANSWERED 2026-10-01: nowhere.** The
+panel is a SUNER POWER BC-12W Pro with the MPPT charge controller built into the
+panel assembly, so there is no separate controller to house, and the box sits
+between the panel's own output lead and the battery. What arrives at the box is
+the controller's regulated output, not the panel's open-circuit voltage. See
+HARDWARE_WIRING. The enclosure therefore holds the XIAO, the INA228 breakout and
+the shunt, and nothing else.
+
+At 12 W on a 12 V system the panel's output is on the order of 1 A, so the 5 A
+fuse from the purchased harness assortment is the right one: comfortably above
+anything the panel can deliver, and far below what 12 AWG can carry. The 12 W
+figure is the vendor's rating, not measured here.
+
+**2. The 12 V to 3.3 V stage is still unchosen**, and HARDWARE_WIRING says so
+explicitly. The XIAO is USB-powered today and the measurement path does not power
+it. In the box it must run from the battery side.
+
+**3. USB-C and battery power can be present at once.** The intended workflow
+disconnects the car first, so normally only one source is live, but an
+accidental overlap must be either handled in the circuit or stated as an
+operating rule. Nothing in this repository has established what the XIAO does
+with both.
+
+**4. Every trip indoors is a cold boot, which makes the recovery work
+load-bearing.** Disconnecting the battery connector removes power, so RTC
+memory is lost, `rtcAutoMagic` reads invalid, and `autoStorageRecover()` rebuilds
+the sequence and the running totals from the durable log on the next arm. That is
+the exact path D-023, D-057, D-060 and D-061 govern. Under this workflow those
+branches stop being rare and become routine, which raises the value of their
+hardware acceptance rather than lowering it.
+
+**5. The reset switch has a second job already planned.** The XIAO has an onboard
+reset button that an enclosure would cover, so an external one restores access.
+Separately, D-054 and the V1 item above plan a physical manual SYNC/wake button,
+and note the first BLE version may use a reset or button-initiated awake window.
+Decide whether one button serves both before cutting two holes.
+
+Unknown and unmeasured: cabin temperature range in a parked car (the bench has
+recorded roughly 20-28 C and says nothing about a closed car in sun),
+condensation, vibration and retention, strain relief, fusing location, the
+current rating the two power connectors need — the panel's wattage is recorded
+nowhere in this repository and the observed charging current is only a few
+hundred mA, which is not a rating — and whether the breakout's indicator LED
+matters once it is enclosed. No automotive environmental figure in this
+repository has been measured.
 
 ### BMW charging-point topology — OPEN, research before any trunk-side decision
 
@@ -111,10 +247,26 @@ not server availability; phone ACK is not proof of server receipt. The ESP must
 not know about or depend on the home inference/web server. Home Wi-Fi proximity
 is never assumed; direct logger Wi-Fi is optional later work.
 
-## Firmware modularization — FOUR STAGES BUILT, LATEST 2026-09-23
+## Firmware modularization — SEVEN STAGES BUILT, LATEST 2026-10-01
 
-`Arduino/solar-logger/solar-logger.ino` is 7,059 lines by `wc -l` after the
-telemetry extraction on 2026-09-23. It was 7,201 after the NVS extraction
+**Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
+1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
+full pre/post dumps preserve all 10,659 preflight record lines exactly, and
+post-upload boot 36 adds 3 records, 12073–12075. Final dump: 10,664 records,
+1412–12075, board invalid 0; observed INFO scans have trailing 0 and INTACT tails
+with no storage errors. [Raw evidence, checksums and limits](../logs/evidence/2026-09-29/storage-hardware/README.md).
+Damaged-log branches remain host/synthetic tested only. No standalone reset,
+storage clear, whole-flash erase or corruption injection was performed.
+
+The current storage status below incorporates this bounded hardware result.
+
+`Arduino/solar-logger/solar-logger.ino` is 6,680 lines by `wc -l` after the
+sequence-authority extraction on 2026-10-01, and was 6,735 immediately before it
+at `6192c2d`. It was 6,649 lines after the
+storage extraction on 2026-09-24. It was 7,098 immediately before that
+extraction, which is the record-format extraction and the durable-log recovery
+fix on top of the 7,059 recorded after the telemetry extraction on 2026-09-23.
+Before that it was 7,201 after the NVS extraction
 earlier the same day, 7,836 after the connection extraction on
 2026-09-18, 7,949 after the INA228 extraction the same day, 9,126 before that,
 and 8,436 when this plan was written. The
@@ -124,7 +276,7 @@ concatenated into the same translation unit, so they hide nothing, enforce
 nothing, and keep the file that a person edits from being valid C++ on its own
 (D-039).
 
-**Five modules exist**, each extracted with no intended behavior change:
+**Seven modules exist**, each extracted with no intended behavior change:
 
 - **The INA228 driver**, `ina228.h` and `ina228.cpp`, 2026-09-18. A hardware
   smoke test of that image was reported later the same day; it is recorded, as
@@ -154,12 +306,28 @@ nothing, and keep the file that a person edits from being valid C++ on its own
   Experiment 3 record; **hardware validation passed on clean `eba3b5d`**. Its boundary is D-056.
   This is the `Record format / CRC` row of the module table below, built as that
   row describes. Record version is still 1 and no byte of the layout changed.
+- **Durable storage**, `storage.h` and `storage.cpp`, 2026-09-24: the LittleFS
+  mount, the log path, the full scan, the tail repair, the append and the
+  filesystem-space figures. Compiled and host-tested, with the real functions
+  run against damaged logs made of real files; **healthy-log hardware-smoke validated on clean 1980d94 (September 29).** Its boundary is D-058. This is the `LittleFS mechanics` row of
+  the module table below, built as that row describes. Which sequence a record
+  gets stayed in `autoStorageRecover()` in the sketch, and storage-full policy
+  was not invented.
+- **Sequence authority**, `sequence_authority.h` and `sequence_authority.cpp`,
+  2026-10-01: the D-023 decision only, `sequenceAuthorityNext(scan,
+  reservedHighWater)`, with its three `[STORAGE]` lines. Compiled and
+  host-tested; **NOT committed, uploaded or hardware validated.** Its boundary
+  is D-062. Reading the NVS reservation into `rtcAutoSeqHighWater`, the mirror
+  itself, `reserveSequenceBlock()`, `ensureSequenceReservation()`,
+  `AUTO_SEQ_BLOCK` and the running-totals reseed stayed in the sketch; see the
+  module table row below for why.
 
 Telemetry was the fourth stage chronologically and is numbered 5 in the
 original table below, because that table split the INA228 work into two rows.
 Those plan numbers are not the chronological stage numbers. Record format was
-the fifth and has no number in that table at all: it is the first of the
-boundaries D-055 separated out of the old `auto_state` proposal.
+the fifth and durable storage the sixth, and neither has a number in that table
+at all: they are the first and second of the boundaries D-055 separated out of
+the old `auto_state` proposal. Sequence authority is the seventh and the third.
 
 The audits and hardware checks are in [LAB_NOTES.md](LAB_NOTES.md). The gate
 every stage passes was built on 2026-09-18, and since the connection
@@ -203,7 +371,7 @@ Persistence classes: **V** volatile RAM (lost on any reset), **R** RTC-retained
 | `rtcAutoIntervalStartMs` | R | wake cycle (after reset), scheduler overrun branch, host handoff, arm, `setup()` (cold-boot resume, RTC-loss rebuild) | The autonomous interval boundary. Must move only when the accumulators are reset. **The overrun branch breaks this**; found 2026-09-18, not fixed, below. |
 | `rtcAutoNextSeq` | R | `autoStorageRecover()`, wake cycle on successful append | Never reused (D-017). Advances only after a durable append. |
 | `rtcAutoSeqHighWater` | R, mirrors N `auto_seq_hw` | `reserveSequenceBlock()`, `autoStorageRecover()` | The floor that makes duplicates impossible. A failed NVS read currently lowers it to 0. |
-| `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Autonomous-local totals, **not** experiment totals. Since the 2026-09-17 fix, advanced only after a successful durable append. |
+| `rtcAutoRunChargeUAh`, `rtcAutoRunEnergyUWh` | R, rebuilt from L | wake cycle, `autoStorageRecover()`, `clearStorage()` | Autonomous-local totals, **not** experiment totals. Since the 2026-09-17 fix, advanced only after a successful durable append. Since D-060 (2026-09-29, working tree), recovery reseeds them only from a log read to its end, and otherwise says what it carries. |
 | `rtcAutoCycleCount` | R | wake cycle, arm, cold-boot resume, RTC-loss path | Zero means "first record of this session", which is what sets `FIRST_AFTER_BOOT`. |
 | `rtcAutoCommandedSleepMs` | R | `autonomousDeepSleepAgain()` | **Written, never read.** No invariant, because nothing depends on it. |
 | `rtcSleepTestMagic`, `rtcSleepTestCycle` | R | `armSleepPowerTest()`, `enterSleepPowerTestDeepSleep()`, `stopAllPowerTests()`, cold-boot resume | Belong to power-test state, not RTC-retained autonomous state. Guarded by their own magic (D-011). |
@@ -246,12 +414,12 @@ filenames or completed extractions**.
 | `ina228` | Register access, device configuration and sensor/accumulator operations | Extracted; callers own measurement timing and accounting (D-047) |
 | `telemetry` | CSV formatting/emission mechanics | Extracted, host-tested and running in the smoke-validated `eba3b5d` image; exhaustive CSV comparison not claimed (D-051) |
 | Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested and **HARDWARE-VALIDATED on clean `eba3b5d`** |
-| LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Planned; use the record contract; expose log facts without deciding sequence authority, reclamation or corruption policy during a move. Corruption policy was settled in source on 2026-09-24 (four damage cases, no automatic mid-file repair) and is the behavior to preserve |
-| Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | Separate concept; consumes storage results and NVS access; RTC holds retained values, not this decision policy. Future placement/API not chosen |
+| LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Extracted 2026-09-24 as `storage`, exactly as this row describes: it uses the record contract and reports log facts, and `autoStorageScanAndRepair()` hands the scan back rather than choosing a sequence. The four-damage-case corruption policy is preserved token for token; no reclamation or storage-full policy was invented (D-058). Host-tested; **healthy-log hardware-smoke validated on clean 1980d94** |
+| Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | **Decision half extracted 2026-10-01 as `sequence_authority`; NOT committed, uploaded or hardware validated** (D-062). The module is handed the scan and the reservation and reads neither: no NVS, RTC, LittleFS or `extern`. **Reservation did not move**: `reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater`, and `tests/test_characterization_nvs.py` pins that write token for token, so moving it needed either the first `RTC_DATA_ATTR` in a module, ahead of the retained-state stage, or a changed characterization test. Reservation, `AUTO_SEQ_BLOCK`, the mirror and the NVS read into it wait for the retained-state stage to settle who owns the mirror. The `ensureSequenceReservation()` call after each recovery stays a caller responsibility: the wake cycle calls it too, with `announceNoOp` false |
 | RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | Planned; no file I/O, record encoding or scheduling; keep power-test RTC state separate |
 | Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
 | Experiment accounting | Tethered interval/experiment state, interval close and checkpoint timing | Planned; calls existing INA/NVS/telemetry interfaces and explicit autonomous-ownership queries |
-| Power tests | Wi-Fi/deep-sleep test state and their separate RTC lifetime | Planned; keep separate from autonomous retained-state ownership |
+| Power tests | Wi-Fi/deep-sleep test state and their separate RTC lifetime | Planned; keep separate from autonomous retained-state ownership. **Attempted out of order on 2026-10-01 and deferred by the user before any code moved.** Today the code calls about 16 sketch-resident names: Wi-Fi control, `autonomousOwnsBoard()`/`autonomousState`/`autonomousTestArmed`/`autonomousTestRunning`, the accounting predicates plus `resumeIntervalAccounting()`/`intervalAccountingBlocked`, boot-wake diagnostics and `experimentId`. The sketch in turn reads `sleepPowerTestRunning`, `rtcSleepTestCycle`, `sleepPowerTestAwakeStartedMs`, `SLEEP_POWER_TEST_AWAKE_MS` and `inaShutdownActive`. Moving it now would need the project's first `extern`s or upward calls. Extract it after retained state, autonomous ownership and accounting, so its dependencies point down |
 | Session logic | Lease acquisition/renewal/release, expiry and accounting handoff | Planned; transport claims stay in `connection`; scheduling coordination is an explicit interface |
 | Command protocol / composition | Parse and dispatch, bounded ACK/RESULT writer, boot/loop ordering and command-pump wiring | Planned later; command protocol stays distinct from CSV and future storage ACKs |
 
@@ -478,17 +646,35 @@ Record format/CRC is **extracted and hardware-validated on clean `eba3b5d`**
 INA_ACCUM_OF set by a real induced overflow remains separate, unperformed work.
 The destructive recovery defect is corrected, host-tested and **normal-path
 hardware-smoke validated on `eba3b5d-dirty`**, a working-tree image based on
-`eba3b5d`. That resolves the prior blocker before extraction. **The next
-structural candidate is LittleFS/durable-storage mechanics**, not yet extracted.
-Preserve D-057, the four recovery cases and remaining limits: no operator
-repair/quarantine command, no resync after non-record-sized insertion, and no
-damaged-log/read-error hardware exercise. Details: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
+`eba3b5d`.
+
+**LittleFS/durable-storage mechanics are now extracted too, as `storage`
+(D-058), software-tested and healthy-log hardware-smoke validated on clean
+1980d94 (September 29).** D-057 and its
+four recovery cases are preserved token for token, and every limit it carried is
+still open: no operator repair/quarantine command, no resync after a
+non-record-sized insertion, and no damaged-log or read-error hardware exercise.
+Storage-full policy was deliberately not invented during the move, so it remains
+undecided. Details: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
+
+**Sequence authority's decision half was extracted on 2026-10-01 (D-062)**;
+it is not committed, uploaded or hardware validated. Reservation stayed in the
+sketch with the RTC mirror it writes. **The next structural candidate is the
+RTC-retained autonomous state**, which must also decide who owns
+`rtcAutoSeqHighWater` and therefore where reservation goes. The paragraph
+below is the 2026-09-24 reasoning that chose this stage:
+
+**The next structural candidates are sequence authority/reservation and the
+RTC-retained autonomous state**, in that order or with a stated reason for
+another. Sequence authority is now the smaller of the two: the storage
+extraction already isolated it in `autoStorageRecover()`, which is the only
+place the D-023 log-versus-NVS reconciliation happens.
 
 | Future boundary | What must remain separate | Validation focus when undertaken |
 | --- | --- | --- |
 | ~~Record format / CRC~~ **BUILT 2026-09-24** | Nothing else moved: no LittleFS, RTC, sequence allocation or scheduling | Done as stated: exact 72-byte golden record, CRC coverage 0–67, CRC offset 68, unchanged version 1 and validation semantics, now also asserted per field at compile time |
-| LittleFS mechanics | No sequence-authority or storage-full policy decision | Preserve append/read/recovery behavior, including the 2026-09-24 four-case recovery policy and its refusal to repair mid-file damage; `tests/test_characterization_storage_recovery.py` already executes that behavior and will follow the code |
-| Sequence authority / reservation | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases, NVS write failure and duplicate avoidance; reclamation must revisit authority explicitly |
+| ~~LittleFS mechanics~~ **BUILT 2026-09-24** | No sequence-authority or storage-full policy decision | Done as stated. Append/read/recovery behavior is preserved, including the four-case policy and the refusal to repair mid-file damage; `tests/test_characterization_storage_recovery.py` did follow the code, needing only to learn that boot recovery is now two functions. Sequence authority stayed in `autoStorageRecover()` in the sketch and storage-full policy is still undecided (D-058). **Healthy-log hardware smoke passed on clean 1980d94; damaged-log hardware branches remain untested** |
+| Sequence authority / reservation — **decision half BUILT 2026-10-01, not committed or uploaded** | Not merely a side effect of storage scan or retained-state access | D-023 intact/partial/corrupt/empty cases executed unchanged through `autoStorageRecover()`; serial message strings byte-identical in the image. Reservation (NVS write failure, duplicate avoidance) did not move and still needs a home; reclamation must revisit authority explicitly |
 | RTC-retained autonomous state | No record encoding, filesystem or scheduler | Single definitions and retained lifetime/validity, session clock continuity and separate power-test state |
 | Autonomous scheduling / policy | Consume mechanics/state through explicit boundaries | Existing deadline, handoff and command-pump contracts; preserve the known overrun xfail until its own fix |
 | Experiment, power-test, session and command concerns | Retain accounting ownership and the separation of transport claims from leases | Scoped characterization, required local gate and later deliberate hardware checks for each move |
@@ -792,6 +978,299 @@ Recently completed and moved out of this file:
 ---
 
 # Known bugs and issues
+
+## Generic STATUS reports uninitialized experiment state in timer-wake rendezvous — found 2026-09-29
+
+**OPEN; pre-existing, observed on eba3b5d-dirty before the storage upload.**
+`printStatus()` reads `experimentId`, `completedInterval` and running-total
+globals before timer-wake rendezvous has reached the normal `loadCheckpoint()`
+path. It prints experiment 0 / interval 0 / zero totals as “frozen” state.
+`LOGGER AUTONOMOUS STATUS` reads experiment context directly from NVS and reported
+3; every pre/post-dump record also carried 3. Held STATUS after initialization
+correctly reported Experiment 3, interval 479. This is misleading presentation,
+not evidence that experiment data was reset. A separate correctness stage should
+report unavailable/unloaded checkpoint state explicitly or read it safely, with
+meaningful coverage of commands issued during early timer wake. Do not reset the
+experiment to make STATUS look right. [Fresh evidence](../logs/evidence/2026-09-29/storage-hardware/README.md).
+
+## Open-for-scan failure can still report an INTACT tail — found 2026-09-29, FIXED AND COMMITTED `44d8b27` 2026-09-29, NOT HARDWARE VALIDATED
+
+**Fixed, reviewed, red-checked and committed as `44d8b27`; nothing was uploaded,
+so no board has run it.** The red-check staged the pre-fix tree with the
+`openFailed` field declared but never set: 5 of the 7 new tests fail there, and
+the pre-fix serial reproduced `Rewriting the log to its valid prefix: 0 of 0
+bytes` for a log the scan never opened. See the newest LAB_NOTES entry. The
+finding as it was recorded:
+
+> **OPEN; pre-existing in 43c3baf, preserved by the storage extraction.**
+> `autoStorageScan()` in `storage.cpp` prints an error if an existing log cannot
+> be opened, then returns a zero-initialized scan without setting `readError`.
+> Recovery and `printStorageInfo()` can consequently print INTACT for an unread
+> log. Sequence authority still falls back to the NVS floor because there are no
+> valid scanned records; this outcome does not automatically discard log bytes.
+> A separate correctness stage should propagate explicit unreadable scan status
+> and exercise open failure in the file-backed harness. Until then, any storage
+> error invalidates an otherwise reassuring INTACT summary. This finding is not
+> a newly introduced extraction regression; see the September 29 LAB_NOTES entry.
+
+**What changed.** `AutoLogScan` gained `openFailed`, and a failed read-open now
+sets it together with `readError`. `readError` is what the existing refusals are
+keyed on, so setting it is what carries the case into them; `openFailed` carries
+what `readError` cannot, which is that no count in the scan was measured at all.
+`autoStorageScanAndRepair()` reports the tail as UNREAD rather than falling
+through to "Log tail is intact: ALL OK", and `printStorageInfo()` prints
+`Tail status: UNREADABLE`, prints no fabricated size or record count, and
+returns false so the command answers `CMD_RESULT,...,ERROR` (D-041) instead of
+`OK`. D-023 sequence authority and the healthy-log path are unchanged.
+
+**A second, sharper defect was found by the regression test and fixed with it.**
+Driven directly against an unopened log, `autoStorageTruncateToValid()` printed
+`Rewriting the log to its valid prefix: 0 of 0 bytes` and proceeded. The only
+thing that stopped it was its own source open failing for the same reason the
+scan's had. A fault that cleared in between — the scan's open failing and the
+rewrite's succeeding — would have copied `keepBytes`, zero, into the temporary
+file, removed the log and renamed the empty file over it, destroying every
+record on the strength of a scan that read nothing. It is not reachable through
+`autoStorageScanAndRepair()`, whose `else if (scan.trailingBytes > 0)` is false
+for an unopened log, which is precisely the case D-058 made for keeping this
+function's refusal compiled rather than leaving it to the caller. `readError`
+now reaches that refusal. Executed by
+`test_the_rewrite_refuses_a_log_it_could_not_open_even_when_called_directly`.
+
+**Still open, and deliberately not touched here:** on this outcome
+`autoStorageRecover()` still reseeds `rtcAutoRunChargeUAh` and
+`rtcAutoRunEnergyUWh` from `scan.lastRunChargeUAh` / `lastRunEnergyUWh`, which
+are zero, so the test-local running totals silently restart at zero for a log
+that was never read. It says nothing about having done so. The same happens on
+the pre-existing short-read path, where at least a prefix was read, so changing
+it alters deployed characterized behavior for both and belongs to its own stage
+rather than riding inside a diagnostic fix. See the next item.
+
+**Hardware acceptance still required.** A physical open failure has never been
+observed; the harness stages one by refusing the read-open while leaving the
+file untouched, which is software failure injection and not evidence of what a
+real LittleFS fault does. Do not inject corruption into the Experiment 3 log to
+get it.
+
+## Boot recovery restarts the running totals at zero from a log it could not read — found 2026-09-29, FIXED AND COMMITTED `58a4e09` 2026-09-29, NOT HARDWARE VALIDATED
+
+**Fixed under D-060 and committed as `58a4e09`; not uploaded.** When
+`scan.openFailed || scan.readError`, recovery no longer assigns the retained
+totals. It prints `Running totals could NOT be recovered: ...` and
+`Carrying the retained totals instead: Qsum_uAh=... Esum_uWh=...`. Healthy
+and mid-file-damage logs reseed exactly as before. Red-checked against
+`44d8b27`: the new open-failure test got 0/0 and the short-read test the stale
+300/400, both failing; see the newest LAB_NOTES entry. Hardware acceptance
+needs only the healthy-log path (totals still reseeded, no new message); a
+physical read fault has never been observed and must not be produced by
+damaging the Experiment 3 log. The finding as it was recorded:
+
+> **OPEN.** `autoStorageRecover()` in `solar-logger.ino` ends with
+> `rtcAutoRunChargeUAh = scan.lastRunChargeUAh` and the energy equivalent. When
+> the scan read nothing — a failed open — or read only a prefix before a short
+> read, those fields hold zero or a stale partial value, and the RTC-retained
+> running totals take it without a word. Nothing claims the totals were recovered,
+> which is why it is a silent deviation rather than a false report, and the
+> measurement records themselves are unaffected: these totals are the test-local
+> running figures D-017 keeps separate from experiment state.
+>
+> The honest options are to leave the retained totals alone when the scan is not
+> trustworthy, or to say explicitly that they could not be recovered. Choosing
+> between them changes deployed accounting behavior on the existing read-error
+> path as well, so it wants its own stage with its own hardware check.
+
+## Recovery cannot see whether the retained totals it carries were ever valid — found 2026-09-29 in review of `58a4e09`, FIXED AND COMMITTED `6192c2d` 2026-10-01, NOT HARDWARE VALIDATED
+
+**Fixed under D-061 and committed as `6192c2d`; not uploaded.** `autoStorageRecover()` now
+takes `bool retainedStateValid`, which each of the four call sites captures
+before it sets the magic. An unreadable log carries valid totals and says so,
+and zeroes invalid ones and says so. Red-checked against `58a4e09`: the
+invalid-state cases carried 5555/6666 where 0/0 was required. See the newest
+LAB_NOTES entry.
+
+**The cold-boot resume question is settled, from the source.** It is reachable
+with valid retained state in two ways. One is a non-deep-sleep reset that
+leaves RTC memory intact, which is the unread v5.5.5 behavior. The other is a
+timer wake whose first NVS load silently reads "not armed" while the second
+succeeds. On both, the new behavior carries the totals and says the state was
+valid. A host-claimed timer wake does not reach that site.
+
+That second path is not a separate defect; it is the one already recorded below
+as "NVS load failures become plausible defaults with no signal", where
+`loadAutonomousSettings()` returns true after a failed `begin()`. D-061's
+reachability analysis is a second reason to fix it.
+
+## Re-arming after AUTONOMOUS OFF discards running totals that were still good — found 2026-10-01 in review of `6192c2d`
+
+**OPEN.** Confirmed by reading the current source, not observed on hardware.
+
+`stopAutonomousTest()` sets `rtcAutoMagic = 0` and deliberately leaves
+`rtcAutoRunChargeUAh` / `rtcAutoRunEnergyUWh` untouched. The totals are zeroed in
+only three places: the image initializer, `clearStorage()`, and D-061's new
+invalid-state branch.
+
+So after `LOGGER AUTONOMOUS OFF`, the retained totals still hold real figures
+from a session that ended seconds ago, while the magic says the retained state is
+invalid. If the log cannot be read on the following re-arm, D-061 zeroes a number
+that was perfectly good. `58a4e09` carried it.
+
+This is bounded: it needs an unreadable log, which has never occurred on this
+hardware, and both outcomes are announced. It is recorded rather than fixed
+because a third revision of the same branch was not worth it.
+
+The tidy fix is to make the magic an honest proxy by having `stopAutonomousTest()`
+zero the totals as well, so that "the session ended" and "there are no totals"
+stop disagreeing. That changes deployed behavior on the OFF path, so it wants its
+own stage. The alternative, carrying on this one path specifically, makes the rule
+harder to state and was rejected for that reason.
+
+## Long diagnostic output is silently truncated, and HELP is the usual casualty — observed 2026-10-02
+
+**OPEN. Observed on hardware**, and it already misled a reader once.
+
+During the 2026-10-02 cadence change, `LOGGER INTERVAL 300` returned
+`CMD_RESULT,...,OK` and set the cadence correctly, but the capture's HELP listing
+arrived incomplete. The source prints, in order: SESSION HOLD, SESSION KEEPALIVE,
+SESSION RELEASE, SESSION STATUS, **LOGGER INTERVAL**, STORAGE INFO, STORAGE DUMP,
+STORAGE CLEAR YES, RESET, RESET YES. What reached the host was HOLD, KEEPALIVE, a
+blank line where RELEASE belongs, STATUS, then blank lines. Seven lines were
+dropped off the tail.
+
+**Nothing said the output was incomplete.** The operator read it, saw no
+`LOGGER INTERVAL`, and reasonably concluded the command did not exist. It does:
+`solar-logger.ino` prints it in the help listing, and it worked when sent.
+
+The same capture carried the sender's own D-036 warning that `CMD_ACK` was not
+observed for that command and was "most likely lost under HWCDC backpressure".
+So the cause is known. What is worth noticing is the shape of the failure:
+**D-036 separates the machine protocol from human diagnostics so the protocol
+stays reliable, and it did — `CMD_ACK` loss was detected and reported, and
+`CMD_RESULT` arrived. The diagnostics have no such guard.** A truncated HELP is
+indistinguishable from a short HELP.
+
+Options, none chosen: print HELP in chunks with flushes between them; end it with
+a terminator line a reader can check for, so absence of the terminator means
+truncation; or have the sender warn when a response ends without an expected
+terminator. The third generalizes to every long response, including a dump,
+though `tools/validate-dump.py` already covers dumps by requiring BEGIN, END, the
+count summary and a matching RESULT.
+
+## Host: a command can attach to a rendezvous that is almost over, and is then lost — observed 2026-10-01
+
+**OPEN. Observed on hardware**, unlike most entries in this file.
+
+`tools/send.sh` waits for the board's next USB rendezvous and sends as soon as
+the port appears. It has no idea how much of the 10-second window remains. Catch
+one late and the board sleeps mid-command.
+
+Observed 2026-10-01 15:24, attempting the preflight dump of the `16a299d`
+acceptance:
+
+    [SERIAL] Still waiting (45s elapsed)...
+    [SERIAL] Port: /dev/cu.usbmodem101
+    [COMMAND] Bytes written to serial port.
+    [COMMAND] Waiting up to 4s for firmware ACK...
+    [COMMAND] NOT ALL OK - Read failed on /dev/cu.usbmodem101:
+              read failed: [Errno 6] Device not configured
+
+The command was written and never acknowledged; the port disappeared during the
+4-second ACK wait. **Nothing was damaged and nothing was silent** — the sender
+said NOT ALL OK, `tools/capture-command.py` recorded `exit_code: 1`, and
+`tools/validate-dump.py` rejected the 730-byte capture rather than reporting a
+clean run. The board was healthy before and after.
+
+Retrying works, because the next rendezvous arrives in about 60 seconds and is
+usually caught early. Successful dumps on 2026-09-29 and 2026-10-01 were each
+started roughly 30 seconds after the preceding command, which lands the wait on a
+fresh window; this failure waited 45.
+
+A fix would have the sender learn how much of the window is left, or have the
+firmware hold the rendezvous open for a command it has already received. The
+second is the better behavior and is NOT a small change: it touches the
+rendezvous and deferred-sleep paths, which carry their own decisions and their
+own resolved bugs. Neither is attempted here.
+
+**This gets worse as the log grows.** The dump is now about 1 MB and takes
+roughly 50 seconds to stream, far longer than the 10-second window, so the
+firmware is already extending its awake time for a command in progress. What
+failed here was the handshake before streaming began, not the streaming.
+
+**A smaller, separate wart with the same root.** The documented validation step
+redirects the tool's stdout into a `.json`, so the shell creates that file before
+the tool decides anything. A rejected validation therefore leaves a 0-byte file
+named `*-validation.json` beside the failed capture, which reads like a
+validation that produced nothing rather than one that refused. `validate-dump.py`
+should write its own output file instead of relying on a redirect.
+
+## Three unexplained resets during the 2026-10-01 acceptance — found 2026-10-01
+
+**OPEN; an observation, not a diagnosis.** Derived from the acceptance dump's
+boot ids and `elapsed_ms`, not from a witnessed event.
+
+The final dump of the `58a4e09` acceptance shows boot 37 running from the upload
+on 2026-09-29 until roughly 08:44 on 2026-10-01, then **boot 38 writing no
+records at all**, boot 39 writing 9, and boot 40 starting around 08:54 and still
+current at the 11:02 dump. The operator's own commands that morning began at
+11:01, so none of those three resets was caused by them.
+
+The firmware handled all of it correctly: continuity held across every boundary
+in the log, Experiment 3 survived, and the board-reported invalid count stayed 0.
+So this is not a regression in anything recently shipped.
+
+Unexplained, and worth knowing before the logger is left alone in a car. A host
+waking and enumerating USB would do it, and so would a loose connection; neither
+has been checked. Boot 38 writing zero records means it did not survive one
+60-second interval, which narrows it.
+
+**Corrected 2026-10-02.** This entry first argued that three boot-id increments
+mean three resets, "because `nextBootId()` increments on RTC-state loss rather
+than on every wake". That reasoning is wrong. `nextBootId()` is called at all
+four `autoStorageRecover()` call sites, and one of them is `armAutonomousTest()`,
+so **`LOGGER AUTONOMOUS ON` increments the boot id with no reset at all**. A new
+boot id in the log means "recovery ran", not "the board restarted".
+
+The conclusion survives, on different evidence: no operator command was issued in
+the 08:44-08:54 window — the first capture that morning is timestamped 11:01 —
+so arming is excluded by the timeline rather than by the mechanism. Anyone
+reading boot ids later should know that a re-arm produces one. The 2026-10-02
+cadence change to 300 s does exactly that, and its new boot id is not a reset.
+
+**Consequence:** a re-arm after `LOGGER AUTONOMOUS OFF` with an unreadable log
+now starts at zero instead of carrying the previous session's totals, because
+OFF clears the magic. Hardware acceptance needs only the healthy-log path. The
+finding as it was recorded:
+
+**OPEN.** Confirmed by reading the current source, not observed on hardware.
+
+D-060 made `autoStorageRecover()` carry the retained running totals when the
+scan could not read the log. Whether carrying them is right depends on whether
+the retained state was valid, and `rtcAutoMagic` is the firmware's own answer to
+that question — D-011 introduced it precisely because RTC memory is undefined
+after a power-on reset. **Recovery cannot read it.** All four call sites assign
+`rtcAutoMagic = AUTO_RTC_MAGIC` immediately before calling, so by the time the
+decision is made the signal has been overwritten.
+
+Two of those sites reach recovery *because* the magic was invalid, and one of
+them says so in its own comment: "Armed in NVS but RTC state is gone, so this is
+a timer wake whose session context was lost. Do not guess the sequence or the
+running totals; rebuild them from the durable log instead." On that path the
+retained totals are exactly what the firmware has already declared lost, and
+`58a4e09` now carries them when the log is unreadable.
+
+The consequence is bounded, not silent: recovery prints the carried value and
+says it was not checked against the log, so an operator sees it. The stored
+records are the test-local totals D-017 keeps separate from experiment state.
+
+A fix would pass the pre-call magic validity into recovery, so it can zero and
+say so when retained state was invalid, and carry and say so when it was valid.
+That would also settle this without depending on any reading of ESP-IDF
+internals, which is what D-060's zero-after-reset expectation currently rests
+on — and that expectation is pinned to the wrong version (see D-060).
+
+A fourth call site, the cold-boot resume near line 6337, sets the magic with no
+prior check at all. Whether it is reachable with valid retained state is
+**unproven**; the CODE stage that wrote `58a4e09` raised this and did not
+resolve it. Settle that as part of the same stage.
 
 Everything in this section was **confirmed by reading the current source** during
 the 2026-09-17 architecture review, except the groups dated 2026-09-18, which
@@ -1483,8 +1962,10 @@ decision and is not assumed here.
 
 ### One corrupt record discards every valid record after it — FIXED 2026-09-24, NORMAL-PATH HARDWARE-SMOKE VALIDATED
 
-`autoStorageScan()`, `autoStorageTruncateToValid()`, `autoStorageRecover()` and
-`printStorageInfo()`, all still in
+`autoStorageScan()` and `autoStorageTruncateToValid()` now live in
+[storage.cpp](../Arduino/solar-logger/storage.cpp), together with the file-side
+`autoStorageScanAndRepair()` (D-058). Sequence recovery in
+`autoStorageRecover()` and presentation in `printStorageInfo()` remain in
 [solar-logger.ino](../Arduino/solar-logger/solar-logger.ino).
 
 The `eba3b5d-dirty` working-tree build passed a healthy-log-only hardware smoke:
@@ -1731,6 +2212,31 @@ full**: 1,196,032 bytes free, 3,272 valid records, intact tail. The displayed
 16,611-record / 11-day remainder is a free-space estimate at that moment, not a
 measured exhaustion date or a fresh reading.
 
+**Updated 2026-10-01, and this is now the nearest deadline in the project.** The
+board's own `LOGGER STORAGE INFO` during the `58a4e09` acceptance, captured
+2026-09-29 at 16:32, reported it directly:
+
+    [STORAGE] Filesystem free:  622592 bytes
+    [STORAGE] Room for 8647 more records = 6 days at 60 second cadence
+
+By the 2026-10-01 dump the log held 13,650 records, 2,549 more than at that
+reading, leaving roughly 6,100 records — about **4 days**, so approximately
+**2026-10-05** at the 60-second cadence. That is derived from the board's own
+free-space figure, not from Section 6's 90%-usable planning estimate. A fresh
+`LOGGER STORAGE INFO` gives the exact current number and should be preferred
+over this arithmetic.
+
+What happens then has never been exercised on hardware: appends fail, storage
+errors print to a serial port no unattended board has anyone reading, and
+logging stops without any persistent record that it stopped.
+
+Raising the cadence buys time rather than fixing it — Section 6 puts 5 minutes at
+about 62 days and 15 minutes at about 188 days. Note that `LOGGER INTERVAL` is
+refused while armed, so changing it means `AUTONOMOUS OFF`, set, `AUTONOMOUS ON`,
+which clears `rtcAutoMagic` and re-arms. That exercises D-061's branch and the
+re-arm issue recorded above, so prefer doing it after the next hardware smoke
+rather than before.
+
 **Direction:** this is the store-and-forward milestone, and it is now the
 limiting factor on how long the logger can be left alone. Until it is built, a
 free-space check that refuses to arm — and that warns during the cold-boot
@@ -1916,6 +2422,34 @@ observed, and not before.
 
 # Experiments to run
 
+## Indicator LED power — identify boards and measure before modifying
+
+Requested 2026-09-25 for eventual deployment. The XIAO ESP32-C3's onboard LED
+is a charge indicator, not a programmable user LED; Seeed's documentation
+states there is no LED_BUILTIN and that BAT-only operation has no onboard LED
+lit. That does not establish behavior under the future vehicle-regulator power
+path, which remains unchosen. Sources:
+[Seeed getting started](https://wiki.seeedstudio.com/XIAO_ESP32C3_Getting_Started/),
+[Seeed explicit no-programmable-LED note](https://wiki.seeedstudio.com/XIAO-ESP32C3-Zephyr/).
+
+The purchased INA228 breakout is now identified from the user's listing as
+**Ubxvamm storefront, “5832 INA228”**; actual manufacturer and PCB revision
+remain unverified. See HARDWARE_WIRING's identity register and preserved
+screenshot. Identify the actual LED circuit before choosing a jumper, resistor
+or LED modification. The INA228 chip's
+measurement/shutdown mode is separate from a breakout's power indicator;
+turning off measurement is not the desired LED optimization. For reference,
+[Adafruit's INA228 pinout](https://learn.adafruit.com/adafruit-ina228-i2c-power-monitor/pinouts)
+identifies a green power LED but does not document an LED-disable jumper; this
+is not proof that the user's board is Adafruit.
+
+Future work: inspect the actual schematics/board, isolate only the LED branch
+if appropriate, then measure supply current before and after under the same
+power source and INA mode. Do not claim savings from LED brightness or the
+existing 1.07/0.33 mA totals; neither separates LED consumption. No physical
+modification was performed or selected. Preserve the present bench baseline
+until the LED comparison is a deliberate separate experiment.
+
 ## Deep-sleep wake transient
 
 The DMM briefly displayed overload around some wake transitions during both the 2026-09-10 runs, so peak current is uncharacterized. Needs an instrument faster than a handheld meter.
@@ -1940,6 +2474,32 @@ The 2026-09-10 shutdown measurement gives a much better number, but not quite th
 
 **Nothing in this section is committed, scheduled, or planned.** These are concepts with a rationale, recorded so they are not lost and not mistaken for work.
 
+## Inferred charger output state in telemetry or UI — conditional idea
+
+If the SUNER dataset establishes a robust current-based classifier, expose
+`CHARGER_OUTPUT` (`CHARGING`, `NOT_CHARGING`, `UNKNOWN / TRANSITION`) in telemetry
+or the UI so visual LED inspection is not required. This is **not implemented**;
+thresholds, persistence, hysteresis and output schema remain undecided.
+The user clarified on 2026-09-24 that eventual production detection should run
+in firmware directly on INA readings; `samples.csv` analysis is characterization
+work, not a production input dependency. Exact sampling and sleep integration
+remain to be designed.
+First complete [characterization](#characterize-suner-charger-state-inference-from-samplescsv)
+and OFF LED/current correlation. The intended firmware input is live INA228
+readings, not samples.csv. Awake sampling can resolve successive changes; normal
+autonomous deep sleep only provides state at wake/sample points. This is not a
+formal architecture decision.
+
+## INA228 alert-pin wake for charger transitions — investigation only
+
+Investigate whether an INA228 alert signal and a compatible ESP32 wake path could
+support charger-transition detection while the ESP sleeps. Feasibility, signal
+behavior, wiring and wake policy are unchosen; this is **not implemented or
+decided**. The normal autonomous INA keeps operating during ESP deep sleep, but
+the ESP evaluates readings only at wake/sample points. Do not claim second-level
+transition timing during sleep or infer it from the wake snapshot. This possible
+sensor-alert path is separate from planned manual SYNC and vehicle-on wake.
+
 ## Adaptive day/night power mode
 
 Possible future behavior, driven by the measured 0.74 mA cost of keeping the INA228 converting through ESP32 sleep.
@@ -1952,9 +2512,13 @@ Possible future behavior, driven by the measured 0.74 mA cost of keeping the INA
 - ESP32 spends most of its time in deep sleep.
 - Hardware CHARGE/ENERGY accumulation continues.
 
-**Night detection:**
+**Night detection — unresolved:**
 
-- After solar current remains near zero or negative for a configurable period, infer that meaningful solar production has ended.
+- The original idea inferred night after near-zero/negative current persisted.
+  The [2026-09-24 SUNER experiment](LAB_NOTES.md#2026-09-24-suner-controller-restart-under-a-temporary-resistor-load) shows why that is insufficient:
+  a full battery/controller cutoff in bright sun can produce the same regime.
+  Current alone may classify charger output, not solar availability or darkness.
+  Day/night inference requires additional evidence; it is not implemented.
 
 **Night mode:**
 

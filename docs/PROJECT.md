@@ -1,5 +1,16 @@
 # Project
 
+## Latest hardware acceptance — 2026-09-29
+
+**Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
+1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
+full pre/post dumps preserve all 10,659 preflight record lines exactly, and
+post-upload boot 36 adds 3 records, 12073–12075. Final dump: 10,664 records,
+1412–12075, board invalid 0; observed INFO scans have trailing 0 and INTACT tails
+with no storage errors. [Raw evidence, checksums and limits](../logs/evidence/2026-09-29/storage-hardware/README.md).
+Damaged-log branches remain host/synthetic tested only. No standalone reset,
+storage clear, whole-flash erase or corruption injection was performed.
+
 ## Purpose
 
 The BMW Solar Logger measures an INA228-powered solar measurement path with an XIAO ESP32-C3 and records live firmware output on a Mac.
@@ -14,6 +25,91 @@ XIAO 3V3, and the VUSB / 5V header has no external circuit connected. See
 diagram. Exact SUNER/shunt/battery routing still needs physical capture;
 vehicle-powered regulation/protection remains future design work.
 
+## SUNER charger-output observations — characterization in progress
+
+The [continuous ON transition](LAB_NOTES.md#2026-09-24-suner-addendum--first-contiguous-charger-on-transition) was captured during continuous logging on
+2026-09-24: −0.628 mA at 14:09:49.469, +178.692 mA at 14:09:50.468, then
++262.236 mA at 14:09:51.469. Blinking red correlated with the charging regime.
+The temporary series-resistor load triggered charging in about 3.5 minutes and
+was removed early after becoming extremely hot. The SUNER was still charging
+at the supplied observation cutoff. A later concurrent audit and CSV spot-check
+establish an OFF-like current step at 14:48:17 −07:00, but matching LED evidence
+is still missing; neither the OFF cause nor both-direction characterization is
+established. The LAB_NOTES addendum keeps these observation cutoffs separate.
+
+[tools/charger-transitions.py](../tools/charger-transitions.py) and samples.csv
+are **characterization tools**. The intended future firmware input is direct
+INA228 readings on the ESP32, not CSV. Production thresholds, hysteresis and
+persistence remain undecided. The tool now separates initial state, state after a capture gap and observed
+contiguous transitions; see the reporting procedure below. Initial/post-gap
+observations never claim a timed edge.
+See the [characterization backlog](BACKLOG.md#characterize-suner-charger-state-inference-from-samplescsv).
+
+Awake successive sampling can resolve transitions at the sampling cadence.
+In normal autonomous deep sleep the INA operates, but the ESP does not evaluate
+continuous samples; state is available only at its wake/sample points. No
+second-level transition timing during sleep is established. A future INA228
+alert-pin wake path is only an investigation idea, not implemented or decided.
+
+The candidate state is `CHARGER_OUTPUT` (`CHARGING`, `NOT_CHARGING`,
+`UNKNOWN / TRANSITION`), not `SOLAR_AVAILABLE`: cutoff in bright sun, nighttime,
+panel disconnection and faults can all produce near-zero output. INA placement
+remains **INFERRED, NOT YET PHYSICALLY TRACED** as the controller charging path
+rather than total battery net current; physical tracing remains open.
+
+### Offline capture-gap report — implemented 2026-09-28
+
+Run from the repository root; reads the CSV only and opens no serial port:
+
+```text
+uv run python tools/charger-transitions.py
+uv run python tools/charger-transitions.py path/to/samples.csv --max-gap-seconds 2 --persistence-samples 5
+```
+
+The default maximum adjacent host timestamp spacing is **2 seconds inclusive**,
+a provisional analysis tolerance of two nominal one-second sample periods
+(measured positive-delta median 1.000138 s in the September 28 snapshot).
+The default persistence is **five consecutive classified samples**, not five
+seconds. Both settings are printed and configurable. Host buffering/jitter
+can split or bunch samples; this rule qualifies captured evidence and does not
+establish uninterrupted physical sampling or a firmware detection policy.
+Existing 10–16 V, >=20 mA charging and <=5 mA not-charging thresholds remain
+analysis settings; intermediate or invalid/nonfinite measurements are ambiguous.
+
+Rows stay in file order, with their original timezone offsets. A gap larger
+than the selected limit, an experiment change, or a repeated/backward timestamp
+starts a new capture segment and resets both confirmed state and persistence.
+Every segment is printed, including those too short/ambiguous to confirm a
+state. Reacquiring the same state after a gap is reported too: intervening
+changes remain unknown. Context tables never cross segment boundaries.
+
+- `INITIAL STATE`: first confirmed state in the file, even if earlier segments
+  supplied no confirmed state; any preceding capture boundary is still shown.
+- `STATE AFTER CAPTURE GAP` (or experiment/time-order boundary): newly confirmed
+  state in a later segment; no transition timing is inferred.
+- `OBSERVED CONTIGUOUS TRANSITION`: adjacent opposite-state runs, each meeting
+  persistence within one segment. The report gives the host-sample bracket,
+  first supporting sample and later confirmation time. The exact physical
+  switching instant remains unknown.
+- `STATE CHANGE WITH UNCERTAIN EDGE`: a newly confirmed opposite state whose
+  immediate preceding run was ambiguous or too short to qualify the edge.
+
+UNKNOWN/TRANSITION samples break candidate persistence; a previously confirmed
+state is not sufficient to claim a contiguous edge after that ambiguity. Brief
+unconfirmed excursions do not become sustained changes. Missing schema, malformed
+numbers/timestamps, naive timestamps and invalid settings fail explicitly;
+nonfinite sensor measurements are counted as UNKNOWN. Empty/header-only captures
+and lack of confirmed state are reported explicitly.
+
+The report prints file endpoints, sample/segment/gap counts and separate edge
+and state-observation counts. File endpoints do not prove continuous coverage.
+The preserved [September 28 report](../logs/evidence/2026-09-28/README.md) has **26,674
+samples**, **80 capture gaps**, **2 contiguous edges** and **39 other state
+observations** at default settings; the latest row is September 27, 22:21:22
+UTC-07:00. Later samples are post-gap observations, not evidence of uninterrupted
+overnight or weekend logging. Regression coverage is in
+`tests/test_charger_transitions.py`; D-059 records the evidence boundary.
+
 ## Installed system architecture — planned, not installed or validated
 
 The current measured system remains the desk/window bench rig. The following
@@ -21,6 +117,30 @@ installation and responsibility boundaries were settled on 2026-09-23; they are
 requirements for future work, not claims that BLE, the iPhone app, time sync or
 the server integration have been built. See D-052 through D-054 in
 [DECISIONS.md](DECISIONS.md).
+
+### The three phases, and the question each one answers
+
+Stated by the operator on 2026-10-01. This is the organizing structure for
+everything below, and it is a sequencing decision rather than an architecture
+change: nothing here supersedes D-052 through D-055.
+
+| Phase | What gets built | The question it can answer |
+| --- | --- | --- |
+| **1** | The logger in the car, measuring the panel. Data read over USB by carrying the enclosure indoors to a laptop. | **Is the solar panel actually charging the battery, and how much?** |
+| **1.5** | BLE and the native iPhone app, so the same data is read from the phone instead of a laptop. | The same question, without carrying the box indoors. More frequent reads, so a fuller record. |
+| **2** | IBS/LIN integration. | **Is the battery net gaining or losing charge?** |
+
+**Phases 1 and 1.5 cannot answer the phase 2 question, and that is by design,
+not an oversight.** The traced measurement topology in
+[HARDWARE_WIRING.md](HARDWARE_WIRING.md) puts the shunt in the positive leg
+between the controller and the battery, so the INA228 measures what the panel
+delivers. Anything else drawing on the battery — in the car, the vehicle's own
+parasitic drain — never crosses the shunt and is invisible. That is the correct
+instrument for the phase 1 question and the wrong one for phase 2, which is why
+phase 2 is a different sensor rather than more firmware.
+
+Phase 1.5 changes how the data leaves the board, not what is measured. Phase 2
+changes what is measured.
 
 ### First installation versus later IBS integration
 
@@ -91,6 +211,8 @@ All paths in these documents are relative to the repository root.
 | NVS persistence module | `Arduino/solar-logger/nvs_persistence.h`, `Arduino/solar-logger/nvs_persistence.cpp` |
 | Telemetry module | `Arduino/solar-logger/telemetry.h`, `Arduino/solar-logger/telemetry.cpp` |
 | Record format module | `Arduino/solar-logger/record_format.h`, `Arduino/solar-logger/record_format.cpp` |
+| Durable storage module | `Arduino/solar-logger/storage.h`, `Arduino/solar-logger/storage.cpp` |
+| Sequence authority module | `Arduino/solar-logger/sequence_authority.h`, `Arduino/solar-logger/sequence_authority.cpp` |
 | Python logger | `app/solar_logger.py` |
 | Current sample telemetry | `data/samples.csv` |
 | Current interval telemetry | `data/intervals.csv` |
@@ -111,7 +233,7 @@ All paths in these documents are relative to the repository root.
 
 The firmware is being split out of `solar-logger.ino` into real `.h`/`.cpp` modules, one stage at a time. The plan and its order are in [BACKLOG.md](BACKLOG.md), and the boundary rules are [DECISIONS.md](DECISIONS.md) D-047.
 
-Five modules exist, all extracted with no intended behavior change, and each audited as a move in [LAB_NOTES.md](LAB_NOTES.md).
+Seven modules exist, all extracted with no intended behavior change, and each audited as a move in [LAB_NOTES.md](LAB_NOTES.md).
 
 **The INA228 driver**, `ina228.h` and `ina228.cpp`, holds register access, identity, configuration, shutdown and continuous mode, `readSensor()`, and the CHARGE/ENERGY read and reset primitives. When any of them runs is still decided in `solar-logger.ino`, and so is starting `Wire`, which the header states as a precondition. A hardware smoke test of that image was reported later the same day and is recorded, as reported, in LAB_NOTES.
 
@@ -127,23 +249,59 @@ What it deliberately does not own is when a line is emitted or what is in it. Th
 
 **Record format**, `record_format.h` and `record_format.cpp`, owns the deployed 72-byte durable record representation and its CRC validation, and nothing else. That is the packed `AutoRecord` struct, `AUTO_RECORD_MAGIC` and `AUTO_RECORD_VERSION`, `AUTO_RECORD_SIZE`, the eight record flag bit values, the `AUTO_EXPERIMENT_UNKNOWN` and snapshot-unread sentinels, and `autoRecordCrc()`, `autoRecordValid()` and `autoRecordSnapshotUnread()`.
 
-A flag's bit value is intrinsic to the format; deciding that a given record carries it is not. Every `flags |=` stayed in the wake cycle, along with the time-quality state, so no policy moved. Nor did any I/O or retained state: LittleFS mount, append, scan, truncation and tail recovery, the `RTC_DATA_ATTR` variables, sequence reservation and the NVS high-water mark, the autonomous scheduler, and host session logic are all still in `solar-logger.ino`. `printAutoRecord()` stayed too — it interleaves flag interpretation with `Serial` formatting and comma bookkeeping for the `LOGGER STORAGE DUMP` transcript, which is an output format rather than the record format, so moving it would have been a formatting rewrite inside a structural move.
+A flag's bit value is intrinsic to the format; deciding that a given record carries it is not. Every `flags |=` stayed in the wake cycle, along with the time-quality state, so no policy moved. Nor did any I/O or retained state: at that stage LittleFS mount, append, scan, truncation and tail recovery, the `RTC_DATA_ATTR` variables, sequence reservation and the NVS high-water mark, the autonomous scheduler, and host session logic were all still in `solar-logger.ino`. The LittleFS half of that list moved later the same day, into the storage module below; everything else on it is still in the sketch. `printAutoRecord()` stayed too — it interleaves flag interpretation with `Serial` formatting and comma bookkeeping for the `LOGGER STORAGE DUMP` transcript, which is an output format rather than the record format, so moving it would have been a formatting rewrite inside a structural move.
 
 The 72-byte layout is a deployed binary contract: Experiment 3's log holds thousands of records written by it. Record version stays **1**, no migration exists, and the move changed no byte. The header now asserts every field's offset, width and signedness at compile time, which `sizeof(AutoRecord) == 72` alone could not do — that assertion cannot see two same-width fields swap places or a signed field turn unsigned. The boundary is [DECISIONS.md](DECISIONS.md) D-056. Extracted 2026-09-24. It is compiled, host-tested and **hardware-validated on clean revision `eba3b5d`**; see the 2026-09-24 hardware addendum in LAB_NOTES.
 
-NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second and record format the third, and neither needed one either.
+**Durable storage**, `storage.h` and `storage.cpp`, owns the LittleFS mechanics: the log path `/auto.bin` and the `/auto.tmp` a repair writes through, the mount that never formats, the format behind `LOGGER STORAGE CLEAR YES`, the full scan that classifies every 72-byte slot, the tail repair, the append and its sub-timings, and the filesystem's own total/used figures. Nothing outside it names `LittleFS` or either path.
 
-### Current validation baseline — 2026-09-24
+What it deliberately does not own is which sequence number the next record carries. `autoStorageScanAndRepair()` scans, reports every damage case by name and repairs only a damaged tail, then hands the scan back; `autoStorageRecover()` in `solar-logger.ino` reads the NVS reservation floor, has `sequence_authority` reconcile the scan against it under D-023, and reseeds the RTC-retained totals. `printStorageInfo()`, `dumpStorage()`, `clearStorage()` and `printAutoRecord()` stayed in the sketch as well, each because it mixes operator-facing formatting, or the autonomous test's own state, with the file access it needs; only the file access moved. Storage-full policy is still undecided and was not invented here, and sync, storage ACKs and reclamation remain absent rather than stubbed.
 
-Five extracted modules plus the sketch make six project translation units:
+**Sequence authority**, `sequence_authority.h` and `sequence_authority.cpp`, owns one decision: which sequence the next record gets. `sequenceAuthorityNext()` is handed the scan and the NVS reservation high-water mark and reads neither itself. An intact log tail is the authority; otherwise the result is never below one past the reservation. It prints the three `[STORAGE]` lines that say which source it used. Reserving a block, the block width and the RTC mirror `rtcAutoSeqHighWater` stayed in the sketch, as did the running-totals reseed (D-060, D-061). The boundary is [DECISIONS.md](DECISIONS.md) D-062. Extracted 2026-10-01. Compiled and host-tested; **not committed, uploaded or hardware validated**.
+
+`autoStorageTruncateToValid()` is exported although the module is its only caller, which is a deliberate departure from D-047. With internal linkage GCC inlined it into that one call site, proved its refusal unreachable from the caller's `else if` chain, and deleted the refusal and its message from the image; the refusal is a property of the function under D-057, so it keeps external linkage and a test pins that. The boundary is [DECISIONS.md](DECISIONS.md) D-058. Extracted 2026-09-24. It is compiled and host-tested, and **healthy-log hardware-smoke validated on clean `1980d94` (September 29)**.
+
+NVS persistence was the first module created after the IntelliSense discovery rule (D-048), and it needed no editor or tooling change of any kind. Telemetry was the second, record format the third and durable storage the fourth, and none of them needed one either.
+
+### Latest software gate — 2026-09-28
+
+After the isolated capture-gap reporting fix, a fresh `tools/check.sh` completed
+**exit 0, ALL OK: 486 passed, 1 xfailed**, pyright/py_compile clean, warning-free
+clean Arduino compile, IntelliSense **7/7**, shell syntax and tracked whitespace
+passing. The 24 added tests exercise reporting behavior on synthetic captures.
+Flash remains **1,104,313 bytes**, globals **36,332 bytes**. The existing
+short-cadence overrun xfail is unchanged. No firmware source, storage extraction,
+dependency or telemetry file was changed by this stage, and no upload or serial
+access occurred. [Evidence and qualification](../logs/evidence/2026-09-28/README.md).
+
+### Storage extraction validation baseline — 2026-09-24
+
+Six extracted modules plus the sketch make seven project translation units:
 `connection.cpp`, `ina228.cpp`, `nvs_persistence.cpp`, `record_format.cpp`,
-`telemetry.cpp`, and `solar-logger.ino`. IntelliSense discovers them automatically.
+`storage.cpp`, `telemetry.cpp`, and `solar-logger.ino`. IntelliSense discovers
+them automatically; `storage.cpp` needed no tooling change.
 
-**Latest coding-agent gate, not rerun by this documentation stint:** pytest
-**429 passed, 1 xfailed**; pyright clean; py_compile, Arduino clean compile with
-`--warnings all`, shell syntax and `git diff --check` passed; IntelliSense **6/6**.
+**Latest coding-agent gate, after the storage extraction: `ALL OK`.** pytest
+**462 passed, 1 xfailed**; pyright clean; py_compile, Arduino clean compile with
+`--warnings all`, shell syntax and `git diff --check` passed; IntelliSense **7/7**.
 The one xfail remains the OPEN short-cadence autonomous overrun defect.
-The extraction's earlier 387/1 result is historical, before 42 recovery tests.
+The earlier 429/1 result is the pre-extraction baseline, and 387/1 is older still,
+from before the 42 recovery tests.
+
+**Pyright failed an intermediate run of that gate, on work from outside this
+stint, and the fix is recorded rather than the failure being dropped.**
+`tools/charger-transitions.py` arrived in the working tree from concurrent
+SUNER-experiment work after the extraction's own baseline had already passed,
+and reported
+`Operator "-" not supported for types "Hashable" and "Literal[5]"`.
+The cause was real rather than a typing nuisance: `DataFrame.iterrows()` yields
+each row's **index label**, and that number was then used both with `.loc`,
+which is label-based, and with `.iloc`, which is positional. `read_csv()`
+returns a default `RangeIndex`, so label and position coincide and the script
+was correct by accident; against a filtered or reindexed frame it would have
+silently printed the wrong surrounding samples. The loop now enumerates
+positions and reads with `.iloc` throughout. Output on `data/samples.csv` is
+byte-identical before and after — 5 transitions, 85 lines.
 
 **Clean `eba3b5d`: record_format is extracted, software-tested and
 hardware-validated.** Experiment 3 survived, historical records decoded, new
@@ -170,16 +328,34 @@ whole scan under the existing D-023 authority rules. The fix is host-tested and
 tail repair, mid-file refusal and read-error refusal remain host/synthetic
 tested only.
 
+A log that exists and **will not open** is now part of that read-error case, as
+of 2026-09-29. It used to print an error and leave `readError` false, so a scan
+that read nothing came back looking like a scan that found nothing, and both
+boot recovery and `LOGGER STORAGE INFO` summarized it as an intact tail.
+`AutoLogScan.openFailed` marks it and `readError` is set alongside, so the
+existing refusals cover it; recovery reports the tail as UNREAD, INFO prints
+`Tail status: UNREADABLE`, prints no size or record count it never measured, and
+answers `CMD_RESULT,...,ERROR` rather than `OK` (D-041). The same regression
+test found that `autoStorageTruncateToValid()`, driven directly, announced a
+rewrite to zero bytes for that log and was stopped only by its own open failing;
+`readError` now reaches its refusal first. **This is host-tested and has not
+been uploaded or hardware validated**, and the harness stages the failed open
+in software, which is not evidence of a physical LittleFS fault.
+
 The autonomous DIAG_ALRT-before-CHARGE/ENERGY ordering is fixed,
 regression-tested and hardware-smoke validated. **No real accumulator overflow
 has been induced, and INA_ACCUM_OF has not been observed SET from one.**
 The golden fixture does not establish that flag behavior.
 
-**Next structural candidate: LittleFS/durable-storage mechanics extraction**,
-preserving D-057 and its remaining edge cases. LittleFS, sequence authority,
-RTC-retained state and autonomous policy remain in the sketch. Still open:
+**LittleFS/durable-storage mechanics are extracted as `storage` (D-058),
+reviewed/committed as **1980d94**, with the fresh isolated software gate and
+September 29 healthy-log hardware smoke passed (see the latest acceptance above).** Sequence authority, RTC-retained state and autonomous policy remain
+in the sketch; sequence authority/reservation and RTC state are later extraction
+candidates, after the storage stage is validated. Still open:
 operator mid-file repair/quarantine, resynchronization after non-record-sized
-insertion, physical read-error testing, tethered overflow qualification,
+insertion, physical read-error and open-failure testing, the running totals
+boot recovery silently restarts at zero from an unread log,
+tethered overflow qualification,
 MATHOF interval semantics, signed-charge versus magnitude-energy semantics,
 and storage-full policy. Running energy is not a signed/net energy balance.
 Sync/ACK/reclamation and time synchronization remain unimplemented.
@@ -241,13 +417,14 @@ Host-side tests. They touch no hardware and open no serial port.
 | `tests/test_characterization_record.py` | the 72-byte record layout, CRC coverage and validation; a **real Experiment 3 record** (`seq=4445`, `crc=0xFB25DA73`) rebuilt byte-for-byte and checked against the CRC the board stored, each of the 68 covered bytes mutated individually; the `record_format` boundary, its per-field compile-time assertions, and its real `record_format.cpp` compiled and run against those bytes, including `printAutoRecord()` reproducing the transcript line the board printed | firmware code run on the host + source + real deployed record bytes |
 | `tests/test_characterization_connection.py` | transport claim and release, run on the host with the exact `[CONNECTION]` wording; who claims, who releases, and that sleep policy asks `anyHostConnected()` | firmware code run on the host + source |
 | `tests/test_characterization_nvs.py` | what is stored: the `solarlog` namespace, every key name and the 15-character limit, the five checkpoint keys with their widths, failure propagation on both checkpoint paths, power-test defaults, the sequence floor's ordering, and the one-owner boundary | source |
+| `tests/test_characterization_storage_recovery.py` | the four damage cases and what each one permits: a valid log untouched, a torn tail and an invalid final record repaired, mid-file damage and a short read reported and REFUSED, the stranded valid suffix preserved, `LOGGER STORAGE INFO` never reading a corrupt middle as clean, and the next-sequence derivation for each case; also the `storage` module boundary — who may name `LittleFS`, where the log path lives, what the header may export, and that the sequence decision stayed in the sketch | firmware code run on the host against real files + source |
 | `tests/test_characterization_telemetry.py` | the machine-readable wire format: the exact `CSV_HEADER`, `CSV_SAMPLE`, `CSV_DATA` and `CSV_EVENT` bytes for known inputs, each field's precision, and the host's own parsers reading those same lines | firmware code run on the host + real host code + source |
 | `tests/test_intellisense.py` | a module added to, broken in, and deleted from a scratch copy of the sketch, through the real generator; every refusal of the database validator | real tooling + real host code |
 | `tests/firmware_source.py` | reads every sketch file as C++ tokens for the source tests | helper |
 
-The six `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
+The seven `test_characterization_*` modules, the source half of the accounting module, and `test_autonomous_schedule.py` are the pre-modularization characterization gate (D-043). They freeze what the monolith does now, so an extraction stage that changes it fails on the host first.
 
-A source test proves the code still has the shape a rule needs. It does not execute firmware. Several modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` and `test_characterization_telemetry.py` do the same with the connection and telemetry code, against a stand-in `Serial` that records what is printed. `test_characterization_record.py` compiles `record_format.cpp` itself rather than an extracted copy, and supplies only `esp_rom_crc32_le()`, which lives in the ESP32 mask ROM; that one substitution is asserted equal to the CRC the board actually stored for `seq=4445`, so it cannot silently become a test of itself. The telemetry stand-in carries a copy of the ESP32 core's own `Print::printFloat`, because Arduino does not format a double the way `printf` does and the test asserts exact bytes. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
+A source test proves the code still has the shape a rule needs. It does not execute firmware. Several modules are exceptions: `test_autonomous_schedule.py` takes three pure timing functions out of the sketch, compiles them with the host's `c++`, and runs them (D-046), and `test_characterization_connection.py` and `test_characterization_telemetry.py` do the same with the connection and telemetry code, against a stand-in `Serial` that records what is printed. `test_characterization_record.py` compiles `record_format.cpp` itself rather than an extracted copy, and supplies only `esp_rom_crc32_le()`, which lives in the ESP32 mask ROM; that one substitution is asserted equal to the CRC the board actually stored for `seq=4445`, so it cannot silently become a test of itself. `test_characterization_storage_recovery.py` goes further still: it extracts the storage functions, links the real `record_format.cpp` beside them so the validator is the deployed one, and runs them against damaged logs made of real files in a pytest temporary directory. Because `firmware_source.py` reads every file Arduino compiles, that harness followed the code into `storage.cpp` without being told where it went. The telemetry stand-in carries a copy of the ESP32 core's own `Print::printFloat`, because Arduino does not format a double the way `printf` does and the test asserts exact bytes. A missing compiler fails the run rather than skipping it, and so does a missing `arduino-cli` for `test_intellisense.py`. The rest of the firmware can only be compiled for the ESP32 until the modularization in [BACKLOG.md](BACKLOG.md) makes more of it host-compilable, so what remains hardware-only is the acceptance sequence in [LAB_NOTES.md](LAB_NOTES.md).
 
 `tests/test_autonomous_accounting.py` is two different things and says so in its own docstring: an executable specification of the running-total rule, and assertions against the real firmware source.
 
@@ -579,7 +756,7 @@ Every current autonomous record writes time quality `UNKNOWN` and `epoch_s = 0`.
 
 Autonomous operation was promoted from a bench test to a persistent mode on 2026-09-11 (D-031). It remains bench-validated, not car/deployment-validated. Full design in [STORAGE_SYNC_DESIGN.md](STORAGE_SYNC_DESIGN.md).
 
-**Storage is confirmed on hardware.** The 65-record, 4680-byte inspection was a 2026-09-11 milestone, not the current log size. The latest supplied storage snapshot is the 2026-09-23 3,272-record reading above. Hardware transcripts include claimed-wake measurement-work timings, but do not establish the full unattended wake budget or RTC drift; see the latest LAB_NOTES addendum.
+**Storage is confirmed on hardware.** The 65-record, 4680-byte inspection was a 2026-09-11 milestone, not the current log size. The latest supplied full dump (2026-09-25) reports 5,756 records, sequences 1412–7167, all Experiment 3, invalid 0; see [CURRENT_STATE.md](CURRENT_STATE.md) and its preserved evidence. The 2026-09-23 reading above is historical. Hardware transcripts include claimed-wake measurement-work timings, but do not establish the full unattended wake budget or RTC drift; see the latest LAB_NOTES addendum.
 
 **Records before sequence 188 carry `exp=0` because of a known prototype bug**, not because they belong to experiment 0. The autonomous wake branch runs before `loadCheckpoint()`, so the `experimentId` global was still at its startup value when those records were stamped. Records from sequence 188 onward carry the real experiment id, read from NVS on each wake. Those historical records were not rewritten by the experiment-context fix; see [LAB_NOTES.md](LAB_NOTES.md) and [DECISIONS.md](DECISIONS.md) D-024.
 

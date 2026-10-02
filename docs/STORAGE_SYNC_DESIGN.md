@@ -2,9 +2,22 @@
 
 Design and implementation record for autonomous local logging and later host synchronization.
 
-**Current status, 2026-09-24: local durable logging is implemented and hardware smoke-tested; sync is not.** Clean `eba3b5d` hardware-validates record_format. The latest supplied storage-recovery smoke used the uncommitted working-tree build reported as `eba3b5d-dirty`; it exercised a healthy log only. Recovery distinguishes torn tail, complete invalid tail, mid-file damage and read error; the first two may be repaired automatically, while the latter two preserve the file and refuse repair (Section 11, D-057). Damaged-log branches remain host/synthetic tested only. `SYNC FROM`, storage `ACK`, acknowledged-sequence state, `SET_TIME`, reclamation, ring storage and storage-full policy remain unimplemented. `CMD_ACK` acknowledges command parsing, not durable receipt of telemetry.
+**Historical status, 2026-09-24: local durable logging is implemented and hardware smoke-tested; sync is not.** The LittleFS mechanics moved into `storage.h`/`storage.cpp` on 2026-09-24 (D-058), software-tested and not yet on hardware; the behavior below is unchanged by that move. Clean `eba3b5d` hardware-validates record_format. The latest supplied storage-recovery smoke used the uncommitted working-tree build reported as `eba3b5d-dirty`; it exercised a healthy log only. Recovery distinguishes torn tail, complete invalid tail, mid-file damage and read error; the first two may be repaired automatically, while the latter two preserve the file and refuse repair (Section 11, D-057). Damaged-log branches remain host/synthetic tested only. `SYNC FROM`, storage `ACK`, acknowledged-sequence state, `SET_TIME`, reclamation, ring storage and storage-full policy remain unimplemented. `CMD_ACK` acknowledges command parsing, not durable receipt of telemetry.
 
 Sections below retain the original design rationale. CONFIRMED denotes the stated evidence, not universal hardware validation; PROPOSED denotes remaining design or an original proposal with an implementation note. Section 12a and its implementation differences describe what exists. Accepted decisions live in [DECISIONS.md](DECISIONS.md).
+
+## Latest hardware acceptance — 2026-09-29
+
+**Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
+1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
+full pre/post dumps preserve all 10,659 preflight record lines exactly, and
+post-upload boot 36 adds 3 records, 12073–12075. Final dump: 10,664 records,
+1412–12075, board invalid 0; observed INFO scans have trailing 0 and INTACT tails
+with no storage errors. [Raw evidence, checksums and limits](../logs/evidence/2026-09-29/storage-hardware/README.md).
+Damaged-log branches remain host/synthetic tested only. No standalone reset,
+storage clear, whole-flash erase or corruption injection was performed.
+
+The September 24 status paragraphs retain their historical scope.
 
 ## Intended installed host — iPhone over BLE, server behind the phone
 
@@ -31,7 +44,13 @@ sleeping radio is not assumed to be remotely wakeable. Installed locations and
 open BMW trunk topology are in PROJECT/D-052; they do not change record/ACK
 semantics.
 
-**Current correctness status:** DIAG_ALRT-before-CHARGE/ENERGY is fixed, source/regression-tested and hardware-smoke validated. No real accumulator overflow has been induced; INA_ACCUM_OF has not been observed SET from one. Record format is extracted, software-tested and hardware-validated on clean `eba3b5d`; version 1, 72-byte layout and IEEE/zlib CRC convention are unchanged. Recovery is corrected, host-tested and normal-path hardware-smoke validated on `eba3b5d-dirty`. The latest coding-agent gate reports **429 passed, 1 xfailed**, with the known overrun still OPEN; this documentation stint did not rerun it. Evidence: [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
+**Current correctness status:** DIAG_ALRT-before-CHARGE/ENERGY is fixed, source/regression-tested and hardware-smoke validated. No real accumulator overflow has been induced; INA_ACCUM_OF has not been observed SET from one. Record format is extracted, software-tested and hardware-validated on clean `eba3b5d`; version 1, 72-byte layout and IEEE/zlib CRC convention are unchanged. Recovery is corrected, host-tested and normal-path hardware-smoke validated on `eba3b5d-dirty`. The recovery baseline was **429 passed, 1 xfailed**. The later storage extraction reports **462 passed, 1 xfailed** and **7/7 translation units**. After the positional-index correction in `tools/charger-transitions.py`, the coding agent reports `tools/check.sh` **exit 0, ALL OK**, including pyright and a warning-free clean firmware compile. That historical gate is superseded by the September 28 host-analysis stage:
+capture-gap handling is now implemented, with a fresh full gate of **486 passed,
+1 xfailed**, all steps green and 7/7 translation units. It changed no firmware or
+storage behavior and performed no upload; see D-059 and the latest LAB_NOTES.
+The known overrun remains OPEN. The September 24 audit used supplied gate results;
+the September 28 stage reran the full gate. [Current software evidence](../logs/evidence/2026-09-28/README.md);
+[historical hardware evidence](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery).
 
 ## The problem
 
@@ -571,6 +590,19 @@ Cost: one NVS write per 256 records. At 60-second cadence that is one write per 
 
 Every record is fixed-length with a magic, a version, and a trailing CRC32, which is what makes the tail recoverable.
 
+**Open-failure diagnostic corrected in source, September 29; NOT hardware
+validated.** A log that exists and will not open used to print an error and
+leave `readError` false, so INFO and recovery could still print INTACT for a log
+neither had read. The unreadable case below now covers both a short read and a
+failed open: `AutoLogScan.openFailed` marks the second, is set together with
+`readError`, and says the difference the counts cannot — a short read has real
+partial numbers, a failed open has none, and zeros from a scan that read nothing
+are not measurements. Recovery calls that tail UNREAD, `LOGGER STORAGE INFO`
+reports `UNREADABLE` and answers `ERROR` rather than `OK`, and the rewrite
+refuses. Nothing has been uploaded, so no board has run it; the host harness
+stages the failed open by refusing the read-open, which is not evidence of what
+a physical LittleFS fault does.
+
 **Four recovery cases, with read errors separate from classified damage.** Until 2026-09-24 this section and the code disagreed, and the code was the destructive one: `autoStorageScan()` stopped at the first invalid record and `autoStorageRecover()` deleted everything past it at boot. The reconciliation the BACKLOG asked for has been made, and the distinction the original proposal left implicit is now explicit:
 
 | Case | What it looks like | What it is | Automatic action |
@@ -578,13 +610,15 @@ Every record is fixed-length with a magic, a version, and a trailing CRC32, whic
 | **Torn tail** | whole records, then 1..71 bytes | consistent with an incomplete write | truncate to the last whole-record boundary, print the byte count |
 | **Invalid tail** | an unbroken run of complete records at the end that fail magic, version or CRC | invalid content; physical cause not established | discard that run, print the record and byte counts |
 | **Mid-file** | a bad record with **valid records after it** | detected interior corruption; physical cause not established | **discard nothing.** Report the count of stranded good records and refuse to rewrite. |
-| **Unreadable** | a short read before end of file | an I/O fault | discard nothing, report it |
+| **Unreadable** | a short read before end of file, or a log that will not open at all | an I/O fault | discard nothing, report it. A failed open reports its counts as UNKNOWN rather than zero, because none of them was measured |
 
 Mid-file damage is not a torn write and must not be repaired as one. A backward walk from the tail finds a valid tail and stops, which already implies leaving a mid-file corruption in place; what the original proposal never said is what to do when the tail is *also* bad and good records sit between. The answer is the conservative one: when the boundary between damaged and good is not known, nothing is deleted, because no amount of accurate reporting makes a deletion recoverable afterwards.
 
 There is deliberately **no automatic repair** for mid-file damage, and no operator command for it yet either. The log keeps the corrupt record, `LOGGER STORAGE DUMP` decodes every record including the invalid ones, and `LOGGER STORAGE INFO` reports the damage without calling the log clean. See [BACKLOG.md](BACKLOG.md).
 
 Sequence authority follows D-023: `logIntact` includes `!readError` as well as no invalid records, partial tail or out-of-order sequence. Otherwise the NVS floor applies. `fromLog` is one past the last valid record in the whole completed scan (or the readable prefix on a read error), not simply the record before the first invalid slot; the existing authority rules choose between it and the NVS floor.
+
+**Owned since 2026-09-24 by `Arduino/solar-logger/storage.h` and `storage.cpp`** (D-058): the mount, the log path, `autoStorageScan()`, `autoStorageTruncateToValid()` and `autoStorageScanAndRepair()`, which performs the scan, reports every case in the table above by name, and repairs only a tail. The sequence decision in the paragraph above did **not** move: `autoStorageRecover()` in `solar-logger.ino` takes the scan the module returns, reads the NVS high-water mark and applies D-023. The extraction preserved the four cases token for token and passed a healthy-log hardware smoke on clean `1980d94` on September 29 (acceptance above). The older smoke below remains the previous image's evidence.
 
 The host tests that execute all of this — the firmware's own scan and recovery functions, compiled and run against synthetic damaged logs — are in `tests/test_characterization_storage_recovery.py`. Those tests never use the live Experiment 3 log. Separately, `eba3b5d-dirty` passed a healthy-log-only hardware smoke: final dump 4,650 records through 6061, invalid 0, Experiment 3 intact. No corruption was injected. Torn/invalid tail repairs, mid-file refusal and read-error refusal remain host/synthetic tested only; any destructive hardware validation requires a disposable/test log.
 
@@ -633,11 +667,11 @@ These are the things this design could not settle by reading, and each one could
 
 ## 12a. Bench prototype — IMPLEMENTED, storage CONFIRMED on hardware
 
-Local sleep/read/store exists and has run on hardware. It graduated to persistent `LOGGER AUTONOMOUS` mode on 2026-09-11 (D-031); deployment in the car remains unvalidated. INA228, connection, NVS, telemetry and record format are now separate modules; timer-wake policy, RTC state, sequence authority, sessions and LittleFS remain in the sketch. The module inventory is current as of 2026-09-24; record_format passed hardware validation on clean `eba3b5d`, and the latest supplied healthy-log recovery smoke reported `eba3b5d-dirty` (uncommitted recovery changes).
+Local sleep/read/store exists and has run on hardware. It graduated to persistent `LOGGER AUTONOMOUS` mode on 2026-09-11 (D-031); deployment in the car remains unvalidated. INA228, connection, NVS, telemetry, record format and durable storage are now separate modules; timer-wake policy, RTC state, sequence authority and sessions remain in the sketch. The module inventory is current as of 2026-09-24; record_format passed hardware validation on clean `eba3b5d`, and the latest supplied healthy-log recovery smoke reported `eba3b5d-dirty` (uncommitted recovery changes). The `storage` extraction (D-058) subsequently passed its healthy-log hardware smoke on clean `1980d94` on September 29; see the current acceptance above.
 
 **Storage is confirmed.** The first run on 2026-09-11 produced eight 72-byte records, a 576-byte log, sequences 1 through 8, and an intact tail on a later cold boot. Read-before-reset ordering, durable append, CRC and tail validation, experiment/storage isolation, and the refusal to auto-format all held.
 
-**Latest supplied storage observations, 2026-09-24:** `eba3b5d-dirty`, Experiment 3, 72-byte records: initially 4,644 valid records, sequences 1412–6055; later 4,649/newest 6060; final dump 4,650 records, invalid 0, through 6061. Trailing bytes stayed 0 and tail INTACT. These are successive snapshots, not live readings. See [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery). Earlier `d017f7d` readings remain historical. The invalid original 0.014 ms cold-boot timing and later claimed-wake measurement-work spans do not establish full unattended wake budget or individual storage costs; Section 12 measurements remain open unless separately recorded.
+**Historical supplied recovery-image observations, 2026-09-24:** `eba3b5d-dirty`, Experiment 3, 72-byte records: initially 4,644 valid records, sequences 1412–6055; later 4,649/newest 6060; final dump 4,650 records, invalid 0, through 6061. Trailing bytes stayed 0 and tail INTACT. These are successive snapshots, not live readings. See [LAB_NOTES.md](LAB_NOTES.md#2026-09-24-hardware-validation-addendum--clean-record-format-and-working-tree-recovery). Earlier `d017f7d` readings remain historical. The invalid original 0.014 ms cold-boot timing and later claimed-wake measurement-work spans do not establish full unattended wake budget or individual storage costs; Section 12 measurements remain open unless separately recorded.
 
 It is a bench test, not production behavior. No Bluetooth, no Wi-Fi, no sync, no ACK, no pruning, no ring buffer.
 
@@ -682,8 +716,8 @@ This is the current development recovery mechanism. The installed plan now retai
    TIMER_WAKE_MEASUREMENT                   |
      read NVS experiment context            |
      validate INA (reads only)              |
-     read CHARGE / ENERGY                   |
      read DIAG_ALRT                         |
+     read CHARGE / ENERGY                   |
      snapshot                               |
      append durable record                  |
      reset accumulators                     |

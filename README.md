@@ -7,7 +7,7 @@ The measured system is a solar panel maintaining a 12 V lead-acid battery. On th
 ## Hardware
 
 - Seeed Studio XIAO ESP32-C3
-- TI INA228 current/voltage/power monitor at I2C address `0x40`, on `D4` (SDA) and `D5` (SCL)
+- TI INA228 current/voltage/power monitor at I2C address `0x40`, on `D4` (SDA) and `D5` (SCL); purchased breakout listed by **Ubxvamm** as “5832 INA228,” actual manufacturer/revision unverified (see the hardware identity register)
 - Shunt calibrated to **15.62 mΩ**, not the 15 mΩ nominally printed on the breakout — the difference came out of DMM measurement and matters for every current reading
 
 Current bench connections and the logic/I2C diagram are in
@@ -27,6 +27,10 @@ The firmware supports autonomous sleep/wake logging to LittleFS and awake, host-
 Tethered experiment state — id, interval number, running charge and energy — is checkpointed to ESP32 NVS every interval. Autonomous mode stores separate 72-byte CRC-protected interval records in LittleFS while the INA228 keeps accumulating through ESP32 sleep. Local storage and USB sessions are hardware smoke-tested; sync, storage ACKs, reclamation and a storage-full policy remain unbuilt. Record format is hardware-validated on clean `eba3b5d`. The later recovery working-tree build (`eba3b5d-dirty`) passed a healthy-log hardware smoke. Recovery automatically repairs tail-only damage and refuses detected mid-file damage or read errors; damaged-log branches remain host-tested only, and byte-misaligned damage cannot yet be resynchronized. See [docs/PROJECT.md](docs/PROJECT.md) for the current baseline and limitations.
 
 The Python host logger discovers the board, prints everything the firmware says, adds a timezone-aware host timestamp to every row, writes durable CSVs, and drives a four-panel live plot with zoom, follow, and hover inspection.
+
+The storage extraction now also passed a healthy-log hardware smoke on clean
+**1980d94**, preserving Experiment 3 and all historical records.
+[September 29 evidence](logs/evidence/2026-09-29/storage-hardware/README.md).
 
 ## Planned installed system
 

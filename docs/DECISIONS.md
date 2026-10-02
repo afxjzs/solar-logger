@@ -1307,6 +1307,18 @@ Its 72-byte/version-1 contract and Experiment 3 golden record remain unchanged.
 now BUILT and hardware-validated on clean `eba3b5d`. The remaining boundaries
 still await extraction; D-057 settles the recovery behavior to preserve.
 
+**Superseded further by D-058, later the same day:** the LittleFS
+mount/read/append/scan/truncate mechanics are now BUILT as `storage`, software
+tested and not yet hardware validated. The list's second bullet is therefore
+done and its third is explicitly not: sequence authority stayed in the sketch,
+where `autoStorageRecover()` consumes the storage module's scan rather than the
+module choosing a sequence. Retained state, scheduling, sessions and the command
+protocol still await their own extractions.
+
+**Superseded further by D-062 on 2026-10-01:** the D-023 decision is now its own
+module, `sequence_authority`. It is not committed or uploaded. Reservation and
+its RTC mirror stayed in the sketch for the retained-state stage.
+
 ## D-056: Record format owns what a record is, never when one is written
 
 Set by the fifth modularization stage on 2026-09-24, the first of the boundaries
@@ -1333,7 +1345,9 @@ contains no `flags |=` at all. This is the line D-055 drew, applied.
 **Nothing else followed the format in.** LittleFS mount, append, scan,
 truncation and tail recovery; the `RTC_DATA_ATTR` retained state; sequence
 reservation and the NVS high-water mark; the autonomous scheduler; host session
-logic — all unchanged and still in the sketch. The module names no `LittleFS`,
+logic — all unchanged and still in the sketch at the time of this decision. The
+LittleFS half of that list moved into `storage` later the same day under D-058,
+which changed none of it; the rest is still in the sketch. The module names no `LittleFS`,
 `Preferences`, `Serial`, `RTC_DATA_ATTR`, `millis` or log path, and a test
 asserts each absence rather than trusting the review.
 
@@ -1407,6 +1421,36 @@ Recovery distinguishes four cases (the shape of damage does not prove its physic
 - a **read error** — the file cannot be read to its reported end, so the unread
   remainder is unknown and must not be discarded.
 
+**Extended 2026-09-29: a scan that never happened must not be representable as
+a scan that found nothing.** Fixed in source and host-tested; **not uploaded and
+not hardware validated**. A log that exists and will not open reported an error
+and returned a zero-initialized scan with `readError` false, so its zeros were
+read as measurements: boot recovery announced "Log tail is intact: ALL OK" and
+`LOGGER STORAGE INFO` printed `Tail status: INTACT` and answered `OK`, for a log
+not one byte of which had been read. The fourth case above now covers it.
+`AutoLogScan.openFailed` marks it and `readError` is set with it, because
+`readError` is what the refusals are keyed on and the case has to reach them;
+`openFailed` carries what `readError` cannot, which is that a short read has
+real partial counts and a failed open has none. Those counts are reported as
+UNKNOWN rather than printed as zero, and INFO answers `ERROR` because the
+command did not do what was asked (D-041). D-023 authority is unchanged: it
+already required valid records, so an unopened log never was the authority.
+
+The measured reason the refusal in `autoStorageTruncateToValid()` had to be the
+thing that covered this, rather than its caller: driven directly against an
+unopened log it printed "Rewriting the log to its valid prefix: 0 of 0 bytes"
+and went ahead, and only its own source open failing stopped it. Had that fault
+cleared in between it would have copied `keepBytes`, zero, into the temporary
+file, removed the log and renamed the empty file over it. `autoStorageScanAndRepair()`
+cannot reach that branch for an unopened log, which is exactly the argument
+D-058 made for keeping the refusal compiled in the function rather than
+inferring it from the call site.
+
+Still unresolved on this outcome, and deliberately not changed inside a
+diagnostic fix: `autoStorageRecover()` reseeds the RTC-retained running totals
+from a scan that read nothing, so they silently restart at zero. Recorded in
+[BACKLOG.md](BACKLOG.md).
+
 For tail-only damage recognized on the 72-byte record grid, the trailing bad
 run and partial remainder are discarded automatically. This does not solve
 byte-misaligned mid-file damage; the limitation below remains open.
@@ -1457,6 +1501,17 @@ hardware smoke used only its healthy normal path; physical read-error testing
 remains open.
 
 ## D-058: Storage owns the filesystem, never which sequence a record gets
+
+**Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
+1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
+full pre/post dumps preserve all 10,659 preflight record lines exactly, and
+post-upload boot 36 adds 3 records, 12073–12075. Final dump: 10,664 records,
+1412–12075, board invalid 0; observed INFO scans have trailing 0 and INTACT tails
+with no storage errors. [Raw evidence, checksums and limits](../logs/evidence/2026-09-29/storage-hardware/README.md).
+Damaged-log branches remain host/synthetic tested only. No standalone reset,
+storage clear, whole-flash erase or corruption injection was performed.
+
+The following paragraphs retain the extraction-time software evidence.
 
 Set by the sixth modularization stage on 2026-09-24, the second of the
 boundaries D-055 separated. Compiled, host-tested and **NOT hardware validated**
@@ -1547,6 +1602,230 @@ Two symbols changed by 2 bytes each, `setup()` and the core's
 `fs::LittleFSFS::begin()`, and both have identical instruction sequences: GNU ld
 RISC-V relaxation following the new section placement, the same outcome recorded
 in D-056. Global variables are unchanged at 36,332 bytes.
+
+## D-059: A captured state and a timed transition are different evidence
+
+Implemented 2026-09-28 in `tools/charger-transitions.py`, an offline
+characterization tool, not firmware policy. Initial state and newly confirmed
+state after missing capture cannot be presented as precisely observed edges.
+Same-state observations on both sides of a gap do not establish continuity
+inside it. The report names every segment boundary and resets both candidate
+persistence and confirmed state across gaps, experiment changes and repeated or
+backward host timestamps. It never sorts the evidence to conceal those breaks.
+
+An `OBSERVED CONTIGUOUS TRANSITION` requires adjacent opposite-state runs,
+each meeting the selected persistence criterion, within a single capture
+segment. UNKNOWN/TRANSITION rows interrupt persistence. If an opposite state
+confirms without that preceding evidence, report `STATE CHANGE WITH UNCERTAIN
+EDGE`; do not invent a narrow transition bracket from stale confirmed state.
+First supporting sample, confirmation time and host-sample bracket are distinct;
+none is the exact physical controller switching instant.
+
+Use **2 s inclusive maximum adjacent spacing** and **five classified samples**
+as configurable, printed analysis defaults. The nominal sample period is 1 s;
+the inspected September 28 CSV has median positive spacing 1.000138 s. Two
+periods allow limited capture jitter, not proof of uninterrupted sensing.
+Five samples do not necessarily span five seconds when serial receipt is bunched.
+No new numeric production thresholds, smoothing, cause classifier or firmware
+state inference is selected by this decision. Voltage/current thresholds remain
+provisional and unchanged. Preserve offsets and file order; malformed input
+fails explicitly, nonfinite sensor readings remain UNKNOWN, and empty or
+unconfirmed captures say so.
+
+The report includes capture endpoints and separate transition/state/gap counts,
+with context clipped to a segment. Tests execute synthetic gaps, partial
+persistence, same-state reacquisition, experiment/time-order boundaries,
+ambiguous samples and contiguous ON/OFF edges. Full software gate: 486 passed,
+1 existing xfailed, all steps green. No board command or upload was performed.
+
+## D-060: Running totals are reseeded only from a log that was read to its end
+
+Decided 2026-09-29 by the orchestrator; implemented, host-tested, reviewed and
+committed as **`58a4e09`** the same day. **Not uploaded, not hardware
+validated.** Evidence and gate scope: the newest [LAB_NOTES.md](LAB_NOTES.md)
+entry.
+
+`autoStorageRecover()` used to end by copying `scan.lastRunChargeUAh` and
+`scan.lastRunEnergyUWh` into `rtcAutoRunChargeUAh` / `rtcAutoRunEnergyUWh`
+unconditionally. After a failed open those fields are zero because nothing was
+read. After a short read they hold whichever record the scan happened to reach
+last, which is not provably the last one written. The retained totals took
+either without a word, so the next record's `Qsum`/`Esum` continued from a
+number nothing had established.
+
+**The rule.** When `scan.openFailed || scan.readError`, the retained totals are
+not assigned, and recovery prints that they could not be recovered, why, and
+the exact values being carried instead. Both halves are required: refusing to
+reseed without saying what is carried would trade one silent deviation for
+another. Every other outcome reseeds exactly as before, including mid-file
+damage and a repaired tail, where the whole file was read and the last valid
+record is known.
+
+**What "carried" means on each path.** All four call sites set `rtcAutoMagic`
+immediately before recovery. `RTC_DATA_ATTR` places the totals in `.rtc.data`
+(ESP32 core 3.3.11, `esp_attr.h`), and ESP-IDF's bootloader reloads RTC
+segments from the image on every reset that is not a deep-sleep wake
+(`should_load()` in `esp_image_format.c`). So after a power-on or other reset
+the carried value is expected to be the initializer, zero, which D-011's
+"undefined after power-on" states more conservatively than the bootloader is
+believed to behave.
+
+**The version behind that claim does not match the toolchain, and the gap is
+not closed.** The `should_load()` source that was read is ESP-IDF **v5.4**. The
+installed core 3.3.11 bundles **v5.5.5**, pinned on 2026-09-29 from
+`~/Library/Arduino15/packages/esp32/tools/esp32c3-libs/3.3.11/include/esp_common/include/esp_idf_version.h`
+(`ESP_IDF_VERSION_MAJOR 5`, `MINOR 5`, `PATCH 5`). Nobody has read v5.5.5's
+`should_load()`; only headers and prebuilt libraries are installed locally, not
+that source. Treat the zero-after-reset behavior as EXPECTED, not measured, on
+the toolchain actually in use. It has never been observed on this board.
+
+**This decision does not rest on that claim being right**, because the firmware
+prints the carried value rather than asserting it was recovered. But the
+related BACKLOG item on retained-state validity does bear on it: see "Recovery
+cannot see whether the retained totals it carries were ever valid". After an in-session `LOGGER AUTONOMOUS OFF` (which sets the
+magic to 0 and leaves the totals alone) followed by a re-arm, or on a timer wake
+that finds the magic invalid, the carried value is whatever the previous
+session left. The firmware cannot tell those apart inside `autoStorageRecover()`,
+which is why it prints the value rather than characterizing it. The message
+says the value was not checked against the log.
+
+These are the test-local totals D-017 keeps separate from experiment state.
+Stored records, the record format (version 1, 72 bytes), the CRC, D-023
+sequence authority and the NVS reservation floor are unchanged. Software
+failure injection in the host harness does not show what a physical LittleFS
+read fault does.
+
+**Superseded in part by D-061 (2026-10-01):** an unreadable log now carries the
+retained totals only when the retained state was valid, and zeroes them
+otherwise. The ESP-IDF expectation above no longer bears on any decision.
+
+## D-061: Recovery carries the retained totals only when retained state was valid
+
+Decided 2026-10-01 by the orchestrator; implemented and host-tested in the
+working tree the same day. **Not committed, not uploaded, not hardware
+validated.** Evidence and gate scope: the newest [LAB_NOTES.md](LAB_NOTES.md)
+entry.
+
+D-060 kept the retained running totals whenever the scan could not read the
+log. Whether keeping them is right depends on whether they were valid, and
+`rtcAutoMagic` is the firmware's own answer to that (D-011). Recovery could not
+read it, because every call site sets the magic immediately before calling.
+
+**The rule.** When `scan.openFailed || scan.readError`, recovery carries the
+retained totals and says so if the retained state was valid **before the call
+site set the magic**. Otherwise it sets them to zero and says so. Both halves
+print, because a silent zero would trade one silent deviation for another. A
+log that was read reseeds from its last record whatever the validity.
+
+**The seam.** `autoStorageRecover(bool retainedStateValid)`. Each call site
+captures `rtcAutoMagic == AUTO_RTC_MAGIC` into a local immediately before it
+sets the magic, and passes that local. A parameter, rather than reordering the
+assignment and reading the global inside recovery, makes every caller state the
+fact and keeps the ordering in one visible line per site. A source test pins
+capture, then set, then call, at all four sites.
+
+**What it removes.** D-060's account of the carried value rested on the
+bootloader reloading `.rtc.data` on every non-deep-sleep reset. That was read
+from ESP-IDF v5.4 while the installed core bundles v5.5.5. The firmware now
+asks its own guard instead, so that reading is not load-bearing. It is still
+unverified for v5.5.5 and still has never been observed on this board.
+
+**A consequence to know.** `LOGGER AUTONOMOUS OFF` clears the magic, so a
+re-arm whose log cannot be read now starts the totals at zero. Under D-060 it
+carried the previous session's values. The guard has declared those values
+invalid, and this rule follows the guard.
+
+Record format (version 1, 72 bytes), CRC, D-023 sequence authority and the NVS
+floor are unchanged.
+
+## D-062: Sequence authority decides the next sequence from facts it is handed
+
+Set by the seventh modularization stage on 2026-10-01, the third of the
+boundaries D-055 separated. The boundary was chosen by the user from the options
+the CODE stage put to them. Committed as **`16a299d`** and **hardware validated
+on 2026-10-02**.
+
+**The decision has been observed on hardware making a choice that could have
+gone wrong.** During the 2026-10-02 cadence change, `LOGGER AUTONOMOUS ON` ran
+recovery with the port open and printed:
+
+```text
+[STORAGE] Next sequence from log: 16439, from NVS reservation: 16453, using: 16439
+[STORAGE] Log tail is provably intact, so it is the authority and the NVS
+          reservation floor was not applied.
+```
+
+The two inputs disagreed by 14. The module took the log, as D-023 requires for a
+provably intact tail; applying the floor would have skipped to 16454 and burned
+14 sequence numbers. The acceptance smoke earlier the same day could only show
+that the sequence stayed contiguous across the upload's reset, which does not
+reveal whether the floor was ever in contention. This does.
+
+Arming prints the transcript because it runs recovery while tethered. The
+cold-boot path runs the same code where no capture reaches it, which is why
+`tools/check-totals-continuity.py` asserts the consequence at the reset boundary
+rather than looking for these lines.
+
+`sequence_authority.h` / `.cpp` hold one function,
+`sequenceAuthorityNext(const AutoLogScan &scan, uint32_t reservedHighWater)`.
+It is the D-023 reconciliation moved out of `autoStorageRecover()`: `logIntact`,
+`fromLog`, `fromNvs` one past the reservation, the choice of `next`, and the
+three `[STORAGE]` lines that say which one was used. It reads neither fact
+itself. The scan comes from `storage`, and the reservation is passed by value.
+The module names no NVS, LittleFS, `RTC_DATA_ATTR` or sketch global, calls
+nothing but `Serial`, and declares no `extern`, so it adds no upward call and
+not the project's first `extern`. A test pins each of those names out of it.
+
+**`autoStorageRecover()` was split, not moved.** It did two jobs for two owners.
+Sequence authority moved. Reseeding the RTC running totals (D-060, D-061) and
+the `retainedStateValid` parameter belong to retained state and stayed, so all
+four call sites and the test that pins "capture, then set, then call" are
+unchanged. What remains in the sketch composes the stages: scan, read the
+reservation into the mirror, decide, reseed.
+
+**Reservation did not move, and that is a measured limit.**
+`reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater` after the
+NVS write succeeds, and `tests/test_characterization_nvs.py` pins that
+assignment token for token. There were two ways to move it. The module could
+own the mirror as a private `static RTC_DATA_ATTR`, which puts the first
+retained variable in a module ahead of the stage that owns retained lifetime
+(BACKLOG counts all ten `rtcAuto*` as retained state). Or it could take the
+mirror by reference, which changes a characterization test. Each is a real
+choice, and neither belonged inside a structural move. `AUTO_SEQ_BLOCK`,
+`reserveSequenceBlock()`, `ensureSequenceReservation()`, the mirror and
+`rtcAutoSeqHighWater = loadSequenceHighWater()` stay in the sketch until the
+retained-state stage decides who owns the mirror. Calling
+`ensureSequenceReservation()` after recovery stays the caller's job.
+
+**Audited as a move (D-047).** The moved body matches the removed tokens except
+for one rename: `rtcAutoSeqHighWater` became the parameter `reservedHighWater`
+in `fromNvs`. `logIntact` and `fromLog` are now computed after
+`loadSequenceHighWater()` instead of before it. Both are pure functions of the
+local scan, and the load prints nothing, so the transcript order is unchanged.
+Flash rose 78 bytes. Of that, 34 are `.flash.text`, which is the new function's
+244 bytes less the 210 that left `autoStorageRecover()` (522 to 312); no other
+symbol changed size. The other 44 are `.eh_frame`, which has exactly one new
+FDE (6,356 to 6,357). The 1,757 human-readable rodata strings are identical
+between the two images. Global variables are unchanged at 36,332 bytes.
+
+**One existing test's title no longer described the code, and was corrected in
+review.** `test_the_sequence_decision_stayed_in_the_sketch` still passed, because
+its assertions are about the NVS read and the reseed, which did stay. But the
+decision itself no longer lives in the sketch. The implementing stage left it
+unedited as its brief required and reported it; the orchestrator then renamed it
+to `test_recovery_composition_stayed_in_the_sketch` and rewrote its docstring.
+
+**No assertion changed.** That distinction is the rule, not a technicality.
+Editing what a characterization test ASSERTS so that a move passes destroys the
+contract the move is supposed to be checked against. Correcting a test's NAME so
+it stops misdescribing what it checks is required by the no-silent-deviation
+rule, because a test whose title is false misleads every later reader who greps
+for it. The same review corrected a comment in `storage.cpp` that attributed the
+rewrite refusal to `autoStorageRecover()`; the refusal has always been
+`autoStorageTruncateToValid()`'s own guard (D-057, D-058).
+
+Record format (version 1, 72 bytes), CRC, D-023, D-057, D-060 and D-061
+semantics, firmware identity and the command vocabulary are unchanged.
 
 ## Project practice
 
