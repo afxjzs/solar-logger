@@ -22,3 +22,9 @@ Keep it to what the orchestrator needs to act:
 - what was left unchanged
 
 Predictions and measurements must never be formatted alike.
+
+## CODE kickoff prompts go in a single code block
+
+When the orchestrator writes a kickoff for a fresh CODE session, print the whole prompt as markdown **in a single fenced code block** in the chat, so Doug can copy it in one action. For this project that replaces the global `PROMPT:` / `---` envelope; the reason is the same either way, which is that the prompt gets copied somewhere else, so its boundaries have to be unmistakable and the copy has to be one gesture.
+
+Nothing but the prompt goes inside the fence. Commentary, caveats and open questions go before or after it, never inside. If the prompt's own text needs a fenced block, use a longer outer fence (````) so the inner one cannot close it.
