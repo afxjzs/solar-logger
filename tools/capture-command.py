@@ -1,7 +1,7 @@
 """Run one canonical hardware command and preserve exactly what it printed.
 
-    tools/capture-command.py <evidence-dir> <label> tools/send.sh [OPTION ...] COMMAND
-    tools/capture-command.py <evidence-dir> <label> tools/upload.sh
+    uv run python tools/capture-command.py <evidence-dir> <label> tools/send.sh [OPTION ...] COMMAND
+    uv run python tools/capture-command.py <evidence-dir> <label> tools/upload.sh
 
 Writes two files into the evidence directory:
 

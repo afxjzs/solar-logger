@@ -1,7 +1,7 @@
 """Did the running-total reseed survive the upload's reset? (D-060)
 
-    tools/check-totals-continuity.py <post-dump.txt> --compare <pre-dump.txt>
-    tools/check-totals-continuity.py <post-dump.txt>          # boundary inferred
+    uv run python tools/check-totals-continuity.py <post-dump.txt> --compare <pre-dump.txt>
+    uv run python tools/check-totals-continuity.py <post-dump.txt>          # boundary inferred
 
 `autoStorageRecover()` reseeds the RTC-retained running totals from the last
 valid record in the durable log, so a reboot continues the totals instead of

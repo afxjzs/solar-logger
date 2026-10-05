@@ -1,7 +1,7 @@
 # Current state — BMW Solar Logger
 
-Updated **2026-10-02**, after the `16a299d` hardware acceptance, the cadence
-change, and the reviewed-but-uncommitted D-063 retained-state extraction. Read
+Updated **2026-10-05**, after the D-063 retained-state extraction passed its full
+hardware acceptance on 2026-10-02. Read
 the canonical documents in the order required by
 [AGENTS.md](../AGENTS.md), then verify fresh Git/source and hardware ownership.
 Navigation: [INDEX.md](INDEX.md).
@@ -13,54 +13,68 @@ accreted into a log; do not let it do that again.
 
 ## Next action
 
-**Commit the D-063 retained-state extraction, then upload and run the full
-hardware acceptance.** The extraction is built, host-tested and
-orchestrator-reviewed; it is **not committed and not uploaded**. BACKLOG requires
-more than the short extraction smoke for anything touching retained state: run
-the complete [2026-09-17 acceptance sequence](LAB_NOTES.md#2026-09-17-correctness-stint---six-must-fix-defects-resolved-first-tests-added),
-including lease expiry (step 7), five consecutive unclaimed records (step 8) and
-the refusals (steps 9 and 10). The 2026-10-02 LAB_NOTES entry lists the exact
-transcript lines that would show retained state still works, and the failure
-signature if it does not.
+**The sequence-reservation extraction.** `AUTO_SEQ_BLOCK`,
+`reserveSequenceBlock()` and `ensureSequenceReservation()` become their own
+module, which includes `autonomous_retained_state.h` rather than needing an
+`extern` of its own. D-063 settled who owns the mirror, which is what was
+blocking it. Give it a fresh CODE session with a kickoff printed in a single
+fenced code block per [CLAUDE.md](../CLAUDE.md).
 
-After that, the next modularization candidate is **sequence reservation**:
-`AUTO_SEQ_BLOCK`, `reserveSequenceBlock()` and `ensureSequenceReservation()` as
-their own module, which can now include `autonomous_retained_state.h`. D-063
-settled who owns the mirror, which is what was blocking it.
+**That kickoff must state that no existing test goes red on a relocation.** Both
+`tests/firmware_source.py` consumers that touch the mirror —
+`test_characterization_nvs.py`'s write-ordering assertion and D-063's writer-set
+test — are keyed on **function name across every file Arduino compiles**, so
+moving `reserveSequenceBlock()` under the same name leaves them green. Measured
+2026-10-02 by performing the move in a scratch copy, not inferred. So the stage
+gets no red test for free and needs its own positive assertions, the way D-063's
+single-definition and `extern`-only-header tests were its real evidence.
+
+The nearest real deadline is unrelated to modularization: **storage fills around
+2026-10-17** and there is still no storage-full policy. See BACKLOG for the cheap
+version already costed out.
 
 Nothing is blocked.
 
 ## Repository and hardware snapshot
 
-Canonical path: `/Users/afxjzs/dev/projects/solar-charger`. HEAD **`65f55d1`** on
-main, **14 commits ahead of `origin/main` at this commit; a push to origin was
-authorized on 2026-10-02 and is performed immediately after it.** Whether it
-succeeded is not asserted here: check `git log origin/main..HEAD` rather than
-trusting this line. The working tree is otherwise clean.
+Canonical path: `/Users/afxjzs/dev/projects/solar-charger`. Work on `main`, and
+**`origin/main` holds the whole history** as of this update — the 12 commits that
+had never left this machine were pushed on 2026-10-02. Verify with
+`git rev-list --left-right --count origin/main...HEAD` rather than trusting this
+line.
 
-Two stages were committed on 2026-10-02, deliberately as separate commits:
+Three commits landed on 2026-10-02, deliberately kept separate:
 
 - **`1801098`, the D-063 retained-state extraction.** New
   `Arduino/solar-logger/autonomous_retained_state.{h,cpp}` and
   `tests/test_characterization_autonomous_retained_state.py`; modified
   `solar-logger.ino` (one `#include`, the definitions removed, three comment
-  fixes), `sequence_authority.h` (a corrected docstring and comment, no
-  assertion), and the DECISIONS, LAB_NOTES, BACKLOG and INDEX entries.
-  **Committed, not uploaded, not hardware validated.**
-- **The capture-gap stage** (D-059): `tools/charger-transitions.py`,
+  fixes) and `sequence_authority.h` (a corrected docstring and comment, no
+  assertion changed). **Hardware validated 2026-10-02.**
+- **`8faa0e3`, the capture-gap stage** (D-059): `tools/charger-transitions.py`,
   `tests/test_charger_transitions.py`, and the pandas and tzdata entries in
-  `pyproject.toml` / `uv.lock`. It had sat uncommitted for several days while
-  D-059, PROJECT and INDEX already described it as existing, so the docs
-  referenced a file the repository did not contain. Committing it closes that
-  gap. Host-tested only; it opens no serial port and reads only CSV.
+  `pyproject.toml` / `uv.lock`. It had sat uncommitted for days while D-059,
+  PROJECT and INDEX already described it as existing, so the docs referenced a
+  file the repository did not contain. Committing it closed that gap. Host-only;
+  it opens no serial port and reads only CSV.
+- **The acceptance record**, including
+  `logs/evidence/2026-10-02/retained-state-1801098/` and the
+  `tools/storage-smoke.py` wait-timeout fix the acceptance itself turned up.
 
-**The board runs `16a299d`**, verified by `VERSION` on 2026-10-02:
-`0.3.0-dev / 16a299d / solar-logger-protocol-ack-v3`. Experiment 3 is intact,
+**The board runs `8faa0e3`**, verified by `VERSION` on 2026-10-02:
+`0.3.0-dev / 8faa0e3 / solar-logger-protocol-ack-v3`. Experiment 3 is intact,
 sequences from 1412, board invalid count 0.
+
+**Why the image reports `8faa0e3` and not `1801098`.** `tools/upload.sh` stamps
+`git rev-parse --short HEAD`, and `8faa0e3` sits on top of the firmware change
+without touching firmware. The content flashed is `1801098`'s.
 
 **Cadence is 300 seconds** as of 2026-10-02, changed from 60 s to buy storage
 headroom. That change cleared `rtcAutoMagic` and re-armed, which produced boot id
-42 — a re-arm, not a reset.
+42 — a re-arm, not a reset. Last observed board state, 2026-10-02 16:15: armed,
+boot id 44, RTC state valid, cycles 7, next sequence 16519, experiment 3. **The
+board was not re-queried on 2026-10-05** — it was asleep, which is its ordinary
+state. Everything above is a dated observation, not a live reading.
 
 ## Software versus hardware
 
@@ -73,9 +87,9 @@ headroom. That change cleared `rtcAutoMagic` and re-armed, which produced boot i
 | Running totals from an unread log (D-060) | Committed `58a4e09`, hardware validated 2026-10-01 |
 | Retained-state validity (D-061) | Committed `6192c2d`, hardware validated 2026-10-02 |
 | Sequence authority (D-062) | Committed `16a299d`, **hardware validated 2026-10-02** |
-| Retained autonomous state (D-063) | Host-tested and orchestrator-reviewed, committed `1801098`, **not uploaded, not hardware validated** |
+| Retained autonomous state (D-063) | Committed `1801098`, **hardware validated 2026-10-02** on image `8faa0e3`. Nine of ten relocated variables directly evidenced; see D-063 for the tenth, which this transport cannot observe |
 | Capture-gap report (D-059) | Implemented and host-tested, committed 2026-10-02. Host analysis only; it opens no serial port |
-| Software gate, working tree 2026-10-02 | `ALL OK`, exit 0 — **563 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense **9/9**. Run twice: by the CODE stage and independently by the orchestrator |
+| Software gate | `ALL OK`, exit 0 — **563 passed / 1 xfailed**, flash 1,106,273 B, globals 36,332 B, IntelliSense **9/9**. Run three times at this tree: by the CODE stage, by the orchestrator on 2026-10-02, and again on 2026-10-05 after the tooling fix. Identical every time |
 
 Sketch: **6,670 lines**. Eight modules extracted. D-063 changed no byte of the
 image: ten allocated sections identical in address and size, four differing
@@ -85,28 +99,53 @@ for why a `.bin` diff shows 69 bytes.
 
 ## Latest hardware evidence
 
-[2026-10-02 acceptance of `16a299d`](../logs/evidence/2026-10-01/storage-recovery-16a299d/startup-baseline.md),
-covering `6192c2d` and `16a299d` together. Final dump 15,021 records, sequences
-1412–16432, no gaps, invalid 0, all `exp=3`; all 13,991 preflight record lines
-byte-identical. Running totals and sequence both continued across the upload's
-reset. The preceding [2026-10-01 acceptance](../logs/evidence/2026-09-29/storage-recovery-58a4e09/startup-baseline.md)
-covered `44d8b27` and `58a4e09`.
+**[2026-10-02 acceptance of `1801098`](../logs/evidence/2026-10-02/retained-state-1801098/acceptance-result.md)**,
+the D-063 retained-state extraction, on image `8faa0e3`. Criteria were written
+before any result, in `startup-baseline.md` beside it. Final dump 15,106 records,
+sequences 1412–16517, **zero gaps across the whole history**, invalid 0, all
+`exp=3`, and **all 15,091 preflight record lines byte-identical**. Both assertion
+tools exit 0 with `--compare` against the preflight dump, so the continuity
+boundary was identified rather than inferred.
 
-**D-062 was observed deciding, not merely running.** During the cadence change,
-arming printed `Next sequence from log: 16439, from NVS reservation: 16453,
-using: 16439`. The two inputs disagreed by 14 and the module correctly took the
-log. Quoted in full in D-062.
+The sharpest single result: **`FIRST_AFTER_BOOT` on exactly one record out of six
+consecutive unclaimed wakes.** That flag is set when `rtcAutoCycleCount` reads 0,
+so a retained definition duplicated across translation units would have set it on
+every wake. One flag in six is positive proof of a single definition surviving
+five deep sleeps.
 
-Damaged-log branches, a real filesystem fault, induced accumulator overflow,
-storage-full behavior and lease expiry all remain **untested on hardware**.
+The earlier [acceptance of `16a299d`](../logs/evidence/2026-10-01/storage-recovery-16a299d/startup-baseline.md)
+covered `6192c2d` and `16a299d`, and the one before it `44d8b27` and `58a4e09`.
+
+**D-062 has now been observed deciding three times**, each with its inputs in
+genuine contention: `16439` against a floor of `16453` during the cadence change,
+then the floor at `16516` declined after the upload's reset, then
+`Next sequence from log: 16512, from NVS reservation: 16517, using: 16512` on the
+re-arm. Applying the floor in any of them would have left a hole in a log the
+board itself reports INTACT.
+
+**Lease expiry is no longer untested.** The 2026-10-02 acceptance holds the
+project's first hardware lease-expiry trace: `Host lease EXPIRED after 15000 ms
+without keepalive`, the firmware releasing the transport itself, the open
+tethered interval closing, and a full-cadence sleep of 300,000 ms against
+`RELEASE`'s 299,750 ms — the D-046 asymmetry, observed side by side for the first
+time.
+
+Damaged-log branches, a real filesystem fault, induced accumulator overflow and
+storage-full behavior all remain **untested on hardware**.
 
 ## Storage headroom — the nearest deadline
 
-At the 2026-10-02 acceptance the board reported room for 4,721 more records. At
-the new 300-second cadence that is roughly **16 days, to about 2026-10-18**.
-There is still no storage-full policy; see BACKLOG. Raising the cadence buys
-weeks, not a fix, and the capacity table in STORAGE_SYNC_DESIGN §6 assumes a
-fresh log, so prefer the board's own `LOGGER STORAGE INFO` projection.
+Last **measured** figure, from the 2026-10-02 acceptance: room for **4,664 more
+records**, which the board itself projected as 16 days at the 300-second cadence.
+
+**Computed forward from there, not measured:** about 830 records by 2026-10-05,
+leaving roughly 3,800, or **about 2026-10-17**. The board was asleep when this
+was written and was not queried, so treat the date as arithmetic rather than
+evidence and run `LOGGER STORAGE INFO` for a real figure.
+
+There is still no storage-full policy; see BACKLOG for the cheap version already
+costed out. Raising the cadence buys weeks, not a fix, and the capacity table in
+STORAGE_SYNC_DESIGN §6 assumes a fresh log, so prefer the board's own projection.
 
 ## Open findings not yet fixed
 

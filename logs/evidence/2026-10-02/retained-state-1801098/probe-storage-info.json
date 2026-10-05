@@ -1,0 +1,13 @@
+{
+  "started": "2026-10-02T15:05:04.506571-07:00",
+  "finished": "2026-10-02T15:09:19.161371-07:00",
+  "argv": [
+    "tools/send.sh",
+    "LOGGER",
+    "STORAGE",
+    "INFO"
+  ],
+  "exit_code": 0,
+  "bytes": 2129,
+  "sha256": "275d646cd75bbe633e0fbea3c4dd1c0576d49c104f217b6aaebdaea7cf012093"
+}

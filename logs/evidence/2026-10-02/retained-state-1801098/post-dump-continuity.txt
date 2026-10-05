@@ -1,0 +1,27 @@
+{
+  "file": "post-dump.txt",
+  "records": 15106,
+  "boundary_how": "identified from pre-dump.txt",
+  "boundary": {
+    "last_before_reset": {
+      "seq": 16503,
+      "boot": 42,
+      "qsum_uAh": 1264889,
+      "esum_uWh": 20696849
+    },
+    "first_after_reset": {
+      "seq": 16504,
+      "boot": 43,
+      "dq_uAh": 3214,
+      "de_uWh": 42883,
+      "qsum_uAh": 1268103,
+      "esum_uWh": 20739732
+    },
+    "expected_qsum_uAh": 1268103,
+    "expected_esum_uWh": 20739732,
+    "expected_seq": 16504,
+    "sequence_contiguous": true
+  },
+  "other_continuity_breaks_reported_not_asserted": []
+}
+[TOTALS] D-060 healthy-path reseed: ALL OK (seq 16503 -> 16504 across boot 42 -> 43)

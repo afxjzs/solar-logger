@@ -1,0 +1,16 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER SESSION RELEASE
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER SESSION RELEASE)
+[COMMAND] NOT ALL OK - the firmware RAN the command and it FAILED.
+[COMMAND] Firmware reported: CMD_RESULT,LOGGER SESSION RELEASE,NOT_HELD
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER SESSION RELEASE
+[SESSION] RELEASE parsed
+[SESSION] No host session was held. Nothing to release.
+CMD_RESULT,LOGGER SESSION RELEASE,NOT_HELD
+[SESSION] RELEASE result queued
+[COMMAND] --- end of firmware response ---

@@ -1,9 +1,9 @@
 """Drive one healthy-log storage acceptance, stage by stage.
 
-    tools/storage-smoke.py preflight --evidence-dir DIR --revision REV
-    tools/storage-smoke.py identify  --evidence-dir DIR --revision REV
-    tools/storage-smoke.py growth    --evidence-dir DIR --revision REV
-    tools/storage-smoke.py session   --evidence-dir DIR --revision REV
+    uv run python tools/storage-smoke.py preflight --evidence-dir DIR --revision REV
+    uv run python tools/storage-smoke.py identify  --evidence-dir DIR --revision REV
+    uv run python tools/storage-smoke.py growth    --evidence-dir DIR --revision REV
+    uv run python tools/storage-smoke.py session   --evidence-dir DIR --revision REV
 
 Each stage captures its commands through tools/capture-command.py and asserts
 its own result, so a stage that fails stops there rather than letting later
@@ -52,8 +52,23 @@ FORBIDDEN = (
 # command that starts one waits. KEEPALIVE, RELEASE and a held STATUS address a
 # session that already exists and must NOT wait: tools/send.sh refuses --wait
 # on those rather than ignoring it.
-WAIT = ["--wait", "--timeout", "150"]
-WAIT_LONG = ["--wait", "--timeout", "150", "--capture-seconds", "10"]
+#
+# THE TIMEOUT MUST EXCEED ONE FULL CADENCE, and it is not a round number picked
+# for comfort. A rendezvous lasts 10 seconds once per cadence, so a capture that
+# starts at an arbitrary moment waits up to one whole cadence for a window. At
+# the 60-second cadence this was written against, the old 150 seconds covered
+# two cadences and always succeeded. The cadence became 300 seconds on
+# 2026-10-02 and nobody revisited this: at 300 seconds a 150-second timeout
+# fails whenever the wait happens to exceed it, which is about half the time, so
+# a four-capture stage had roughly a 6% chance of completing. A capture that
+# failed that way looked exactly like a board that did not answer.
+#
+# 400 seconds covers the current 300-second cadence with 100 seconds of
+# headroom. Raise it again if the cadence rises; `LOGGER AUTONOMOUS STATUS`
+# reports the cadence the board is actually using. Deriving it from the board's
+# own reported cadence would be better than a constant and is in BACKLOG.
+WAIT = ["--wait", "--timeout", "400"]
+WAIT_LONG = ["--wait", "--timeout", "400", "--capture-seconds", "10"]
 HELD: list[str] = []
 
 

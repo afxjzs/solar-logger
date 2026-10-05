@@ -1,0 +1,45 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER AUTONOMOUS ON
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER AUTONOMOUS ON)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER AUTONOMOUS ON,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER AUTONOMOUS ON
+[STORAGE] Scanning durable log...
+[STORAGE] File bytes:     1087200
+[STORAGE] Valid records:  15100
+[STORAGE] Sequence range: 1412 -> 16511
+[STORAGE] Log tail is intact: ALL OK
+[STORAGE] Next sequence from log: 16512, from NVS reservation: 16517, using: 16512
+[STORAGE] Log tail is provably intact, so it is the authority and the NVS reservation floor was not applied.
+[STORAGE] Sequence reservation already covers 16512; reserved through 16515. No NVS write needed.
+
+[AUTO] Autonomous bench test ARMED
+[AUTO] Interval: 300 seconds
+[AUTO] Boot id: 44
+[AUTO] Next sequence: 16512
+[AUTO] Experiment accounting is ISOLATED: this test never modifies experiment totals or the NVS checkpoint.
+[AUTO] Interval accounting and CSV output are suspended while it runs.
+
+[AUTO] HOW TO STOP IT LATER:
+[AUTO] Timer wakes are too short to catch. Reset or power-cycle the board, then send LOGGER TEST STOP within the 15-second cold-boot maintenance window.
+[WIFI] Disabling Wi-Fi...
+[WIFI] Wi-Fi disabled: ALL OK
+[INA228] Resetting ENERGY and CHARGE accumulators...
+[WARNING] Accumulator reset readback was not exactly zero. ENERGY=0 CHARGE=23
+[AUTO] STATE: IDLE -> DEEP_SLEEP_PENDING  (LOGGER AUTONOMOUS ON)
+[AUTO] Deferred autonomous sleep ARMED; entering it in 250 ms, after the command result has been delivered.
+CMD_RESULT,LOGGER AUTONOMOUS ON,OK
+CSV_SAMPLE,3,29100.002,13.347852,30.028000,400.793600,26.5703
+[AUTO] Deferred sleep deadline reached
+[AUTO] Command acknowledgement grace elapsed; entering autonomous sleep.
+[AUTO] Sleeping until interval deadline; remaining: 299750 ms.
+[TIMING] Arm-to-sleep duration (setup entry -> sleep): 23948.518 ms
+[TIMING] NOT a wake timing. The board had been awake and logging for an unknown time before the arm command arr
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 32
+[COMMAND] Capture ended: transport disappeared after the successful result (expected for RELEASE).

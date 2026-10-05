@@ -1,0 +1,25 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER AUTONOMOUS OFF
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER AUTONOMOUS OFF)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER AUTONOMOUS OFF,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER AUTONOMOUS OFF
+[AUTO] Persisted autonomous mode flag cleared.
+
+[AUTO] A host session is held and is being KEPT.
+[AUTO] Autonomous mode is now OFF, so the lease no longer gates anything: the board stays awake either way.
+[AUTO] KEEPALIVE and RELEASE continue to work normally for this session.
+[AUTO] STATE: HOST_SESSION -> IDLE  (autonomous mode disabled)
+[AUTO] Cycles completed this power-on: 8
+[AUTO] Stored records are NOT deleted. Use LOGGER STORAGE INFO to inspect them.
+[AUTO] Autonomous mode DISABLED: ALL OK
+CMD_RESULT,LOGGER AUTONOMOUS OFF,OK
+CSV_SAMPLE,3,29101.001,13.348438,31.216000,416.691200,26.5781
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 12
+[COMMAND] Capture ended: port quiet for 600ms.

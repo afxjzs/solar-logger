@@ -6,7 +6,11 @@ Design and implementation record for autonomous local logging and later host syn
 
 Sections below retain the original design rationale. CONFIRMED denotes the stated evidence, not universal hardware validation; PROPOSED denotes remaining design or an original proposal with an implementation note. Section 12a and its implementation differences describe what exists. Accepted decisions live in [DECISIONS.md](DECISIONS.md).
 
-## Latest hardware acceptance — 2026-09-29
+## Hardware acceptance history
+
+**The newest acceptance is always named in [CURRENT_STATE.md](CURRENT_STATE.md).** As of 2026-10-02 that is `8faa0e3`, the D-063 retained-state extraction. Four acceptances have followed the September 29 one recorded below, so read this section as history rather than as current state.
+
+### 2026-09-29
 
 **Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
 1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;

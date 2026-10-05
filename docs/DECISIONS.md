@@ -1321,9 +1321,9 @@ module, `sequence_authority`, committed as `16a299d` and hardware validated on
 retained-state stage.
 
 **Superseded further by D-063 on 2026-10-02:** the retained-state definitions
-are now their own module, `autonomous_retained_state`, compiled and host-tested
-and not yet committed or hardware validated. It owns the definitions and their
-lifetime, including the reservation mirror's, and no writer. Reservation policy,
+are now their own module, `autonomous_retained_state`, committed as `1801098`
+and hardware validated the same day. It owns the definitions and their lifetime,
+including the reservation mirror's, and no writer. Reservation policy,
 scheduling, sessions and the command protocol still await their own extractions.
 
 ## D-056: Record format owns what a record is, never when one is written
@@ -1838,8 +1838,27 @@ semantics, firmware identity and the command vocabulary are unchanged.
 
 Set by the eighth modularization stage on 2026-10-02, the fourth of the
 boundaries D-055 separated. The boundary was chosen by the user from three
-options the CODE stage put to them. Compiled and host-tested; **not committed,
-not uploaded, not hardware validated.** Evidence: the 2026-10-02 LAB_NOTES entry.
+options the CODE stage put to them. Committed as **`1801098`** and **HARDWARE
+VALIDATED 2026-10-02** on image `8faa0e3`. Evidence, criteria-before-result and
+limits: [logs/evidence/2026-10-02/retained-state-1801098/](../logs/evidence/2026-10-02/retained-state-1801098/acceptance-result.md).
+
+**Nine of the ten relocated variables are directly evidenced on hardware**, and
+the sharpest is `rtcAutoCycleCount`: `FIRST_AFTER_BOOT` appears on exactly one
+record out of six consecutive unclaimed wakes. That flag is set when the counter
+reads 0, so a definition duplicated across translation units — the hazard this
+module exists to make impossible — would have set it on every wake. One flag in
+six is positive proof of a single retained definition surviving five deep
+sleeps. `rtcAutoSeqHighWater` is evidenced in both directions: the reservation
+floor was declined twice in favor of an intact log, and a new 64-block was later
+persisted with the mirror advancing after the write succeeded.
+
+**`rtcAutoCommandedSleepMs` is not directly evidenced, and cannot be by this
+transport.** Its value is printed only in the wake report, emitted before the
+rendezvous opens, when no USB device exists; `Serial.setTxTimeoutMs(0)` (D-027)
+drops that output rather than buffering it. A host attaching at the rendezvous
+is structurally too late, so neither `tools/send.sh` nor `app/solar_logger.py`
+can receive the line. Its correctness is evidenced only indirectly, by the
+commanded sleeps producing the right durations.
 
 `autonomous_retained_state.h` / `.cpp` hold the ten `rtcAuto*` values and
 `AUTO_RTC_MAGIC`. The `.cpp` holds the only definition of each, with

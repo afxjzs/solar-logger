@@ -418,7 +418,7 @@ filenames or completed extractions**.
 | Record format / CRC | Version-1 layout, field/flag constants, CRC and record validation | Extracted 2026-09-24 as `record_format`, exactly as this row describes; the Experiment 3 golden bytes are preserved and now executed against the module's own source; no filesystem, RTC, sequence allocation or scheduler moved (D-056). Host-tested and **HARDWARE-VALIDATED on clean `eba3b5d`** |
 | LittleFS storage mechanics | Mount, record I/O, append, scan/truncate mechanics and explicit recovery/error results | Extracted 2026-09-24 as `storage`, exactly as this row describes: it uses the record contract and reports log facts, and `autoStorageScanAndRepair()` hands the scan back rather than choosing a sequence. The four-damage-case corruption policy is preserved token for token; no reclamation or storage-full policy was invented (D-058). Host-tested; **healthy-log hardware-smoke validated on clean 1980d94** |
 | Sequence authority / reservation policy | D-023 reconciliation of intact log tail versus NVS reservation, allocation and persistence ordering | **Decision half extracted 2026-10-01 as `sequence_authority`, committed `16a299d`, hardware validated 2026-10-02** (D-062). The module is handed the scan and the reservation and reads neither: no NVS, RTC, LittleFS or `extern`. **Reservation did not move**: `reserveSequenceBlock()` writes the RTC mirror `rtcAutoSeqHighWater`, and `tests/test_characterization_nvs.py` pins that write token for token, so moving it needed either the first `RTC_DATA_ATTR` in a module, ahead of the retained-state stage, or a changed characterization test. Reservation, `AUTO_SEQ_BLOCK`, the mirror and the NVS read into it wait for the retained-state stage to settle who owns the mirror. The `ensureSequenceReservation()` call after each recovery stays a caller responsibility: the wake cycle calls it too, with `announceNoOp` false |
-| RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | **Extracted 2026-10-02 as `autonomous_retained_state`; compiled and host-tested, NOT committed, uploaded or hardware validated** (D-063). It holds the one definition of each of the ten `rtcAuto*` values and `AUTO_RTC_MAGIC`, exported by `extern`, and no function: every writer stayed in the sketch. The `extern` is a named departure from D-047, compensated by a test that pins every writer of all ten. It owns the reservation mirror's definition and lifetime; reservation policy owns the mirror's writes. Power-test RTC state stayed out. The linked image is identical apart from the build stamp |
+| RTC-retained autonomous state | Retained autonomous values, validity and lifetime across deep sleep | **Extracted 2026-10-02 as `autonomous_retained_state`; committed `1801098`, hardware validated 2026-10-02** (D-063). It holds the one definition of each of the ten `rtcAuto*` values and `AUTO_RTC_MAGIC`, exported by `extern`, and no function: every writer stayed in the sketch. The `extern` is a named departure from D-047, compensated by a test that pins every writer of all ten. It owns the reservation mirror's definition and lifetime; reservation policy owns the mirror's writes. Power-test RTC state stayed out. The linked image is identical apart from the build stamp |
 | Autonomous scheduling / policy | Wake-cycle ordering, interval deadlines, runtime state transitions/ownership queries, rendezvous and sleep/handoff decisions | Planned; consumes explicit sensor, storage, sequence, retained-state and connection results; no new behavior hidden in extraction |
 | Experiment accounting | Tethered interval/experiment state, interval close and checkpoint timing | Planned; calls existing INA/NVS/telemetry interfaces and explicit autonomous-ownership queries |
 | Power tests | Wi-Fi/deep-sleep test state and their separate RTC lifetime | Planned; keep separate from autonomous retained-state ownership. **Attempted out of order on 2026-10-01 and deferred by the user before any code moved.** Today the code calls about 16 sketch-resident names: Wi-Fi control, `autonomousOwnsBoard()`/`autonomousState`/`autonomousTestArmed`/`autonomousTestRunning`, the accounting predicates plus `resumeIntervalAccounting()`/`intervalAccountingBlocked`, boot-wake diagnostics and `experimentId`. The sketch in turn reads `sleepPowerTestRunning`, `rtcSleepTestCycle`, `sleepPowerTestAwakeStartedMs`, `SLEEP_POWER_TEST_AWAKE_MS` and `inaShutdownActive`. Moving it now would need the project's first `extern`s or upward calls. Extract it after retained state, autonomous ownership and accounting, so its dependencies point down |
@@ -1175,6 +1175,50 @@ truncation; or have the sender warn when a response ends without an expected
 terminator. The third generalizes to every long response, including a dump,
 though `tools/validate-dump.py` already covers dumps by requiring BEGIN, END, the
 count summary and a matching RESULT.
+
+## Host: the acceptance driver's wait timeout is a constant that must exceed the cadence — found 2026-10-02, PARTIALLY FIXED
+
+**Found while starting the D-063 acceptance, before any capture was driven.**
+`tools/storage-smoke.py` passed `--timeout 150` on every waiting capture. A
+rendezvous lasts 10 seconds once per cadence, so a capture starting at an
+arbitrary moment waits up to a full cadence for a window. That constant was
+written against the 60-second cadence, where 150 seconds covered two cadences
+and always won. **The cadence became 300 seconds on 2026-10-02 and nobody
+revisited it**, so a capture failed whenever its wait exceeded 150 seconds. The
+failure mode was the bad kind: a capture that timed out looked exactly like a
+board that did not answer.
+
+**The exposure is one wait per stage, not one per capture.** An initial estimate
+put a four-capture stage at about a 6% chance of completing, by assuming each
+capture waits independently. That was wrong, and the D-063 preflight measured
+it: `pre-version` waited 145 seconds for a window, then the three captures after
+it finished in 1 second each inside that same 10-second rendezvous, the last
+reporting `Rendezvous: 4 / 10 s`. A stage pays one wait of up to a full cadence
+and then rides the window, so at 300 seconds the old constant would have failed
+a stage roughly half the time rather than almost always. Half is still a coin
+flip, and a timing-dependent failure is the flaky shape this project refuses, so
+the fix stands.
+
+Never observed as a failure, because it was found by reading the constant
+against the new cadence before the driven stages ran — and the one wait it did
+produce, 145 seconds, would have cleared the old limit by 5 seconds. The
+orchestrator's own earlier probe took 237 seconds and succeeded only because it
+passed no `--timeout` at all, and `tools/send.sh`'s default wait deliberately
+has none (D-040).
+
+**Raised to 400 seconds**, which covers 300 with 100 seconds of headroom, with
+the reasoning written next to the constant so the next cadence change does not
+silently re-break it.
+
+**Still open, and the better fix:** the timeout is derived from nothing. It
+should come from the cadence the board itself reports in
+`LOGGER AUTONOMOUS STATUS`, or at minimum fail loudly when it is shorter than
+the configured cadence rather than waiting an amount that cannot work. A
+constant that has to be maintained in step with a persisted device setting is
+the same class of problem as the tunables that no longer existed — correct
+today, quietly wrong after the next change. The general lesson belongs with the
+cadence: **a host timeout that must exceed a device cadence should read the
+cadence, not restate it.**
 
 ## Host: a command can attach to a rendezvous that is almost over, and is then lost — observed 2026-10-01
 

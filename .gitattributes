@@ -1,0 +1,15 @@
+# Preserved hardware evidence is captured device output, byte for byte, and must
+# never be reformatted to satisfy a linter. esptool's upload progress bars carry
+# trailing whitespace, so `git diff HEAD --check` -- the whitespace step of
+# tools/check.sh -- flags every newly committed upload capture.
+#
+# That was invisible until 2026-10-05 because `git diff --check` only inspects
+# CHANGED lines: the 2026-10-01 acceptance's upload.txt tripped it once, at the
+# moment it was staged, and never again once committed. Each new acceptance would
+# hit it again, and the only ways out would be stripping the bytes, which AGENTS.md
+# forbids, or ignoring a failing gate step, which is worse.
+#
+# Marking these paths `-whitespace` turns the check off for them specifically, so
+# the step keeps its real job -- source hygiene -- instead of being defeated by
+# captured output nobody may edit.
+logs/evidence/** -whitespace

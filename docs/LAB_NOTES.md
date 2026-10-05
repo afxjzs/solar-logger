@@ -6,7 +6,64 @@ The measured system is on a desk, not in a car. A jump-and-carry jump pack's bat
 
 Every measurement in this file was taken against that arrangement. Irradiance is whatever the window gave at that time of day, so absolute solar numbers are not comparable across sessions and are not a model of the panel on a car. Current draw measurements of the XIAO and INA228 themselves are unaffected by this.
 
-## 2026-10-02: RTC-retained autonomous state extracted as the eighth module (D-063) — NOT committed, uploaded or hardware validated
+## 2026-10-02: Retained-state extraction ACCEPTED on hardware (D-063)
+
+Full acceptance of `1801098` on image `8faa0e3`, run by the orchestrator the same
+day the module was built. **PASSED on every criterion.** Evidence, criteria
+written before any result, and limits:
+[logs/evidence/2026-10-02/retained-state-1801098/](../logs/evidence/2026-10-02/retained-state-1801098/acceptance-result.md).
+
+Experiment 3 was not reset, cleared, erased or corrupted at any point.
+
+| Fact | Value |
+| --- | --- |
+| Records, post | 15,106, sequences 1412–16517 |
+| Sequence gaps | **none, across the whole history** |
+| Board invalid | 0 |
+| Preflight lines reproduced byte-identically | **15,091 of 15,091** |
+| `validate-dump.py --compare` | exit 0 |
+| `check-totals-continuity.py --compare` | exit 0, boundary **identified** from the preflight dump |
+| Forbidden strings | all ten absent from all 20 captures |
+
+**The sharpest result: `FIRST_AFTER_BOOT` on exactly one record out of six
+consecutive unclaimed wakes.** That flag is set when `rtcAutoCycleCount` reads 0.
+A retained definition duplicated across translation units — the hazard BACKLOG
+calls the single highest-risk detail in the modularization plan — would have set
+it on every wake. One in six is positive proof of a single definition surviving
+five deep sleeps. Nine of the ten relocated variables are directly evidenced;
+`rtcAutoCommandedSleepMs` cannot be, for the structural reason D-063 records.
+
+**Two results beyond the stage under test:**
+
+- **The project's first hardware lease-expiry trace**, outstanding since
+  2026-09-11 in both PROJECT and this file: `Host lease EXPIRED after 15000 ms
+  without keepalive`, the firmware releasing the USB transport itself, the open
+  tethered interval closing (D-026), and a return to autonomous sleep.
+- **D-046's handoff asymmetry, side by side for the first time.** `RELEASE` slept
+  299,750 ms, one cadence minus the 250 ms result grace; lease expiry slept
+  300,000 ms, a full cadence, having no result to deliver. At 60 seconds these
+  were 59,750 and 60,000; the move to 300 made them unmistakable.
+
+**Three findings the acceptance itself produced, all recorded in BACKLOG:**
+
+- `tools/storage-smoke.py` hardcoded a 150-second wait timeout written for the
+  60-second cadence. At 300 it would fail a stage roughly half the time, and a
+  timed-out capture looks exactly like a board that did not answer. Raised to
+  400 with the reasoning beside the constant.
+- `send.sh`'s default 600 ms idle threshold ends a capture before a later event.
+  The first lease-expiry capture **exited 0 having never observed the expiry** —
+  exit status answered "did HOLD work", not "did we see it". Retried under a new
+  label with `--idle-seconds 8`; the failed attempt is kept.
+- The four acceptance tools are mode 644 while their own usage text shows bare
+  invocation, which fails. They have no shebang, so the usage text was corrected
+  to `uv run python` rather than the files being made executable.
+
+**Step 4 of the 2026-09-17 sequence was deliberately not run.** `LOGGER INTERVAL
+60` would have reverted the cadence decision and cut storage headroom from about
+16 days to about 3. `LOGGER INTERVAL 5` was sent while armed instead: refused,
+`ERROR`, exit 1, cadence unchanged at 300 at both ends of the run.
+
+## 2026-10-02: RTC-retained autonomous state extracted as the eighth module (D-063) — the build and software gate
 
 CODE stage, run against HEAD `65f55d1` plus the uncommitted capture-gap work.
 Software only: no upload, no serial port and no device command. Experiment 3 was

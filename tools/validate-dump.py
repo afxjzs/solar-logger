@@ -1,6 +1,6 @@
 """Validate a captured LOGGER STORAGE DUMP, and optionally compare it to an earlier one.
 
-    tools/validate-dump.py <dump.txt> [--compare <earlier-dump.txt>] [--experiment N]
+    uv run python tools/validate-dump.py <dump.txt> [--compare <earlier-dump.txt>] [--experiment N]
 
 Prints a JSON summary on stdout and exits non-zero if the dump is not a
 complete, self-consistent capture of a healthy log.

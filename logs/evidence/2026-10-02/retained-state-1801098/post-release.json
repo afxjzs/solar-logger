@@ -1,0 +1,13 @@
+{
+  "started": "2026-10-02T15:39:45.938368-07:00",
+  "finished": "2026-10-02T15:39:46.448082-07:00",
+  "argv": [
+    "tools/send.sh",
+    "LOGGER",
+    "SESSION",
+    "RELEASE"
+  ],
+  "exit_code": 0,
+  "bytes": 4447,
+  "sha256": "a57c60270b29414ec9176c25d107947210d1d9e6b710980fbbbbce47043c857a"
+}

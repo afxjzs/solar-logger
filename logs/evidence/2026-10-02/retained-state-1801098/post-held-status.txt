@@ -1,0 +1,29 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: STATUS
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,STATUS)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,STATUS,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: STATUS
+
+[STATUS] Current logger state:
+[FIRMWARE] Version:  0.3.0-dev
+[FIRMWARE] Revision: 8faa0e3
+[FIRMWARE] Build ID: solar-logger-protocol-ack-v3
+[STATUS] Experiment ID      = 3
+[STATUS] Completed interval = 482
+[STATUS] Running charge     = 86.899273 mAh
+[STATUS] Running energy     = 1248.386731 mWh
+[STATUS] Interval accounting = ACTIVE
+[STATUS] Voltage            = 13.3500 V
+[STATUS] Current            = 36.764 mA
+[STATUS] Power              = 491.059 mW
+CMD_RESULT,STATUS,OK
+CSV_SAMPLE,3,28922.001,13.350195,37.624000,502.259200,26.0938
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 16
+[COMMAND] Capture ended: port quiet for 600ms.

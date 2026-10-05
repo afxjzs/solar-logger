@@ -1,0 +1,17 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER AUTONOMOUS ON
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER AUTONOMOUS ON)
+[COMMAND] NOT ALL OK - the firmware RAN the command and it FAILED.
+[COMMAND] Firmware reported: CMD_RESULT,LOGGER AUTONOMOUS ON,ERROR
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER AUTONOMOUS ON
+[AUTO] ERROR: A host session is held, so arming would deep sleep with an open tethered interval and silently discard its charge.
+[AUTO] Send LOGGER SESSION RELEASE first, then LOGGER AUTONOMOUS ON.
+[AUTO] No change was made. The session is untouched.
+CMD_RESULT,LOGGER AUTONOMOUS ON,ERROR
+[COMMAND] NOT ALL OK - LOGGER AUTONOMOUS ON did not complete successfully.
+[COMMAND] --- end of firmware response ---

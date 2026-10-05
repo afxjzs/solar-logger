@@ -1,6 +1,10 @@
 # Project
 
-## Latest hardware acceptance — 2026-09-29
+## Hardware acceptance history
+
+**The newest acceptance is always named in [CURRENT_STATE.md](CURRENT_STATE.md).** As of 2026-10-02 that is `8faa0e3`, the D-063 retained-state extraction. Four acceptances have followed the September 29 one recorded below, so read this section as history rather than as current state.
+
+### 2026-09-29
 
 **Fresh healthy-log storage hardware smoke passed, 2026-09-29, on clean
 1980d94** (`0.3.0-dev`, `solar-logger-protocol-ack-v3`). Experiment 3 retained;
@@ -457,7 +461,9 @@ These values identify the supplied 2026-09-24 storage-recovery hardware smoke: a
 - **`-dev` stays on the version** until an image has been uploaded and confirmed on hardware. Drop it in the commit that records the successful hardware check.
 - **1.0.0 is reserved** for firmware that has run unattended in the car and been read back successfully. That has not happened, so the number stays below it.
 
-**Current release-label discrepancy:** despite the recorded smoke tests, the source and uploaded image still report `0.3.0-dev`. The policy above has not yet been applied to remove that suffix; this doc-only audit does not change firmware identity.
+**Current release-label discrepancy — the policy is deliberately not being applied, decided 2026-10-05.** The source and every uploaded image still report `0.3.0-dev`, and the suffix has now survived five hardware acceptances: `eba3b5d`, `1980d94`, `58a4e09`, `16a299d` and `8faa0e3`. The rule above says `-dev` drops "in the commit that records the successful hardware check", so the rule and the practice disagree.
+
+Asked and answered by the operator on 2026-10-05: **keep `0.3.0-dev`.** The suffix stays until there is a reason to move it, and this paragraph exists so the gap between the written policy and what is actually done is stated rather than silently carried. The policy text above is left unchanged rather than quietly rewritten to match; if the rule itself should change — for example to drop the suffix only once an image has run installed in the car — that is a decision to take deliberately and record, not to infer from five acceptances of practice.
 
 The version started at 0.1.0 because that was the first firmware to carry one. It is not a statement about how much has been built.
 
@@ -817,7 +823,9 @@ while true; do tools/send.sh LOGGER SESSION HOLD && break; sleep 0.2; done
 
 — still works and is no longer needed. The waiting moved into `app/device_session.py`, which polls at the same 200 ms and prints a heartbeat during a long wait.
 
-**The rendezvous is confirmed on hardware.** On 2026-09-11 a timer wake exposed USB, `send.sh` claimed it with `LOGGER SESSION HOLD`, and `LOGGER SESSION RELEASE` returned the board to deep sleep, with no reset, BOOT button, power cycle, or replug. Lease expiry and host-session accounting were both broken in that first run and were fixed. Test B (keepalives and session accounting) passed later on 2026-09-11; recent transcripts also confirm RELEASE. An explicit lease-expiry trace remains outstanding; see [LAB_NOTES.md](LAB_NOTES.md).
+**The rendezvous is confirmed on hardware.** On 2026-09-11 a timer wake exposed USB, `send.sh` claimed it with `LOGGER SESSION HOLD`, and `LOGGER SESSION RELEASE` returned the board to deep sleep, with no reset, BOOT button, power cycle, or replug. Lease expiry and host-session accounting were both broken in that first run and were fixed. Test B (keepalives and session accounting) passed later on 2026-09-11; recent transcripts also confirm RELEASE.
+
+**An explicit lease-expiry trace was outstanding from 2026-09-11 until 2026-10-02, and is now recorded.** The D-063 acceptance captured it: `[SESSION] Host lease EXPIRED after 15000 ms without keepalive`, the firmware releasing the USB transport itself with no host cooperation, the open tethered interval closing before sleep (D-026), and the return to autonomous sleep. It also puts the two handoff paths side by side at the 300-second cadence, which D-046 described but which had never been observed together: **`RELEASE` sleeps one cadence minus the 250 ms result-delivery grace (299,750 ms), while lease expiry sleeps a full cadence (300,000 ms)** because it has no command result to deliver. [Capture and limits](../logs/evidence/2026-10-02/retained-state-1801098/acceptance-result.md).
 
 ### Stopping an armed board
 

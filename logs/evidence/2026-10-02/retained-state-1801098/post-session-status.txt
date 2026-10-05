@@ -1,0 +1,36 @@
+[COMMAND] BMW Solar Logger command sender
+[COMMAND] Command: LOGGER SESSION STATUS
+[SERIAL] Logger not running. Using direct serial access.
+[SERIAL] Port: /dev/cu.usbmodem101
+[COMMAND] Bytes written to serial port.
+[COMMAND] Waiting up to 4s for firmware ACK...
+[COMMAND] Firmware parsed command: ALL OK (CMD_ACK,LOGGER SESSION STATUS)
+[COMMAND] Firmware completed command: ALL OK (CMD_RESULT,LOGGER SESSION STATUS,OK)
+[COMMAND] Capturing response: quiet for 600ms ends it, 2s hard cap.
+[COMMAND] --- firmware response ---
+[COMMAND] Received: LOGGER SESSION STATUS
+
+============================================================
+[SESSION] STATE: HOST_SESSION
+[SESSION] Autonomous armed: YES
+[SESSION] Host session held: YES
+[SESSION] Lease timeout: 15000 ms
+[SESSION] Lease remaining: 13049 ms
+[SESSION] Since last HOLD/KEEPALIVE: 1951 ms
+[SESSION] Session age: 2 s
+[SESSION] Keepalives received: 1
+[SESSION] Tethered interval open for: 2.815 s
+[SESSION] Interval baseline clean: YES
+[CONNECTION] Active transports: USB
+[CONNECTION] Any host connected: YES
+[SESSION] Rendezvous active: NO
+[SESSION] Rendezvous window: 10000 ms per successful timer wake
+[SESSION] Autonomous cadence: 300 seconds
+[SESSION] Interval accounting: ACTIVE
+[AUTO] USB right now: plugged=YES cdcConnected=YES
+============================================================
+CMD_RESULT,LOGGER SESSION STATUS,OK
+CSV_SAMPLE,3,28923.001,13.350000,37.356000,498.688000,26.0938
+[COMMAND] --- end of firmware response ---
+[COMMAND] Response lines captured: 23
+[COMMAND] Capture ended: port quiet for 600ms.
